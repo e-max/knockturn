@@ -1,0 +1,21 @@
+[package]
+name = "knockturn"
+version = "0.1.0"
+authors = ["Cycle42 <devs@cycle42.com>"]
+edition = "2018"
+
+[dependencies]
+actix-web = "0.7"
+actix = "0.7"
+serde = { version = "1.0", features = ["derive"] }
+serde_json="1.0"
+bcrypt = "0.2.0"
+chrono = { version = "0.4.6", features = ["serde"] }
+diesel = { version = "1.4", features = ["postgres", "uuid", "r2d2", "chrono"] }
+dotenv = "0.13.0"
+env_logger = "0.5.13"
+failure = "0.1.2"
+frank_jwt = "3.0"
+futures = "0.1"
+r2d2 = "0.8.2"
+uuid = { version = "0.6", features = ["serde", "v4"] }
