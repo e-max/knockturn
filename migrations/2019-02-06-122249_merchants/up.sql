@@ -1,6 +1,6 @@
 -- Your SQL goes here
 CREATE TABLE merchants (
-  id UUID NOT NULL PRIMARY KEY,
+  id TEXT NOT NULL PRIMARY KEY,
   email VARCHAR(100) NOT NULL UNIQUE,
   password VARCHAR(64) NOT NULL, --bcrypt hash
   wallet_url TEXT,

@@ -1,13 +1,12 @@
-use crate::models::Merchant;
+use crate::errors::*;
+use crate::models::{Merchant, Order, OrderStatus};
 use actix::{Actor, SyncContext};
 use actix::{Handler, Message};
 use chrono::{Duration, Local};
 use diesel::pg::PgConnection;
 use diesel::r2d2::{ConnectionManager, Pool};
-use diesel::result::{DatabaseErrorKind, Error, Error::DatabaseError};
 use diesel::{self, prelude::*};
 use serde::Deserialize;
-use uuid::Uuid;
 
 pub struct DbExecutor(pub Pool<ConnectionManager<PgConnection>>);
 
@@ -17,6 +16,7 @@ impl Actor for DbExecutor {
 
 #[derive(Debug, Deserialize)]
 pub struct CreateMerchant {
+    pub id: String,
     pub email: String,
     pub password: String,
     pub wallet_url: Option<String>,
@@ -27,12 +27,27 @@ pub struct GetMerchantById {
     pub id: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct CreateOrder {
+    pub merchant_id: String,
+    pub order_id: String,
+    pub amount: i64,
+    pub currency: String,
+    pub confirmations: i32,
+    pub callback_url: String,
+    pub email: Option<String>,
+}
+
 impl Message for CreateMerchant {
     type Result = Result<Merchant, Error>;
 }
 
 impl Message for GetMerchantById {
     type Result = Result<Option<Merchant>, Error>;
+}
+
+impl Message for CreateOrder {
+    type Result = Result<Order, Error>;
 }
 
 impl Handler<CreateMerchant> for DbExecutor {
@@ -43,10 +58,10 @@ impl Handler<CreateMerchant> for DbExecutor {
         let conn: &PgConnection = &self.0.get().unwrap();
 
         let new_merchant = Merchant {
-            id: Uuid::new_v4(),
-            email: msg.email.clone(),
-            password: msg.password.clone(),
-            wallet_url: msg.wallet_url.clone(),
+            id: msg.id,
+            email: msg.email,
+            password: msg.password,
+            wallet_url: msg.wallet_url,
             balance: 0,
             created_at: Local::now().naive_local() + Duration::hours(24),
         };
@@ -63,10 +78,33 @@ impl Handler<GetMerchantById> for DbExecutor {
     fn handle(&mut self, msg: GetMerchantById, _: &mut Self::Context) -> Self::Result {
         use crate::schema::merchants::dsl::*;
         let conn: &PgConnection = &self.0.get().unwrap();
-        let merchant_id = match Uuid::parse_str(&msg.id) {
-            Ok(mid) => mid,
-            Err(_) => return Ok(None),
+        merchants.find(msg.id).get_result(conn).optional()
+    }
+}
+
+impl Handler<CreateOrder> for DbExecutor {
+    type Result = Result<Order, Error>;
+
+    fn handle(&mut self, msg: CreateOrder, _: &mut Self::Context) -> Self::Result {
+        use crate::schema::orders::dsl::*;
+        let conn: &PgConnection = &self.0.get().unwrap();
+
+        let new_order = Order {
+            order_id: msg.order_id,
+            merchant_id: msg.merchant_id,
+            email: msg.email,
+            callback_url: msg.callback_url,
+            fiat_amount: msg.amount,
+            currency: msg.currency,
+            amount: msg.amount,
+            status: OrderStatus::Unpaid as i32,
+            confirmations: msg.confirmations,
+            created_at: Local::now().naive_local() + Duration::hours(24),
+            updated_at: Local::now().naive_local() + Duration::hours(24),
         };
-        merchants.find(merchant_id).get_result(conn).optional()
+
+        diesel::insert_into(orders)
+            .values(&new_order)
+            .get_result(conn)
     }
 }

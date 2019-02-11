@@ -1,6 +1,6 @@
 table! {
     merchants (id) {
-        id -> Uuid,
+        id -> Text,
         email -> Varchar,
         password -> Varchar,
         wallet_url -> Nullable<Text>,
@@ -12,12 +12,16 @@ table! {
 table! {
     orders (merchant_id, order_id) {
         order_id -> Text,
-        merchant_id -> Uuid,
-        fiat_amount -> Int4,
+        merchant_id -> Text,
+        fiat_amount -> Int8,
         currency -> Text,
-        amount -> Int4,
-        status -> Text,
+        amount -> Int8,
+        status -> Int4,
+        confirmations -> Int4,
+        callback_url -> Text,
+        email -> Nullable<Text>,
         created_at -> Timestamp,
+        updated_at -> Timestamp,
     }
 }
 

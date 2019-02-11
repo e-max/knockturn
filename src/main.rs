@@ -9,15 +9,15 @@ mod schema;
 extern crate diesel;
 #[macro_use]
 extern crate failure;
+#[macro_use]
+extern crate enum_primitive;
 
 use actix::prelude::*;
 use actix_web::server;
 //use actix_web::{http, server, App, HttpRequest, Path};
 use crate::db::DbExecutor;
-use diesel::prelude::*;
 use diesel::{r2d2::ConnectionManager, PgConnection};
 use dotenv::dotenv;
-use serde::Deserialize;
 use std::env;
 
 fn main() {
