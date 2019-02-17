@@ -69,6 +69,7 @@ impl Handler<CreateMerchant> for DbExecutor {
         diesel::insert_into(merchants)
             .values(&new_merchant)
             .get_result(conn)
+            .map_err(|e| e.into())
     }
 }
 
@@ -78,7 +79,11 @@ impl Handler<GetMerchantById> for DbExecutor {
     fn handle(&mut self, msg: GetMerchantById, _: &mut Self::Context) -> Self::Result {
         use crate::schema::merchants::dsl::*;
         let conn: &PgConnection = &self.0.get().unwrap();
-        merchants.find(msg.id).get_result(conn).optional()
+        merchants
+            .find(msg.id)
+            .get_result(conn)
+            .optional()
+            .map_err(|e| e.into())
     }
 }
 
@@ -86,8 +91,18 @@ impl Handler<CreateOrder> for DbExecutor {
     type Result = Result<Order, Error>;
 
     fn handle(&mut self, msg: CreateOrder, _: &mut Self::Context) -> Self::Result {
+        use crate::schema::merchants::dsl::*;
         use crate::schema::orders::dsl::*;
         let conn: &PgConnection = &self.0.get().unwrap();
+
+        if !merchants
+            .find(msg.merchant_id.clone())
+            .get_result::<Merchant>(conn)
+            .is_ok()
+        {
+            println!("merchant {} not found", msg.merchant_id);
+            return Err(Error::InvalidEntity("merchant".to_owned()));
+        }
 
         let new_order = Order {
             order_id: msg.order_id,
@@ -106,5 +121,6 @@ impl Handler<CreateOrder> for DbExecutor {
         diesel::insert_into(orders)
             .values(&new_order)
             .get_result(conn)
+            .map_err(|e| e.into())
     }
 }
