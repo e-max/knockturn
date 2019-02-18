@@ -3,6 +3,7 @@ mod db;
 mod errors;
 mod handlers;
 mod models;
+mod rates;
 mod schema;
 
 #[macro_use]
@@ -21,14 +22,15 @@ use crate::db::DbExecutor;
 use diesel::{r2d2::ConnectionManager, PgConnection};
 use dotenv::dotenv;
 use env_logger;
+use log::info;
 use std::env;
 
 fn main() {
+    env_logger::init();
     dotenv().ok();
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     let sys = actix::System::new("Knockout");
-    std::env::set_var("RUST_LOG", "actix_web=debug");
-    env_logger::init();
+    //std::env::set_var("RUST_LOG", "actix_web=debug");
 
     let manager = ConnectionManager::<PgConnection>::new(database_url);
     let pool = r2d2::Pool::builder()
@@ -37,6 +39,9 @@ fn main() {
 
     let address: Addr<DbExecutor> = SyncArbiter::start(10, move || DbExecutor(pool.clone()));
 
+    info!("Starting");
+    let rates_db = address.clone();
+    let _rates = Arbiter::start(move |_| rates::RatesFetcher::new(rates_db));
     server::new(move || app::create_app(address.clone()))
         .bind("0.0.0.0:3000")
         .expect("Can not bind to '0.0.0.0:3000'")

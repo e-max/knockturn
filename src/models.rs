@@ -52,3 +52,5 @@ pub struct Order {
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
 }
+
+pub struct Money {}
