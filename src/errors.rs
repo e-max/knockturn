@@ -10,11 +10,24 @@ pub enum Error {
 
     #[fail(display = "Invalid entity {}", _0)]
     InvalidEntity(String),
+
+    #[fail(display = "Entity already exists {}", _0)]
+    AlreadyExists(String),
 }
 
 impl From<diesel::result::Error> for Error {
     fn from(error: diesel::result::Error) -> Self {
-        Error::Db(format!("{:?}", error))
+        match error {
+            diesel::result::Error::NotFound => Error::EntityNotFound(format!("Not found")),
+            diesel::result::Error::DatabaseError(kind, _) => match kind {
+                diesel::result::DatabaseErrorKind::UniqueViolation
+                | diesel::result::DatabaseErrorKind::ForeignKeyViolation => {
+                    Error::AlreadyExists("Already exists".to_owned())
+                }
+                _ => Error::Db(format!("{:?}", error)),
+            },
+            _ => Error::Db(format!("{:?}", error)),
+        }
     }
 }
 
@@ -25,6 +38,7 @@ impl ResponseError for Error {
             Error::Db(_) => HttpResponse::InternalServerError().json("Internal Server Error"),
             Error::EntityNotFound(ref message) => HttpResponse::NotFound().json(message),
             Error::InvalidEntity(ref message) => HttpResponse::BadRequest().json(message),
+            Error::AlreadyExists(ref message) => HttpResponse::BadRequest().json(message),
         }
     }
 }

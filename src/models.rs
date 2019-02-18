@@ -2,7 +2,7 @@ use crate::schema::{merchants, orders};
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize, Queryable, Insertable)]
+#[derive(Debug, Serialize, Deserialize, Queryable, Insertable, Identifiable)]
 #[table_name = "merchants"]
 pub struct Merchant {
     pub id: String,
@@ -32,8 +32,9 @@ pub enum OrderStatus {
 }
 }
 
-#[derive(Debug, Serialize, Deserialize, Queryable, Insertable)]
+#[derive(Debug, Serialize, Deserialize, Queryable, Insertable, Identifiable)]
 #[table_name = "orders"]
+#[primary_key(merchant_id, order_id)]
 pub struct Order {
     pub order_id: String,
     pub merchant_id: String,

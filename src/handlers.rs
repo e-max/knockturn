@@ -1,8 +1,9 @@
 use crate::app::AppState;
-use crate::db::{CreateMerchant, CreateOrder, GetMerchantById};
+use crate::db::{CreateMerchant, CreateOrder, GetMerchant, GetOrder};
 use crate::errors::*;
 use actix_web::{AsyncResponder, FutureResponse, HttpResponse, Json, Path, State};
 use futures::future::Future;
+use log::debug;
 use serde::Deserialize;
 
 pub fn create_merchant(
@@ -24,16 +25,13 @@ pub fn get_merchant(
 ) -> FutureResponse<HttpResponse> {
     state
         .db
-        .send(GetMerchantById {
+        .send(GetMerchant {
             id: merchant_id.to_owned(),
         })
         .from_err()
         .and_then(|db_response| {
             let merchant = db_response?;
-            match merchant {
-                Some(merchant) => Ok(HttpResponse::Ok().json(merchant)),
-                None => Ok(HttpResponse::NotFound().json("")),
-            }
+            Ok(HttpResponse::Ok().json(merchant))
         })
         .responder()
 }
@@ -63,6 +61,20 @@ pub fn create_order(
     state
         .db
         .send(create_order)
+        .from_err()
+        .and_then(|db_response| {
+            let order = db_response?;
+            Ok(HttpResponse::Ok().json(order))
+        })
+        .responder()
+}
+
+pub fn get_order(
+    (get_order, state): (Path<GetOrder>, State<AppState>),
+) -> FutureResponse<HttpResponse> {
+    state
+        .db
+        .send(get_order.into_inner())
         .from_err()
         .and_then(|db_response| {
             let order = db_response?;

@@ -23,8 +23,14 @@ pub struct CreateMerchant {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct GetMerchantById {
+pub struct GetMerchant {
     pub id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetOrder {
+    pub merchant_id: String,
+    pub order_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -42,8 +48,12 @@ impl Message for CreateMerchant {
     type Result = Result<Merchant, Error>;
 }
 
-impl Message for GetMerchantById {
-    type Result = Result<Option<Merchant>, Error>;
+impl Message for GetMerchant {
+    type Result = Result<Merchant, Error>;
+}
+
+impl Message for GetOrder {
+    type Result = Result<Order, Error>;
 }
 
 impl Message for CreateOrder {
@@ -73,16 +83,28 @@ impl Handler<CreateMerchant> for DbExecutor {
     }
 }
 
-impl Handler<GetMerchantById> for DbExecutor {
-    type Result = Result<Option<Merchant>, Error>;
+impl Handler<GetMerchant> for DbExecutor {
+    type Result = Result<Merchant, Error>;
 
-    fn handle(&mut self, msg: GetMerchantById, _: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: GetMerchant, _: &mut Self::Context) -> Self::Result {
         use crate::schema::merchants::dsl::*;
         let conn: &PgConnection = &self.0.get().unwrap();
         merchants
             .find(msg.id)
             .get_result(conn)
-            .optional()
+            .map_err(|e| e.into())
+    }
+}
+
+impl Handler<GetOrder> for DbExecutor {
+    type Result = Result<Order, Error>;
+
+    fn handle(&mut self, msg: GetOrder, _: &mut Self::Context) -> Self::Result {
+        use crate::schema::orders::dsl::*;
+        let conn: &PgConnection = &self.0.get().unwrap();
+        orders
+            .find((msg.merchant_id, msg.order_id))
+            .get_result(conn)
             .map_err(|e| e.into())
     }
 }
@@ -100,7 +122,6 @@ impl Handler<CreateOrder> for DbExecutor {
             .get_result::<Merchant>(conn)
             .is_ok()
         {
-            println!("merchant {} not found", msg.merchant_id);
             return Err(Error::InvalidEntity("merchant".to_owned()));
         }
 

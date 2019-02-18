@@ -13,7 +13,8 @@ bcrypt = "0.2.0"
 chrono = { version = "0.4.6", features = ["serde"] }
 diesel = { version = "1.4", features = ["postgres", "uuid", "r2d2", "chrono"] }
 dotenv = "0.13.0"
-env_logger = "0.5.13"
+env_logger = "0.6"
+log = "0.4.6"
 failure = "0.1.2"
 frank_jwt = "3.0"
 futures = "0.1"

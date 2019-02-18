@@ -19,4 +19,7 @@ pub fn create_app(db: Addr<DbExecutor>) -> App<AppState> {
         .resource("/merchants/{merchant_id}/orders", |r| {
             r.method(Method::POST).with(create_order)
         })
+        .resource("/merchants/{merchant_id}/orders/{order_id}", |r| {
+            r.method(Method::GET).with(get_order)
+        })
 }
