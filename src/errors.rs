@@ -13,6 +13,9 @@ pub enum Error {
 
     #[fail(display = "Entity already exists {}", _0)]
     AlreadyExists(String),
+
+    #[fail(display = "Template erorr")]
+    Template(String),
 }
 
 impl From<diesel::result::Error> for Error {
@@ -31,14 +34,23 @@ impl From<diesel::result::Error> for Error {
     }
 }
 
+impl From<askama::Error> for Error {
+    fn from(error: askama::Error) -> Self {
+        Error::Template(format!("{:?}", error))
+    }
+}
+
 // impl ResponseError trait allows to convert our errors into http responses with appropriate data
 impl ResponseError for Error {
     fn error_response(&self) -> HttpResponse {
         match *self {
-            Error::Db(_) => HttpResponse::InternalServerError().json("Internal Server Error"),
+            Error::Db(ref message) | Error::Template(ref message) => {
+                HttpResponse::InternalServerError().json(message)
+            }
             Error::EntityNotFound(ref message) => HttpResponse::NotFound().json(message),
-            Error::InvalidEntity(ref message) => HttpResponse::BadRequest().json(message),
-            Error::AlreadyExists(ref message) => HttpResponse::BadRequest().json(message),
+            Error::InvalidEntity(ref message) | Error::AlreadyExists(ref message) => {
+                HttpResponse::BadRequest().json(message)
+            }
         }
     }
 }

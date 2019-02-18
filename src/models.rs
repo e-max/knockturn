@@ -32,6 +32,18 @@ pub enum OrderStatus {
 }
 }
 
+impl ToString for OrderStatus {
+    fn to_string(&self) -> String {
+        match self {
+            OrderStatus::Unpaid => "Unpaid".to_owned(),
+            OrderStatus::Received => "Received".to_owned(),
+            OrderStatus::Rejected => "Rejected".to_owned(),
+            OrderStatus::Finalized => "Finalized".to_owned(),
+            OrderStatus::Confirmed => "Confirmed".to_owned(),
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Queryable, Insertable, Identifiable)]
 #[table_name = "orders"]
 #[primary_key(merchant_id, order_id)]

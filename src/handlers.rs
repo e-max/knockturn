@@ -1,7 +1,10 @@
 use crate::app::AppState;
 use crate::db::{CreateMerchant, CreateOrder, GetMerchant, GetOrder};
 use crate::errors::*;
+use crate::models::OrderStatus;
 use actix_web::{AsyncResponder, FutureResponse, HttpResponse, Json, Path, State};
+use askama::Template;
+use enum_primitive::FromPrimitive;
 use futures::future::Future;
 use log::debug;
 use serde::Deserialize;
@@ -64,6 +67,7 @@ pub fn create_order(
         .from_err()
         .and_then(|db_response| {
             let order = db_response?;
+
             Ok(HttpResponse::Ok().json(order))
         })
         .responder()
@@ -78,7 +82,26 @@ pub fn get_order(
         .from_err()
         .and_then(|db_response| {
             let order = db_response?;
-            Ok(HttpResponse::Ok().json(order))
+            let html = OrderTemplate {
+                order_id: order.order_id,
+                merchant_id: order.merchant_id,
+                amount: order.amount,
+                confirmations: order.confirmations,
+                status: OrderStatus::from_i32(order.status).unwrap().to_string(),
+            }
+            .render()
+            .map_err(|e| Error::from(e))?;
+            Ok(HttpResponse::Ok().content_type("text/html").body(html))
         })
         .responder()
+}
+
+#[derive(Template)]
+#[template(path = "order.html")]
+struct OrderTemplate {
+    order_id: String,
+    merchant_id: String,
+    status: String,
+    amount: i64,
+    confirmations: i32,
 }

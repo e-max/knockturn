@@ -11,6 +11,8 @@ extern crate diesel;
 extern crate failure;
 #[macro_use]
 extern crate enum_primitive;
+#[macro_use]
+extern crate askama;
 
 use actix::prelude::*;
 use actix_web::server;
@@ -20,8 +22,6 @@ use diesel::{r2d2::ConnectionManager, PgConnection};
 use dotenv::dotenv;
 use env_logger;
 use std::env;
-#[macro_use]
-extern crate log;
 
 fn main() {
     dotenv().ok();
@@ -38,8 +38,8 @@ fn main() {
     let address: Addr<DbExecutor> = SyncArbiter::start(10, move || DbExecutor(pool.clone()));
 
     server::new(move || app::create_app(address.clone()))
-        .bind("127.0.0.1:3000")
-        .expect("Can not bind to '127.0.0.1:3000'")
+        .bind("0.0.0.0:3000")
+        .expect("Can not bind to '0.0.0.0:3000'")
         .start();
 
     sys.run();
