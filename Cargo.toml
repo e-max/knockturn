@@ -21,6 +21,8 @@ frank_jwt = "3.0"
 futures = "0.1"
 r2d2 = "0.8.2"
 enum_primitive = "*"
+base64 = "0.10.1"
+uuid = { version = "0.7.2", features = ["serde"] }
 
 [build-dependencies]
 askama = "0.6"

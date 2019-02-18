@@ -1,4 +1,4 @@
-use crate::schema::{merchants, orders, rates};
+use crate::schema::{merchants, orders, rates, txs};
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -108,5 +108,23 @@ impl fmt::Display for Money {
 pub struct Rate {
     pub id: String,
     pub rate: f64,
+    pub updated_at: NaiveDateTime,
+}
+
+#[derive(Debug, Serialize, Deserialize, Queryable, Insertable, Identifiable)]
+#[table_name = "txs"]
+#[primary_key(slate_id)]
+pub struct Tx {
+    pub slate_id: String,
+    pub created_at: NaiveDateTime,
+    pub confirmed: bool,
+    pub confirmed_at: Option<NaiveDateTime>,
+    pub fee: Option<i64>,
+    pub messages: Vec<String>,
+    pub num_inputs: i64,
+    pub num_outputs: i64,
+    pub tx_type: String,
+    pub order_id: String,
+    pub merchant_id: String,
     pub updated_at: NaiveDateTime,
 }

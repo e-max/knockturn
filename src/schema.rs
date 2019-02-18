@@ -33,10 +33,23 @@ table! {
     }
 }
 
+table! {
+    txs (slate_id) {
+        slate_id -> Text,
+        created_at -> Timestamp,
+        confirmed -> Bool,
+        confirmed_at -> Nullable<Timestamp>,
+        fee -> Nullable<Int8>,
+        messages -> Array<Text>,
+        num_inputs -> Int8,
+        num_outputs -> Int8,
+        tx_type -> Text,
+        merchant_id -> Text,
+        order_id -> Text,
+        updated_at -> Timestamp,
+    }
+}
+
 joinable!(orders -> merchants (merchant_id));
 
-allow_tables_to_appear_in_same_query!(
-    merchants,
-    orders,
-    rates,
-);
+allow_tables_to_appear_in_same_query!(merchants, orders, rates, txs,);
