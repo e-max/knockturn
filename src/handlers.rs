@@ -4,14 +4,18 @@ use crate::errors::*;
 use crate::models::OrderStatus;
 use actix_web::{AsyncResponder, FutureResponse, HttpResponse, Json, Path, State};
 use askama::Template;
+use bcrypt;
 use enum_primitive::FromPrimitive;
-use futures::future::Future;
-use log::debug;
+use futures::future::{result, Future};
 use serde::Deserialize;
 
 pub fn create_merchant(
-    (create_merchant, state): (Json<CreateMerchant>, State<AppState>),
+    (mut create_merchant, state): (Json<CreateMerchant>, State<AppState>),
 ) -> FutureResponse<HttpResponse> {
+    create_merchant.password = match bcrypt::hash(&create_merchant.password, bcrypt::DEFAULT_COST) {
+        Ok(v) => v,
+        Err(_) => return result(Ok(HttpResponse::InternalServerError().finish())).responder(),
+    };
     state
         .db
         .send(create_merchant.into_inner())

@@ -13,14 +13,6 @@ pub struct Merchant {
     pub created_at: NaiveDateTime,
 }
 
-impl Merchant {
-    // this is just a helper function to remove password from user just before we return the value out later
-    pub fn remove_pwd(mut self) -> Self {
-        self.password = "".to_string();
-        self
-    }
-}
-
 enum_from_primitive! {
 #[derive(Debug, PartialEq)]
 pub enum OrderStatus {
