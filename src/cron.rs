@@ -1,22 +1,20 @@
-use crate::rates;
+use crate::db::DbExecutor;
+use crate::rates::{FetchRates, RatesFetcher};
 use actix::prelude::*;
+use log::error;
 
 pub struct Cron {
     db: Addr<DbExecutor>,
 }
 
-impl Actor for RatesFetcher {
+impl Actor for Cron {
     type Context = Context<Self>;
 
     fn started(&mut self, ctx: &mut Self::Context) {
+        let rates_addr = RatesFetcher::new(self.db.clone()).start();
         ctx.run_interval(
             std::time::Duration::new(5, 0),
-            |instance: &mut RatesFetcher, _ctx: &mut Context<Self>| {
-                instance.do_send(FetchRates {}).map_err(|e| {
-                    error!("failed to send rates db updte: {:?}", e);
-                    ()
-                })
-            },
+            move |_instance: &mut Cron, _ctx: &mut Context<Self>| rates_addr.do_send(FetchRates {}),
         );
     }
 

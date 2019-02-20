@@ -1,4 +1,5 @@
 mod app;
+mod cron;
 mod db;
 mod errors;
 mod handlers;
@@ -40,8 +41,8 @@ fn main() {
     let address: Addr<DbExecutor> = SyncArbiter::start(10, move || DbExecutor(pool.clone()));
 
     info!("Starting");
-    let rates_db = address.clone();
-    let _rates = Arbiter::start(move |_| rates::RatesFetcher::new(rates_db));
+    let cron_db = address.clone();
+    let _cron = Arbiter::start(move |_| cron::Cron::new(cron_db));
     server::new(move || app::create_app(address.clone()))
         .bind("0.0.0.0:3000")
         .expect("Can not bind to '0.0.0.0:3000'")

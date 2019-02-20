@@ -69,6 +69,7 @@ impl ResponseError for Error {
             Error::InvalidEntity(ref message) | Error::AlreadyExists(ref message) => {
                 HttpResponse::BadRequest().json(message)
             }
+            _ => HttpResponse::InternalServerError().json("general error".to_owned()),
         }
     }
 }
