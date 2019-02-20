@@ -1,7 +1,7 @@
 CREATE TABLE orders (
   order_id TEXT NOT NULL,
   merchant_id TEXT NOT NULL,
-  fiat_amount BIGINT NOT NULL,
+  grin_amount BIGINT NOT NULL,
   currency TEXT NOT NULL,
   amount BIGINT NOT NULL,
   status INTEGER NOT NULL,

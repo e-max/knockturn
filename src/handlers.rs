@@ -1,7 +1,7 @@
 use crate::app::AppState;
 use crate::db::{CreateMerchant, CreateOrder, GetMerchant, GetOrder};
 use crate::errors::*;
-use crate::models::OrderStatus;
+use crate::models::{Money, OrderStatus};
 use actix_web::{AsyncResponder, FutureResponse, HttpResponse, Json, Path, State};
 use askama::Template;
 use bcrypt;
@@ -86,11 +86,19 @@ pub fn get_order(
         .from_err()
         .and_then(|db_response| {
             let order = db_response?;
+            let amount = Money {
+                amount: order.amount,
+                currency: order.currency,
+            };
             let html = OrderTemplate {
                 order_id: order.order_id,
                 merchant_id: order.merchant_id,
-                amount: order.amount,
+                amount,
                 confirmations: order.confirmations,
+                grins: Money {
+                    amount: order.grin_amount,
+                    currency: "grin".to_owned(),
+                },
                 status: OrderStatus::from_i32(order.status).unwrap().to_string(),
             }
             .render()
@@ -106,6 +114,7 @@ struct OrderTemplate {
     order_id: String,
     merchant_id: String,
     status: String,
-    amount: i64,
+    amount: Money,
+    grins: Money,
     confirmations: i32,
 }

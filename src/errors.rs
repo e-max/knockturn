@@ -17,6 +17,9 @@ pub enum Error {
     #[fail(display = "Template erorr")]
     Template(String),
 
+    #[fail(display = "Unsupported currency: {}", _0)]
+    UnsupportedCurrency(String),
+
     #[fail(display = "General error: {}", _0)]
     General(String),
 }
@@ -63,9 +66,9 @@ impl ResponseError for Error {
                 HttpResponse::InternalServerError().json(message)
             }
             Error::EntityNotFound(ref message) => HttpResponse::NotFound().json(message),
-            Error::InvalidEntity(ref message) | Error::AlreadyExists(ref message) => {
-                HttpResponse::BadRequest().json(message)
-            }
+            Error::InvalidEntity(ref message)
+            | Error::AlreadyExists(ref message)
+            | Error::UnsupportedCurrency(ref message) => HttpResponse::BadRequest().json(message),
             _ => HttpResponse::InternalServerError().json("general error".to_owned()),
         }
     }

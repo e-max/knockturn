@@ -1,5 +1,5 @@
 use crate::errors::*;
-use crate::models::{Merchant, Order, OrderStatus, Rate};
+use crate::models::{Merchant, Money, Order, OrderStatus, Rate};
 use actix::{Actor, SyncContext};
 use actix::{Handler, Message};
 use chrono::{Duration, Local};
@@ -50,6 +50,12 @@ pub struct RegisterRate {
     pub rates: HashMap<String, f64>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct ConvertCurrency {
+    pub amount: Money,
+    pub to: String,
+}
+
 impl Message for CreateMerchant {
     type Result = Result<Merchant, Error>;
 }
@@ -68,6 +74,10 @@ impl Message for CreateOrder {
 
 impl Message for RegisterRate {
     type Result = Result<(), Error>;
+}
+
+impl Message for ConvertCurrency {
+    type Result = Result<Money, Error>;
 }
 
 impl Handler<CreateMerchant> for DbExecutor {
@@ -125,6 +135,8 @@ impl Handler<CreateOrder> for DbExecutor {
     fn handle(&mut self, msg: CreateOrder, _: &mut Self::Context) -> Self::Result {
         use crate::schema::merchants::dsl::*;
         use crate::schema::orders::dsl::*;
+        use crate::schema::rates::dsl::*;
+
         let conn: &PgConnection = &self.0.get().unwrap();
 
         if !merchants
@@ -135,14 +147,36 @@ impl Handler<CreateOrder> for DbExecutor {
             return Err(Error::InvalidEntity("merchant".to_owned()));
         }
 
+        let exch_rate = match rates
+            .find(&msg.currency)
+            .get_result::<Rate>(conn)
+            .optional()?
+        {
+            None => return Err(Error::UnsupportedCurrency(msg.currency)),
+            Some(v) => v,
+        };
+
+        //let precision: f64 = if msg.currency == "btc " {
+        //    100_000_000.0
+        //} else {
+        //    100.0
+        //};
+
+        //let conv_rate = (precision * exch_rate.rate) as i64;
+        let fiat = Money {
+            amount: msg.amount,
+            currency: msg.currency,
+        };
+        let grins = fiat.convert_to("grin", exch_rate.rate);
+
         let new_order = Order {
             order_id: msg.order_id,
             merchant_id: msg.merchant_id,
             email: msg.email,
             callback_url: msg.callback_url,
-            fiat_amount: msg.amount,
-            currency: msg.currency,
-            amount: msg.amount,
+            currency: fiat.currency,
+            amount: fiat.amount,
+            grin_amount: grins.amount, //msg.amount * 1_000_000_000 / conv_rate,
             status: OrderStatus::Unpaid as i32,
             confirmations: msg.confirmations,
             created_at: Local::now().naive_local(),

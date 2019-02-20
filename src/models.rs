@@ -1,6 +1,7 @@
 use crate::schema::{merchants, orders, rates};
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 #[derive(Debug, Serialize, Deserialize, Queryable, Insertable, Identifiable)]
 #[table_name = "merchants"]
@@ -42,7 +43,7 @@ impl ToString for OrderStatus {
 pub struct Order {
     pub order_id: String,
     pub merchant_id: String,
-    pub fiat_amount: i64,
+    pub grin_amount: i64,
     pub currency: String,
     pub amount: i64,
     pub status: i32,
@@ -53,7 +54,54 @@ pub struct Order {
     pub updated_at: NaiveDateTime,
 }
 
-pub struct Money {}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Money {
+    pub amount: i64,
+    pub currency: String,
+}
+
+impl Money {
+    pub fn new(amount: i64, currency: String) -> Self {
+        Money {
+            amount,
+            currency: currency.to_lowercase(),
+        }
+    }
+
+    pub fn convert_to(&self, currency: &str, rate: f64) -> Money {
+        let amount = self.amount * Money::currency_precision(currency)
+            / (self.precision() as f64 * rate) as i64;
+        Money {
+            amount,
+            currency: currency.to_owned(),
+        }
+    }
+
+    pub fn precision(&self) -> i64 {
+        Money::currency_precision(&self.currency)
+    }
+
+    pub fn currency_precision(currency: &str) -> i64 {
+        match currency {
+            "btc" => 100_000_000,
+            "grin" => 1_000_000_000,
+            _ => 100,
+        }
+    }
+}
+
+impl fmt::Display for Money {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let pr = self.precision();
+        let grins = self.amount / pr;
+        let mgrins = self.amount % pr;
+        match self.currency.as_str() {
+            "btc" => write!(f, "{}.{:08} {}", grins, mgrins, self.currency),
+            "grin" => write!(f, "{}.{:09} {}", grins, mgrins, self.currency),
+            _ => write!(f, "{}.{:02} {}", grins, mgrins, self.currency),
+        }
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize, Queryable, Insertable, Identifiable, AsChangeset)]
 #[table_name = "rates"]

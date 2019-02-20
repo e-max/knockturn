@@ -13,7 +13,7 @@ table! {
     orders (merchant_id, order_id) {
         order_id -> Text,
         merchant_id -> Text,
-        fiat_amount -> Int8,
+        grin_amount -> Int8,
         currency -> Text,
         amount -> Int8,
         status -> Int4,
