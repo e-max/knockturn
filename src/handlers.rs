@@ -1,13 +1,19 @@
 use crate::app::AppState;
-use crate::db::{CreateMerchant, CreateOrder, GetMerchant, GetOrder};
+use crate::db::{CreateMerchant, CreateOrder, CreateTx, GetMerchant, GetOrder};
 use crate::errors::*;
 use crate::models::{Money, OrderStatus};
-use actix_web::{AsyncResponder, FutureResponse, HttpResponse, Json, Path, State};
+use crate::wallet::Slate;
+use actix_web::{
+    AsyncResponder, FromRequest, FutureResponse, HttpRequest, HttpResponse, Json, Path, Responder,
+    State,
+};
 use askama::Template;
 use bcrypt;
 use enum_primitive::FromPrimitive;
-use futures::future::{result, Future};
+use futures::future::{err, ok, result, Future};
+use log::debug;
 use serde::Deserialize;
+use std::iter::Iterator;
 
 pub fn create_merchant(
     (mut create_merchant, state): (Json<CreateMerchant>, State<AppState>),
@@ -117,4 +123,55 @@ struct OrderTemplate {
     amount: Money,
     grins: Money,
     confirmations: i32,
+}
+
+pub fn get_tx(state: State<AppState>) -> Box<Future<Item = HttpResponse, Error = Error>> {
+    state
+        .wallet
+        .get_tx("c3b4be4a-b72c-46f5-8fb0-e318ca19ba2b")
+        .and_then(|body| Ok(HttpResponse::Ok().json(body)))
+        .responder()
+}
+
+pub fn pay_order(
+    (order, slate, state): (Path<GetOrder>, Json<Slate>, State<AppState>),
+) -> FutureResponse<HttpResponse, Error> {
+    let slate = state.wallet.receive(&slate);
+
+    slate
+        .and_then(move |slate| {
+            state
+                .wallet
+                .get_tx(&slate.id.to_hyphenated().to_string())
+                .and_then(move |tx| {
+                    let messages: Vec<String> = if let Some(pm) = tx.messages {
+                        pm.messages
+                            .into_iter()
+                            .map(|pmd| pmd.message)
+                            .filter_map(|x| x)
+                            .collect()
+                    } else {
+                        vec![]
+                    };
+
+                    let msg = CreateTx {
+                        slate_id: tx.tx_slate_id.unwrap(),
+                        created_at: tx.creation_ts,
+                        confirmed: tx.confirmed,
+                        confirmed_at: tx.confirmation_ts,
+                        fee: tx.fee.map(|f| f as i64),
+                        messages: messages,
+                        num_inputs: tx.num_inputs as i64,
+                        num_outputs: tx.num_outputs as i64,
+                        //FIXME
+                        tx_type: format!("{:?}", tx.tx_type),
+                        order_id: order.order_id.clone(),
+                        merchant_id: order.merchant_id.clone(),
+                    };
+                    state.db.send(msg).map_err(|e| Error::WalletAPIError)
+                })
+                .and_then(|_| ok(slate))
+        })
+        .and_then(|slate| Ok(HttpResponse::Ok().json(slate)))
+        .responder()
 }

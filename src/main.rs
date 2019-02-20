@@ -6,6 +6,7 @@ mod handlers;
 mod models;
 mod rates;
 mod schema;
+mod wallet;
 
 #[macro_use]
 extern crate diesel;
@@ -18,6 +19,7 @@ use actix::prelude::*;
 use actix_web::server;
 //use actix_web::{http, server, App, HttpRequest, Path};
 use crate::db::DbExecutor;
+use crate::wallet::Wallet;
 use diesel::{r2d2::ConnectionManager, PgConnection};
 use dotenv::dotenv;
 use env_logger;
@@ -38,10 +40,17 @@ fn main() {
 
     let address: Addr<DbExecutor> = SyncArbiter::start(10, move || DbExecutor(pool.clone()));
 
+    let wallet_url = env::var("WALLET_URL").expect("WALLET_URL must be set");
+    let wallet_user = env::var("WALLET_USER").expect("WALLET_USER must be set");
+    let wallet_pass = env::var("WALLET_PASS").expect("WALLET_PASS must be set");
+
+    let wallet = Wallet::new(&wallet_url, &wallet_user, &wallet_pass);
+
     info!("Starting");
     let cron_db = address.clone();
     let _cron = Arbiter::start(move |_| cron::Cron::new(cron_db));
-    server::new(move || app::create_app(address.clone()))
+
+    server::new(move || app::create_app(address.clone(), wallet.clone()))
         .bind("0.0.0.0:3000")
         .expect("Can not bind to '0.0.0.0:3000'")
         .start();
