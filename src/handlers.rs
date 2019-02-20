@@ -168,7 +168,7 @@ pub fn pay_order(
                         order_id: order.order_id.clone(),
                         merchant_id: order.merchant_id.clone(),
                     };
-                    state.db.send(msg).map_err(|e| Error::Db(s!(e)))
+                    state.db.send(msg).from_err()
                 })
                 .and_then(|_| ok(slate))
         })
