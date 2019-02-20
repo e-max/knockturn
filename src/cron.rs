@@ -1,7 +1,6 @@
 use crate::db::DbExecutor;
-use crate::rates::{FetchRates, RatesFetcher};
+use crate::rates::RatesFetcher;
 use actix::prelude::*;
-use log::error;
 
 pub struct Cron {
     db: Addr<DbExecutor>,
@@ -14,11 +13,9 @@ impl Actor for Cron {
         let rates = RatesFetcher::new(self.db.clone());
         ctx.run_interval(
             std::time::Duration::new(5, 0),
-            move |_instance: &mut Cron, ctx: &mut Context<Self>| {
-				let f = rates.fetch();
-				actix::spawn(f);
-			}
-			//rates_addr.do_send(FetchRates {}),
+            move |_instance: &mut Cron, _ctx: &mut Context<Self>| {
+                rates.fetch();
+            },
         );
     }
 

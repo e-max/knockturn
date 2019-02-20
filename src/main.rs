@@ -13,8 +13,6 @@ extern crate diesel;
 extern crate failure;
 #[macro_use]
 extern crate enum_primitive;
-#[macro_use]
-extern crate askama;
 
 use actix::prelude::*;
 use actix_web::server;

@@ -17,9 +17,6 @@ pub enum Error {
     #[fail(display = "Template erorr")]
     Template(String),
 
-    #[fail(display = "Fetch erorr")]
-    Fetch(String),
-
     #[fail(display = "General error: {}", _0)]
     General(String),
 }
