@@ -1,5 +1,5 @@
 use crate::errors::*;
-use crate::models::{Merchant, Order, OrderStatus};
+use crate::models::{Merchant, Order, OrderStatus, Rate};
 use actix::{Actor, SyncContext};
 use actix::{Handler, Message};
 use chrono::{Duration, Local};
@@ -7,6 +7,7 @@ use diesel::pg::PgConnection;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::{self, prelude::*};
 use serde::Deserialize;
+use std::collections::HashMap;
 
 pub struct DbExecutor(pub Pool<ConnectionManager<PgConnection>>);
 
@@ -44,6 +45,11 @@ pub struct CreateOrder {
     pub email: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct RegisterRate {
+    pub rates: HashMap<String, f64>,
+}
+
 impl Message for CreateMerchant {
     type Result = Result<Merchant, Error>;
 }
@@ -58,6 +64,10 @@ impl Message for GetOrder {
 
 impl Message for CreateOrder {
     type Result = Result<Order, Error>;
+}
+
+impl Message for RegisterRate {
+    type Result = Result<(), Error>;
 }
 
 impl Handler<CreateMerchant> for DbExecutor {
@@ -135,13 +145,39 @@ impl Handler<CreateOrder> for DbExecutor {
             amount: msg.amount,
             status: OrderStatus::Unpaid as i32,
             confirmations: msg.confirmations,
-            created_at: Local::now().naive_local() + Duration::hours(24),
-            updated_at: Local::now().naive_local() + Duration::hours(24),
+            created_at: Local::now().naive_local(),
+            updated_at: Local::now().naive_local(),
         };
 
         diesel::insert_into(orders)
             .values(&new_order)
             .get_result(conn)
             .map_err(|e| e.into())
+    }
+}
+
+impl Handler<RegisterRate> for DbExecutor {
+    type Result = Result<(), Error>;
+
+    fn handle(&mut self, msg: RegisterRate, _: &mut Self::Context) -> Self::Result {
+        use crate::schema::rates::dsl::*;
+        let conn: &PgConnection = &self.0.get().unwrap();
+
+        for (currency, new_rate) in msg.rates {
+            let new_rate = Rate {
+                id: currency,
+                rate: new_rate,
+                updated_at: Local::now().naive_local(),
+            };
+
+            diesel::insert_into(rates)
+                .values(&new_rate)
+                .on_conflict(id)
+                .do_update()
+                .set(&new_rate)
+                .get_result::<Rate>(conn)
+                .map_err(|e| Error::from(e))?;
+        }
+        Ok(())
     }
 }

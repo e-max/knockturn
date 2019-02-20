@@ -16,6 +16,12 @@ pub enum Error {
 
     #[fail(display = "Template erorr")]
     Template(String),
+
+    #[fail(display = "Fetch erorr")]
+    Fetch(String),
+
+    #[fail(display = "General error: {}", _0)]
+    General(String),
 }
 
 impl From<diesel::result::Error> for Error {
@@ -37,6 +43,18 @@ impl From<diesel::result::Error> for Error {
 impl From<askama::Error> for Error {
     fn from(error: askama::Error) -> Self {
         Error::Template(format!("{:?}", error))
+    }
+}
+
+impl From<serde_json::error::Error> for Error {
+    fn from(error: serde_json::error::Error) -> Self {
+        Error::General(format!("{:?}", error))
+    }
+}
+
+impl From<std::str::Utf8Error> for Error {
+    fn from(error: std::str::Utf8Error) -> Self {
+        Error::General(format!("{:?}", error))
     }
 }
 

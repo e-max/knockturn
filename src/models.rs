@@ -1,4 +1,4 @@
-use crate::schema::{merchants, orders};
+use crate::schema::{merchants, orders, rates};
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 
@@ -54,3 +54,11 @@ pub struct Order {
 }
 
 pub struct Money {}
+
+#[derive(Debug, Serialize, Deserialize, Queryable, Insertable, Identifiable, AsChangeset)]
+#[table_name = "rates"]
+pub struct Rate {
+    pub id: String,
+    pub rate: f64,
+    pub updated_at: NaiveDateTime,
+}

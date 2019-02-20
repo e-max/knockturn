@@ -25,9 +25,18 @@ table! {
     }
 }
 
+table! {
+    rates (id) {
+        id -> Text,
+        rate -> Float8,
+        updated_at -> Timestamp,
+    }
+}
+
 joinable!(orders -> merchants (merchant_id));
 
 allow_tables_to_appear_in_same_query!(
     merchants,
     orders,
+    rates,
 );
