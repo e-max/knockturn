@@ -4,7 +4,7 @@ use actix::prelude::*;
 use actix_web::client;
 use actix_web::HttpMessage;
 use futures;
-use futures::future::Future;
+use futures::future::{err, ok, result, Future};
 use log::{debug, error, info};
 use serde::Deserialize;
 use serde_json;
@@ -69,7 +69,8 @@ impl RatesFetcher {
         RatesFetcher { db }
     }
 
-    fn fetch(&mut self) -> impl Future<Item = (), Error = Error> {
+    pub fn fetch(&self) -> impl Future<Item = (), Error = ()> + '_ {
+        let db = self.db.clone();
         client::get(
             "https://api.coingecko.com/api/v3/simple/price?ids=grin&vs_currencies=btc%2Cusd%2Ceur",
         )
@@ -83,13 +84,24 @@ impl RatesFetcher {
             response
                 .body()
                 .map_err(|e| Error::Fetch(format!("Payload error: {:?}", e)))
-                .and_then(move |body| Ok(str::from_utf8(&body)?))
-                //.from_err(Error::Fetch(format!("failed to parse body")))
-                .and_then(|str| Ok(serde_json::from_str::<Rates>(&str)?))
-                .map_err(|e| Error::Fetch(format!("failed to parse json: {:?}", e)))
-                .and_then(|rates| {
-                    self.db
-                        .send(RegisterRate { rates: rates.grin })
+                .and_then(move |body| {
+                    match str::from_utf8(&body) {
+                        Ok(v) => ok(v.to_owned()),
+                        Err(e) => err(Error::Fetch(format!("failed to parse body"))),
+                    }
+                    //result(
+                    //    str::from_utf8(&body)
+                    //        .map_err(|_| Error::Fetch(format!("failed to parse body"))),
+                    //)
+                })
+                .and_then(|str| {
+                    result(
+                        serde_json::from_str::<Rates>(&str)
+                            .map_err(|e| Error::Fetch(format!("failed to parse json: {:?}", e))),
+                    )
+                })
+                .and_then(move |rates| {
+                    db.send(RegisterRate { rates: rates.grin })
                         .map_err(|_| Error::Fetch(format!("failed to parse body")))
                         .and_then(|db_response| db_response)
                         .from_err()
