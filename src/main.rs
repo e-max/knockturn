@@ -30,11 +30,11 @@ use log::info;
 use std::env;
 
 fn main() {
+    std::env::set_var("RUST_LOG", "actix_web=info");
     env_logger::init();
     dotenv().ok();
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     let sys = actix::System::new("Knockout");
-    std::env::set_var("RUST_LOG", "actix_web=info");
 
     let manager = ConnectionManager::<PgConnection>::new(database_url);
     let pool = r2d2::Pool::builder()
