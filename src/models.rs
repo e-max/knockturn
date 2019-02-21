@@ -1,3 +1,4 @@
+use crate::errors::*;
 use crate::schema::{merchants, orders, rates, txs};
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
@@ -55,37 +56,69 @@ pub struct Order {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub enum Currency {
+    GRIN = 0,
+    BTC = 1,
+    EUR = 2,
+    USD = 3,
+}
+
+impl Currency {
+    pub fn precision(&self) -> u64 {
+        match self {
+            Currency::BTC => 100_000_000,
+            Currency::GRIN => 1_000_000_000,
+            Currency::EUR | Currency::USD => 100,
+        }
+    }
+}
+
+impl fmt::Display for Currency {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let s = match self {
+            Currency::BTC => "BTC",
+            Currency::GRIN => "GRIN",
+            Currency::EUR => "EUR",
+            Currency::USD => "USD",
+        };
+        write!(f, "{}", s)
+    }
+}
+
+impl std::str::FromStr for Currency {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_uppercase() {
+            "GRIN" => Ok(Currency::GRIN),
+            "BTC" => Ok(Currency::BTC),
+            "USD" => Ok(Currency::USD),
+            "EUR" => Ok(Currency::EUR),
+            _ => Err(Error::UnsupportedCurrency(s)),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Money {
     pub amount: i64,
-    pub currency: String,
+    pub currency: Currency,
 }
 
 impl Money {
-    pub fn new(amount: i64, currency: String) -> Self {
+    pub fn new(amount: i64, currency: Currency) -> Self {
         Money {
             amount,
             currency: currency.to_lowercase(),
         }
     }
 
-    pub fn convert_to(&self, currency: &str, rate: f64) -> Money {
-        let amount = self.amount * Money::currency_precision(currency)
-            / (self.precision() as f64 * rate) as i64;
+    pub fn convert_to(&self, currency: Currency, rate: f64) -> Money {
+        let amount =
+            self.amount * currency.precision() / (self.currency.precision() as f64 * rate) as i64;
         Money {
             amount,
-            currency: currency.to_owned(),
-        }
-    }
-
-    pub fn precision(&self) -> i64 {
-        Money::currency_precision(&self.currency)
-    }
-
-    pub fn currency_precision(currency: &str) -> i64 {
-        match currency {
-            "btc" => 100_000_000,
-            "grin" => 1_000_000_000,
-            _ => 100,
+            currency: currency,
         }
     }
 }
@@ -95,9 +128,9 @@ impl fmt::Display for Money {
         let pr = self.precision();
         let grins = self.amount / pr;
         let mgrins = self.amount % pr;
-        match self.currency.as_str() {
-            "btc" => write!(f, "{}.{:08} {}", grins, mgrins, self.currency),
-            "grin" => write!(f, "{}.{:09} {}", grins, mgrins, self.currency),
+        match self.currency {
+            Currency::BTC => write!(f, "{}.{:08} {}", grins, mgrins, self.currency),
+            Currency::GRIN => write!(f, "{}.{:09} {}", grins, mgrins, self.currency),
             _ => write!(f, "{}.{:02} {}", grins, mgrins, self.currency),
         }
     }

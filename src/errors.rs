@@ -22,9 +22,6 @@ pub enum Error {
 
     #[fail(display = "General error: {}", _0)]
     General(String),
-
-    #[fail(display = "Got error when call wallet API ")]
-    WalletAPIError,
 }
 
 impl From<diesel::result::Error> for Error {
