@@ -344,6 +344,7 @@ impl Handler<GetTx> for DbExecutor {
     fn handle(&mut self, msg: GetTx, _: &mut Self::Context) -> Self::Result {
         use crate::schema::txs::dsl::*;
         let conn: &PgConnection = &self.0.get().unwrap();
+        let sid = msg.slate_id.clone();
         txs.filter(merchant_id.eq(msg.merchant_id))
             .filter(order_id.eq(msg.order_id))
             .filter(slate_id.eq(msg.slate_id))
@@ -352,7 +353,10 @@ impl Handler<GetTx> for DbExecutor {
             .and_then(|transactions| match transactions.len() {
                 0 => Ok(None),
                 1 => Ok(transactions.into_iter().next()),
-                _ => Err(Error::WalletAPIError),
+                _ => Err(Error::Db(format!(
+                    "Found more than one transaction with slate id {}",
+                    sid
+                ))),
             })
     }
 }

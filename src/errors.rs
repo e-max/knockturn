@@ -1,3 +1,4 @@
+use actix::MailboxError;
 use actix_web::{error::ResponseError, HttpResponse};
 
 #[derive(Fail, Debug)]
@@ -22,6 +23,15 @@ pub enum Error {
 
     #[fail(display = "General error: {}", _0)]
     General(String),
+
+    #[fail(display = "Got error when call wallet API {}", _0)]
+    WalletAPIError(String),
+}
+
+impl From<MailboxError> for Error {
+    fn from(error: MailboxError) -> Self {
+        Error::General(s!(error))
+    }
 }
 
 impl From<diesel::result::Error> for Error {

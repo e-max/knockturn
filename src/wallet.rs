@@ -39,28 +39,37 @@ impl Wallet {
     }
 
     pub fn get_tx(&self, tx_id: &str) -> impl Future<Item = TxLogEntry, Error = Error> {
+        let tx_id = tx_id.to_owned();
         let url = format!("{}/{}?tx_id={}", self.url, RETRIEVE_TXS, tx_id);
         client::get(&url) // <- Create request builder
             .header(header::AUTHORIZATION, self.auth_header.clone())
             .finish()
             .unwrap()
             .send() // <- Send http request
-            .map_err(|_| Error::WalletAPIError)
+            .map_err(|e| Error::WalletAPIError(s!(e)))
             .and_then(|resp| {
                 // <- server http response
                 println!("Response: {:?}", resp);
                 resp.body()
-                    .map_err(|_| Error::WalletAPIError)
+                    .map_err(|e| Error::WalletAPIError(s!(e)))
                     .and_then(move |bytes| {
                         //let resp = from_slice(&bytes).map_err(|e| PayloadError::EncodingCorrupted)?;
                         //let resp = from_slice(&bytes)
                         //.context(Error::WalletAPIError("Cannot decode json".to_owned()))?;
-                        let txs: TxListResp = from_slice(&bytes).unwrap();
+                        let txs: TxListResp = from_slice(&bytes).map_err(|e| {
+                            Error::WalletAPIError(format!("Cannot decode json {}", e))
+                        })?;
                         if txs.txs.len() == 0 {
-                            return Err(Error::WalletAPIError);
+                            return Err(Error::WalletAPIError(format!(
+                                "Transaction with slate_id {} not found",
+                                tx_id
+                            )));
                         }
                         if txs.txs.len() > 1 {
-                            return Err(Error::WalletAPIError);
+                            return Err(Error::WalletAPIError(format!(
+                                "Wallet returned more than one transaction with slate_id {}",
+                                tx_id
+                            )));
                         }
                         let tx = txs.txs.into_iter().next().unwrap();
                         Ok(tx)
@@ -70,31 +79,6 @@ impl Wallet {
 
     pub fn receive(&self, slate: &Slate) -> impl Future<Item = Slate, Error = Error> {
         ok(slate.clone())
-    }
-
-    pub fn get_tx2() -> impl Future<Item = String, Error = Error> {
-        let url = "http://localhost:3420/v1/wallet/owner/retrieve_txs?tx_id=c3b4be4a-b72c-46f5-8fb0-e318ca19ba2b";
-
-        let username = "grin";
-        let password = "n9qp5nKhtdkpIingzzYI";
-        let auth = format!("{}:{}", username, password);
-        let header_value = format!("Basic {}", encode(&auth));
-
-        client::get(url)
-            .header(header::AUTHORIZATION, &*header_value)
-            .finish()
-            .unwrap()
-            .send()
-            .map_err(|_| Error::WalletAPIError)
-            .and_then(|resp| {
-                resp.body()
-                    .map_err(|_| Error::WalletAPIError)
-                    .and_then(|body| {
-                        Ok(std::str::from_utf8(&body)
-                            .map_err(|_| Error::WalletAPIError)?
-                            .to_owned())
-                    })
-            })
     }
 }
 
