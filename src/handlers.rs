@@ -1,7 +1,7 @@
 use crate::app::AppState;
-use crate::db::{CreateMerchant, CreateOrder, CreateTx, GetMerchant, GetOrder};
+use crate::db::{CreateMerchant, CreateOrder, CreateTx, GetMerchant, GetOrder, GetOrders};
 use crate::errors::*;
-use crate::models::{Currency, Money, OrderStatus};
+use crate::models::{Currency, Money, Order, OrderStatus};
 use crate::wallet::Slate;
 use actix_web::middleware::identity::RequestIdentity;
 use actix_web::{
@@ -20,19 +20,33 @@ use std::iter::Iterator;
 #[template(path = "index.html")]
 struct IndexTemplate<'a> {
     merchant_id: &'a str,
+    orders: Vec<Order>,
 }
 
-pub fn index(req: &HttpRequest<AppState>) -> Result<HttpResponse, Error> {
+pub fn index(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse> {
     let merchant_id = match req.identity() {
         Some(v) => v,
-        None => return Ok(HttpResponse::Found().header("location", "/login").finish()),
+        None => return ok(HttpResponse::Found().header("location", "/login").finish()).responder(),
     };
-    let html = IndexTemplate {
-        merchant_id: &merchant_id,
-    }
-    .render()
-    .map_err(|e| Error::from(e))?;
-    Ok(HttpResponse::Ok().content_type("text/html").body(html))
+    req.state()
+        .db
+        .send(GetOrders {
+            merchant_id: merchant_id.clone(),
+            offset: 0,
+            limit: 100,
+        })
+        .from_err()
+        .and_then(move |db_response| {
+            let orders = db_response?;
+            let html = IndexTemplate {
+                merchant_id: &merchant_id,
+                orders,
+            }
+            .render()
+            .map_err(|e| Error::from(e))?;
+            Ok(HttpResponse::Ok().content_type("text/html").body(html))
+        })
+        .responder()
 }
 
 #[derive(Debug, Deserialize)]

@@ -36,6 +36,13 @@ pub struct GetOrder {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct GetOrders {
+    pub merchant_id: String,
+    pub offset: i64,
+    pub limit: i64,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct CreateOrder {
     pub merchant_id: String,
     pub order_id: String,
@@ -106,6 +113,10 @@ impl Message for GetMerchant {
 
 impl Message for GetOrder {
     type Result = Result<Order, Error>;
+}
+
+impl Message for GetOrders {
+    type Result = Result<Vec<Order>, Error>;
 }
 
 impl Message for CreateOrder {
@@ -179,6 +190,21 @@ impl Handler<GetOrder> for DbExecutor {
         orders
             .find((msg.merchant_id, msg.order_id))
             .get_result(conn)
+            .map_err(|e| e.into())
+    }
+}
+
+impl Handler<GetOrders> for DbExecutor {
+    type Result = Result<Vec<Order>, Error>;
+
+    fn handle(&mut self, msg: GetOrders, _: &mut Self::Context) -> Self::Result {
+        use crate::schema::orders::dsl::*;
+        let conn: &PgConnection = &self.0.get().unwrap();
+        orders
+            .filter(merchant_id.eq(msg.merchant_id))
+            .offset(msg.offset)
+            .limit(msg.limit)
+            .load::<Order>(conn)
             .map_err(|e| e.into())
     }
 }
