@@ -6,12 +6,14 @@ use actix_web::error::PayloadError;
 use actix_web::http::header;
 use actix_web::HttpMessage;
 use base64::encode;
-use chrono::NaiveDateTime;
+use chrono::{DateTime, Utc};
 use failure::ResultExt;
 use futures::future::ok;
 use futures::Future;
+use log::error;
 use serde::{Deserialize, Serialize};
 use serde_json::{from_slice, Value};
+use std::str::from_utf8;
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -22,7 +24,8 @@ pub struct Wallet {
     url: String,
 }
 
-const RETRIEVE_TXS: &'static str = "v1/wallet/owner/retrieve_txs";
+const RETRIEVE_TXS_URL: &'static str = "v1/wallet/owner/retrieve_txs";
+const RECEIVE_URL: &'static str = "v1/wallet/foreign/receive_tx";
 
 impl Wallet {
     pub fn new(url: &str, username: &str, password: &str) -> Self {
@@ -40,7 +43,7 @@ impl Wallet {
 
     pub fn get_tx(&self, tx_id: &str) -> impl Future<Item = TxLogEntry, Error = Error> {
         let tx_id = tx_id.to_owned();
-        let url = format!("{}/{}?tx_id={}", self.url, RETRIEVE_TXS, tx_id);
+        let url = format!("{}/{}?tx_id={}", self.url, RETRIEVE_TXS_URL, tx_id);
         client::get(&url) // <- Create request builder
             .header(header::AUTHORIZATION, self.auth_header.clone())
             .finish()
@@ -50,13 +53,16 @@ impl Wallet {
             .and_then(|resp| {
                 // <- server http response
                 println!("Response: {:?}", resp);
+                error!("AAA");
                 resp.body()
                     .map_err(|e| Error::WalletAPIError(s!(e)))
                     .and_then(move |bytes| {
-                        //let resp = from_slice(&bytes).map_err(|e| PayloadError::EncodingCorrupted)?;
-                        //let resp = from_slice(&bytes)
-                        //.context(Error::WalletAPIError("Cannot decode json".to_owned()))?;
                         let txs: TxListResp = from_slice(&bytes).map_err(|e| {
+                            error!(
+                                "Cannot decode json {:?}:\n with error {} ",
+                                from_utf8(&bytes),
+                                e
+                            );
                             Error::WalletAPIError(format!("Cannot decode json {}", e))
                         })?;
                         if txs.txs.len() == 0 {
@@ -78,7 +84,30 @@ impl Wallet {
     }
 
     pub fn receive(&self, slate: &Slate) -> impl Future<Item = Slate, Error = Error> {
-        ok(slate.clone())
+        let url = format!("{}/{}", self.url, RECEIVE_URL);
+        client::post(&url) // <- Create request builder
+            .header(header::AUTHORIZATION, self.auth_header.clone())
+            .json(slate)
+            .unwrap()
+            .send() // <- Send http request
+            .map_err(|e| Error::WalletAPIError(s!(e)))
+            .and_then(|resp| {
+                // <- server http response
+                println!("Response: {:?}", resp);
+                resp.body()
+                    .map_err(|e| Error::WalletAPIError(s!(e)))
+                    .and_then(move |bytes| {
+                        let slate_resp: Slate = from_slice(&bytes).map_err(|e| {
+                            error!(
+                                "Cannot decode json {:?}:\n with error {} ",
+                                from_utf8(&bytes),
+                                e
+                            );
+                            Error::WalletAPIError(format!("Cannot decode json {}", e))
+                        })?;
+                        Ok(slate_resp)
+                    })
+            })
     }
 }
 
@@ -103,10 +132,10 @@ pub struct TxLogEntry {
     pub tx_type: TxLogEntryType,
     /// Time this tx entry was created
     /// #[serde(with = "tx_date_format")]
-    pub creation_ts: NaiveDateTime,
+    pub creation_ts: DateTime<Utc>,
     /// Time this tx was confirmed (by this wallet)
     /// #[serde(default, with = "opt_tx_date_format")]
-    pub confirmation_ts: Option<NaiveDateTime>,
+    pub confirmation_ts: Option<DateTime<Utc>>,
     /// Whether the inputs+outputs involved in this transaction have been
     /// confirmed (In all cases either all outputs involved in a tx should be
     /// confirmed, or none should be; otherwise there's a deeper problem)
@@ -334,5 +363,11 @@ mod tests {
     fn wallet_get_tx_test() {
         get_tx();
         assert!(true);
+    }
+    #[test]
+    fn txs_read_test() {
+        TxListResp = from_slice(s.as_bytes()).map_err(|e| {
+            error!("Cannot decode json {:?}:\n with error {} ", s, e);
+        })?;
     }
 }

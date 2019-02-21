@@ -201,12 +201,34 @@ pub fn get_tx(state: State<AppState>) -> Box<Future<Item = HttpResponse, Error =
 pub fn pay_order(
     (order, slate, state): (Path<GetOrder>, Json<Slate>, State<AppState>),
 ) -> FutureResponse<HttpResponse, Error> {
-    let slate = state.wallet.receive(&slate);
+    let slate_amount = slate.amount;
+    let order_id = order.order_id.clone();
+    let merchant_id = order.merchant_id.clone();
 
+    let res = state
+        .db
+        .send(order.into_inner())
+        .from_err()
+        .and_then(move |db_response| {
+            let order = db_response?;
+            if order.status != OrderStatus::Unpaid as i32 {
+                return Err(Error::WrongOrderStatus(s!(order.status)));
+            }
+            if order.grin_amount != slate_amount as i64 {
+                return Err(Error::WrongAmount(order.grin_amount as u64, slate_amount));
+            }
+            Ok(())
+        });
+
+    let wallet = state.wallet.clone();
+
+    let slate = res.and_then(move |_| wallet.receive(&slate));
+
+    let wallet = state.wallet.clone();
+    let db = state.db.clone();
     slate
         .and_then(move |slate| {
-            state
-                .wallet
+            wallet
                 .get_tx(&slate.id.to_hyphenated().to_string())
                 .and_then(move |tx| {
                     let messages: Vec<String> = if let Some(pm) = tx.messages {
@@ -221,19 +243,19 @@ pub fn pay_order(
 
                     let msg = CreateTx {
                         slate_id: tx.tx_slate_id.unwrap(),
-                        created_at: tx.creation_ts,
+                        created_at: tx.creation_ts.naive_utc(),
                         confirmed: tx.confirmed,
-                        confirmed_at: tx.confirmation_ts,
+                        confirmed_at: tx.confirmation_ts.map(|dt| dt.naive_utc()),
                         fee: tx.fee.map(|f| f as i64),
                         messages: messages,
                         num_inputs: tx.num_inputs as i64,
                         num_outputs: tx.num_outputs as i64,
                         //FIXME
                         tx_type: format!("{:?}", tx.tx_type),
-                        order_id: order.order_id.clone(),
-                        merchant_id: order.merchant_id.clone(),
+                        order_id: order_id,
+                        merchant_id: merchant_id,
                     };
-                    state.db.send(msg).from_err()
+                    db.send(msg).from_err()
                 })
                 .and_then(|_| ok(slate))
         })

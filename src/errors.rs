@@ -26,6 +26,12 @@ pub enum Error {
 
     #[fail(display = "Got error when call wallet API {}", _0)]
     WalletAPIError(String),
+
+    #[fail(display = "Wrong amount. Required {} received {}", _0, _1)]
+    WrongAmount(u64, u64),
+
+    #[fail(display = "Wrong order status {}", _0)]
+    WrongOrderStatus(String),
 }
 
 impl From<MailboxError> for Error {
