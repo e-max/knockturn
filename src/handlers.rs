@@ -3,9 +3,10 @@ use crate::db::{CreateMerchant, CreateOrder, CreateTx, GetMerchant, GetOrder};
 use crate::errors::*;
 use crate::models::{Currency, Money, OrderStatus};
 use crate::wallet::Slate;
+use actix_web::middleware::identity::RequestIdentity;
 use actix_web::{
-    AsyncResponder, FromRequest, FutureResponse, HttpRequest, HttpResponse, Json, Path, Responder,
-    State,
+    AsyncResponder, Form, FromRequest, FutureResponse, HttpRequest, HttpResponse, Json, Path,
+    Responder, State,
 };
 use askama::Template;
 use bcrypt;
@@ -14,6 +15,67 @@ use futures::future::{err, ok, result, Future};
 use log::debug;
 use serde::Deserialize;
 use std::iter::Iterator;
+
+#[derive(Template)]
+#[template(path = "index.html")]
+struct IndexTemplate<'a> {
+    merchant_id: &'a str,
+}
+
+pub fn index(req: &HttpRequest<AppState>) -> Result<HttpResponse, Error> {
+    let merchant_id = match req.identity() {
+        Some(v) => v,
+        None => return Ok(HttpResponse::Found().header("location", "/login").finish()),
+    };
+    let html = IndexTemplate {
+        merchant_id: &merchant_id,
+    }
+    .render()
+    .map_err(|e| Error::from(e))?;
+    Ok(HttpResponse::Ok().content_type("text/html").body(html))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LoginRequest {
+    pub login: String,
+    pub password: String,
+}
+pub fn login(
+    (req, login_form): (HttpRequest<AppState>, Form<LoginRequest>),
+) -> FutureResponse<HttpResponse> {
+    req.state()
+        .db
+        .send(GetMerchant {
+            id: login_form.login.clone(),
+        })
+        .from_err()
+        .and_then(move |db_response| {
+            let merchant = db_response?;
+            match bcrypt::verify(&login_form.password, &merchant.password) {
+                Ok(res) => {
+                    if res {
+                        req.remember(merchant.id);
+                        Ok(HttpResponse::Found().header("location", "/").finish())
+                    } else {
+                        Ok(HttpResponse::Found().header("location", "/login").finish())
+                    }
+                }
+                Err(_) => Ok(HttpResponse::Found().header("location", "/login").finish()),
+            }
+        })
+        .responder()
+}
+
+pub fn login_form(req: HttpRequest<AppState>) -> HttpResponse {
+    HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(include_str!("../templates/login.html"))
+}
+
+pub fn logout(req: HttpRequest<AppState>) -> Result<HttpResponse, Error> {
+    req.forget();
+    Ok(HttpResponse::Found().header("location", "/login").finish())
+}
 
 pub fn create_merchant(
     (mut create_merchant, state): (Json<CreateMerchant>, State<AppState>),
