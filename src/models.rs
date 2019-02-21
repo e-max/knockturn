@@ -1,6 +1,10 @@
 use crate::errors::*;
 use crate::schema::{merchants, orders, rates, txs};
 use chrono::NaiveDateTime;
+use diesel::deserialize::{self, FromSql};
+use diesel::pg::Pg;
+use diesel::serialize::{self, Output, ToSql};
+use diesel::sql_types::Jsonb;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -45,17 +49,15 @@ pub struct Order {
     pub order_id: String,
     pub merchant_id: String,
     pub grin_amount: i64,
-    pub currency: String,
-    pub amount: i64,
+    pub amount: Money,
     pub status: i32,
     pub confirmations: i32,
-    pub callback_url: String,
     pub email: Option<String>,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub enum Currency {
     GRIN = 0,
     BTC = 1,
@@ -64,7 +66,7 @@ pub enum Currency {
 }
 
 impl Currency {
-    pub fn precision(&self) -> u64 {
+    pub fn precision(&self) -> i64 {
         match self {
             Currency::BTC => 100_000_000,
             Currency::GRIN => 1_000_000_000,
@@ -89,17 +91,18 @@ impl std::str::FromStr for Currency {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_uppercase() {
+        match s.to_uppercase().as_str() {
             "GRIN" => Ok(Currency::GRIN),
             "BTC" => Ok(Currency::BTC),
             "USD" => Ok(Currency::USD),
             "EUR" => Ok(Currency::EUR),
-            _ => Err(Error::UnsupportedCurrency(s)),
+            _ => Err(Error::UnsupportedCurrency(s!(s))),
         }
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, AsExpression, FromSqlRow, Clone, Copy)]
+#[sql_type = "Jsonb"]
 pub struct Money {
     pub amount: i64,
     pub currency: Currency,
@@ -107,10 +110,7 @@ pub struct Money {
 
 impl Money {
     pub fn new(amount: i64, currency: Currency) -> Self {
-        Money {
-            amount,
-            currency: currency.to_lowercase(),
-        }
+        Money { amount, currency }
     }
 
     pub fn convert_to(&self, currency: Currency, rate: f64) -> Money {
@@ -123,9 +123,28 @@ impl Money {
     }
 }
 
+impl ToSql<Jsonb, Pg> for Money {
+    fn to_sql<W: std::io::Write>(&self, out: &mut Output<W, Pg>) -> serialize::Result {
+        out.write_all(&[1])?;
+        serde_json::to_writer(out, self)
+            .map(|_| serialize::IsNull::No)
+            .map_err(Into::into)
+    }
+}
+
+impl FromSql<Jsonb, Pg> for Money {
+    fn from_sql(bytes: Option<&[u8]>) -> deserialize::Result<Self> {
+        let bytes = not_none!(bytes);
+        if bytes[0] != 1 {
+            return Err("Unsupported JSONB encoding version".into());
+        }
+        serde_json::from_slice(&bytes[1..]).map_err(Into::into)
+    }
+}
+
 impl fmt::Display for Money {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let pr = self.precision();
+        let pr = self.currency.precision();
         let grins = self.amount / pr;
         let mgrins = self.amount % pr;
         match self.currency {

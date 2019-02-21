@@ -1,7 +1,7 @@
 use crate::app::AppState;
 use crate::db::{CreateMerchant, CreateOrder, CreateTx, GetMerchant, GetOrder};
 use crate::errors::*;
-use crate::models::{Money, OrderStatus};
+use crate::models::{Currency, Money, OrderStatus};
 use crate::wallet::Slate;
 use actix_web::{
     AsyncResponder, FromRequest, FutureResponse, HttpRequest, HttpResponse, Json, Path, Responder,
@@ -52,10 +52,8 @@ pub fn get_merchant(
 #[derive(Debug, Deserialize)]
 pub struct CreateOrderRequest {
     pub order_id: String,
-    pub amount: i64,
-    pub currency: String,
+    pub amount: Money,
     pub confirmations: i32,
-    pub callback_url: String,
     pub email: Option<String>,
 }
 
@@ -66,9 +64,7 @@ pub fn create_order(
         merchant_id: merchant_id.into_inner(),
         order_id: order_req.order_id.clone(),
         amount: order_req.amount,
-        currency: order_req.currency.clone(),
         confirmations: order_req.confirmations,
-        callback_url: order_req.callback_url.clone(),
         email: order_req.email.clone(),
     };
     state
@@ -92,19 +88,12 @@ pub fn get_order(
         .from_err()
         .and_then(|db_response| {
             let order = db_response?;
-            let amount = Money {
-                amount: order.amount,
-                currency: order.currency,
-            };
             let html = OrderTemplate {
                 order_id: order.order_id,
                 merchant_id: order.merchant_id,
-                amount,
+                amount: order.amount,
                 confirmations: order.confirmations,
-                grins: Money {
-                    amount: order.grin_amount,
-                    currency: "grin".to_owned(),
-                },
+                grin_amount: Money::new(order.grin_amount, Currency::GRIN),
                 status: OrderStatus::from_i32(order.status).unwrap().to_string(),
             }
             .render()
@@ -121,7 +110,7 @@ struct OrderTemplate {
     merchant_id: String,
     status: String,
     amount: Money,
-    grins: Money,
+    grin_amount: Money,
     confirmations: i32,
 }
 

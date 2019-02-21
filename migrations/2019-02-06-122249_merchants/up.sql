@@ -1,4 +1,3 @@
--- Your SQL goes here
 CREATE TABLE merchants (
   id TEXT NOT NULL PRIMARY KEY,
   email VARCHAR(100) NOT NULL UNIQUE,

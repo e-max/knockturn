@@ -1,5 +1,5 @@
 use crate::errors::*;
-use crate::models::{Merchant, Money, Order, OrderStatus, Rate, Tx};
+use crate::models::{Currency, Merchant, Money, Order, OrderStatus, Rate, Tx};
 use actix::{Actor, SyncContext};
 use actix::{Handler, Message};
 use chrono::NaiveDateTime;
@@ -39,10 +39,8 @@ pub struct GetOrder {
 pub struct CreateOrder {
     pub merchant_id: String,
     pub order_id: String,
-    pub amount: i64,
-    pub currency: String,
+    pub amount: Money,
     pub confirmations: i32,
-    pub callback_url: String,
     pub email: Option<String>,
 }
 
@@ -204,35 +202,22 @@ impl Handler<CreateOrder> for DbExecutor {
         }
 
         let exch_rate = match rates
-            .find(&msg.currency)
+            .find(&msg.amount.currency.to_string())
             .get_result::<Rate>(conn)
             .optional()?
         {
-            None => return Err(Error::UnsupportedCurrency(msg.currency)),
+            None => return Err(Error::UnsupportedCurrency(msg.amount.currency.to_string())),
             Some(v) => v,
         };
 
-        //let precision: f64 = if msg.currency == "btc " {
-        //    100_000_000.0
-        //} else {
-        //    100.0
-        //};
-
-        //let conv_rate = (precision * exch_rate.rate) as i64;
-        let fiat = Money {
-            amount: msg.amount,
-            currency: msg.currency,
-        };
-        let grins = fiat.convert_to("grin", exch_rate.rate);
+        let grins = msg.amount.convert_to(Currency::GRIN, exch_rate.rate);
 
         let new_order = Order {
             order_id: msg.order_id,
             merchant_id: msg.merchant_id,
             email: msg.email,
-            callback_url: msg.callback_url,
-            currency: fiat.currency,
-            amount: fiat.amount,
-            grin_amount: grins.amount, //msg.amount * 1_000_000_000 / conv_rate,
+            amount: msg.amount,
+            grin_amount: grins.amount,
             status: OrderStatus::Unpaid as i32,
             confirmations: msg.confirmations,
             created_at: Local::now().naive_local(),
@@ -255,7 +240,7 @@ impl Handler<RegisterRate> for DbExecutor {
 
         for (currency, new_rate) in msg.rates {
             let new_rate = Rate {
-                id: currency,
+                id: currency.to_uppercase(),
                 rate: new_rate,
                 updated_at: Local::now().naive_local(),
             };

@@ -1,4 +1,3 @@
--- Your SQL goes here
 CREATE TABLE txs (
   slate_id TEXT PRIMARY KEY,
   created_at TIMESTAMP NOT NULL,

@@ -14,11 +14,9 @@ table! {
         order_id -> Text,
         merchant_id -> Text,
         grin_amount -> Int8,
-        currency -> Text,
-        amount -> Int8,
+        amount -> Jsonb,
         status -> Int4,
         confirmations -> Int4,
-        callback_url -> Text,
         email -> Nullable<Text>,
         created_at -> Timestamp,
         updated_at -> Timestamp,
@@ -52,4 +50,9 @@ table! {
 
 joinable!(orders -> merchants (merchant_id));
 
-allow_tables_to_appear_in_same_query!(merchants, orders, rates, txs,);
+allow_tables_to_appear_in_same_query!(
+    merchants,
+    orders,
+    rates,
+    txs,
+);
