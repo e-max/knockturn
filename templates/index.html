@@ -6,6 +6,28 @@
 <body>
 	<h1>Merchant {{merchant_id}}</h1>
 	<p>Orders: {{orders.len()}}</p>
+	<table>
+	<tr>
+  		<th>ID</th>
+  		<th>Amount</th>
+		<th>Grins</th>
+  		<th>Status</th>
+		<th>Confirmations</th>
+		<th>Created</th>
+		<th>Updated</th>
+    </tr>
+{% for order in orders %}
+	<tr>
+  		<td>{{ order.external_id }}</td>
+  		<td>{{ order.amount }}</td>
+  		<td>{{ order.grins() }}</td>
+		<td>{{ order.status.to_string() }}</td>
+		<td>{{ order.confirmations }}</td>
+		<td>{{ order.created_at }}</td>
+		<td>{{ order.updated_at }}</td>
+    </tr>
+  {% endfor %}
+  </table>
 	<form method="POST" action="/logout">
 		<input type="submit" value="Logout">
 	</form>
