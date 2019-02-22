@@ -58,6 +58,12 @@ pub struct Order {
     pub updated_at: NaiveDateTime,
 }
 
+impl Order {
+    pub fn grins(&self) -> Money {
+        Money::new(self.grin_amount, Currency::GRIN)
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub enum Currency {
     GRIN = 0,
