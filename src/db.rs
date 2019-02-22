@@ -91,14 +91,30 @@ pub struct UpdateTx {
     pub slate_id: String,
     pub created_at: NaiveDateTime,
     pub confirmed: bool,
-    pub confirmed_at: NaiveDateTime,
+    pub confirmed_at: Option<NaiveDateTime>,
     pub fee: Option<i64>,
     pub messages: Vec<String>,
     pub num_inputs: i64,
     pub num_outputs: i64,
-    pub order_id: String,
-    pub merchant_id: String,
+    pub order_id: Uuid,
 }
+
+impl From<Tx> for UpdateTx {
+    fn from(tx: Tx) -> Self {
+        UpdateTx {
+            slate_id: tx.slate_id,
+            created_at: tx.created_at,
+            confirmed: tx.confirmed,
+            confirmed_at: tx.confirmed_at,
+            fee: tx.fee,
+            messages: tx.messages,
+            num_inputs: tx.num_inputs,
+            num_outputs: tx.num_outputs,
+            order_id: tx.order_id,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct GetUnpaidOrders;
 
