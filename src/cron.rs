@@ -66,7 +66,7 @@ fn process_orders(cron: &mut Cron, ctx: &mut Context<Cron>) {
                             msg.confirmed_at = wallet_tx.confirmation_ts.map(|dt| dt.naive_utc());
                             let res = db
                                 .send(msg)
-                                .map_err(|e| Error::General(s!("Cannot send message")))
+                                .from_err()
                                 .and_then(|res| {
                                     res?;
                                     Ok(())
@@ -76,7 +76,7 @@ fn process_orders(cron: &mut Cron, ctx: &mut Context<Cron>) {
                                         id: order_id,
                                         status: order_status,
                                     })
-                                    .map_err(|e| Error::General(s!("Cannot send message")))
+                                    .from_err()
                                     .and_then(|db_response| {
                                         db_response?;
                                         Ok(())
