@@ -99,6 +99,8 @@ pub struct UpdateTx {
     pub order_id: String,
     pub merchant_id: String,
 }
+#[derive(Debug, Deserialize)]
+pub struct GetUnpaidOrders;
 
 impl Message for CreateMerchant {
     type Result = Result<Merchant, Error>;
@@ -140,6 +142,10 @@ impl Message for GetTxs {
 
 impl Message for GetTx {
     type Result = Result<Option<Tx>, Error>;
+}
+
+impl Message for GetUnpaidOrders {
+    type Result = Result<Vec<(Order, Vec<Tx>)>, Error>;
 }
 
 impl Handler<CreateMerchant> for DbExecutor {
@@ -200,6 +206,26 @@ impl Handler<GetOrders> for DbExecutor {
             .limit(msg.limit)
             .load::<Order>(conn)
             .map_err(|e| e.into())
+    }
+}
+
+impl Handler<GetUnpaidOrders> for DbExecutor {
+    type Result = Result<Vec<(Order, Vec<Tx>)>, Error>;
+
+    fn handle(&mut self, msg: GetUnpaidOrders, _: &mut Self::Context) -> Self::Result {
+        use crate::schema::orders::dsl::*;
+        let conn: &PgConnection = &self.0.get().unwrap();
+
+        let unpaid_orders = orders
+            .filter(status.eq(OrderStatus::Unpaid as i32))
+            .load::<Order>(conn)
+            .map_err(|e| Error::Db(s!(e)))?;
+
+        let txs = Tx::belonging_to(&unpaid_orders)
+            .load::<Tx>(conn)?
+            .grouped_by(&unpaid_orders);
+        let data = unpaid_orders.into_iter().zip(txs).collect::<Vec<_>>();
+        Ok(data)
     }
 }
 

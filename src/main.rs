@@ -51,7 +51,10 @@ fn main() {
 
     info!("Starting");
     let cron_db = address.clone();
-    let _cron = Arbiter::start(move |_| cron::Cron::new(cron_db));
+    let _cron = Arbiter::start({
+        let wallet = wallet.clone();
+        move |_| cron::Cron::new(cron_db, wallet.clone())
+    });
 
     server::new(move || app::create_app(address.clone(), wallet.clone()))
         .bind("0.0.0.0:3000")

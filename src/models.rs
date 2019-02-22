@@ -5,6 +5,7 @@ use diesel::deserialize::{self, FromSql};
 use diesel::pg::Pg;
 use diesel::serialize::{self, Output, ToSql};
 use diesel::sql_types::Jsonb;
+use diesel::BelongingToDsl;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use uuid::Uuid;
@@ -21,7 +22,7 @@ pub struct Merchant {
 }
 
 enum_from_primitive! {
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, AsExpression)]
 pub enum OrderStatus {
     Unpaid  = 0,
     Received = 1,
@@ -164,8 +165,11 @@ pub struct Rate {
     pub updated_at: NaiveDateTime,
 }
 
-#[derive(Debug, Serialize, Deserialize, Queryable, Insertable, Identifiable)]
+#[derive(
+    Debug, Serialize, PartialEq, Associations, Deserialize, Queryable, Insertable, Identifiable,
+)]
 #[table_name = "txs"]
+#[belongs_to(Order)]
 #[primary_key(slate_id)]
 pub struct Tx {
     pub slate_id: String,
