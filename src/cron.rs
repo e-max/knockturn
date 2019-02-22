@@ -3,7 +3,7 @@ use crate::errors::Error;
 use crate::rates::RatesFetcher;
 use crate::wallet::Wallet;
 use actix::prelude::*;
-use futures::future::{join_all, Either, Future};
+use futures::future::{join_all, ok, Either, Future};
 
 pub struct Cron {
     db: Addr<DbExecutor>,
@@ -38,7 +38,7 @@ impl Cron {
 fn process_orders(cron: &mut Cron, ctx: &mut Context<Cron>) {
     println!("hello");
     let wallet = cron.wallet.clone();
-    let db = cron.db.clone();
+    let db_clone = cron.db.clone();
     let res = cron
         .db
         .send(GetUnpaidOrders)
@@ -55,25 +55,25 @@ fn process_orders(cron: &mut Cron, ctx: &mut Context<Cron>) {
                 println!("\x1B[31;1m txs\x1B[0m = {:?}", txs);
                 for tx in txs {
                     println!("\x1B[31;1m tx\x1B[0m = {:?}", tx);
-                    /*
-                    let res = wallet.get_tx(&tx.slate_id).and_then(|wallet_tx| {
-                        if tx.confirmed {
+                    let db = db_clone.clone();
+                    let res = wallet.get_tx(&tx.slate_id).and_then(move |wallet_tx| {
+                        if wallet_tx.confirmed {
                             let mut msg = UpdateTx::from(tx);
                             msg.confirmed = true;
-                            if let Some(confirmation_time) = wallet_tx.confirmation_ts {
-                                msg.confirmed_at = confirmation_time.naive_utc();
-                            }
-                            Either::A(
-                                db.send(msg)
-                                    .map_err(|e| Error::General(s!("Cannot send message")))
-                                    .and_then(|resp| resp?),
-                            )
+                            msg.confirmed_at = wallet_tx.confirmation_ts.map(|dt| dt.naive_utc());
+                            let res = db
+                                .send(msg)
+                                .map_err(|e| Error::General(s!("Cannot send message")))
+                                .and_then(|res| {
+                                    res?;
+                                    Ok(())
+                                })
+                                .map(|_| ());
+                            Either::A(res)
                         } else {
-                            Either::B(())
+                            Either::B(ok(()))
                         }
                     });
-                    */
-                    let res = wallet.get_tx(&tx.slate_id);
                     futures.push(res);
                 }
             }
