@@ -138,7 +138,7 @@ pub fn create_order(
 ) -> FutureResponse<HttpResponse> {
     let create_order = CreateOrder {
         merchant_id: merchant_id.into_inner(),
-        order_id: order_req.order_id.clone(),
+        external_id: order_req.order_id.clone(),
         amount: order_req.amount,
         confirmations: order_req.confirmations,
         email: order_req.email.clone(),
@@ -165,7 +165,7 @@ pub fn get_order(
         .and_then(|db_response| {
             let order = db_response?;
             let html = OrderTemplate {
-                order_id: order.order_id,
+                order_id: order.external_id,
                 merchant_id: order.merchant_id,
                 amount: order.amount,
                 confirmations: order.confirmations,
@@ -202,8 +202,7 @@ pub fn pay_order(
     (order, slate, state): (Path<GetOrder>, Json<Slate>, State<AppState>),
 ) -> FutureResponse<HttpResponse, Error> {
     let slate_amount = slate.amount;
-    let order_id = order.order_id.clone();
-    let merchant_id = order.merchant_id.clone();
+    let order_id = order.id.clone();
 
     let res = state
         .db
@@ -229,7 +228,7 @@ pub fn pay_order(
     slate
         .and_then(move |slate| {
             wallet
-                .get_tx(&slate.id.to_hyphenated().to_string())
+                .get_tx(&slate.id.hyphenated().to_string())
                 .and_then(move |tx| {
                     let messages: Vec<String> = if let Some(pm) = tx.messages {
                         pm.messages
@@ -253,7 +252,6 @@ pub fn pay_order(
                         //FIXME
                         tx_type: format!("{:?}", tx.tx_type),
                         order_id: order_id,
-                        merchant_id: merchant_id,
                     };
                     db.send(msg).from_err()
                 })
