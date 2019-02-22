@@ -7,6 +7,7 @@ use diesel::serialize::{self, Output, ToSql};
 use diesel::sql_types::Jsonb;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize, Queryable, Insertable, Identifiable)]
 #[table_name = "merchants"]
@@ -44,9 +45,9 @@ impl ToString for OrderStatus {
 
 #[derive(Debug, Serialize, Deserialize, Queryable, Insertable, Identifiable)]
 #[table_name = "orders"]
-#[primary_key(merchant_id, order_id)]
 pub struct Order {
-    pub order_id: String,
+    pub id: Uuid,
+    pub external_id: String,
     pub merchant_id: String,
     pub grin_amount: i64,
     pub amount: Money,
@@ -176,7 +177,6 @@ pub struct Tx {
     pub num_inputs: i64,
     pub num_outputs: i64,
     pub tx_type: String,
-    pub order_id: String,
-    pub merchant_id: String,
+    pub order_id: Uuid,
     pub updated_at: NaiveDateTime,
 }

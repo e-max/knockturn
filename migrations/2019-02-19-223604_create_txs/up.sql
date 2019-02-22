@@ -8,8 +8,7 @@ CREATE TABLE txs (
   num_inputs int8 NOT NULL DEFAULT 0,
   num_outputs int8 NOT NULL DEFAULT 0,
   tx_type TEXT NOT NULL,
-  merchant_id TEXT NOT NULL,
-  order_id TEXT  NOT NULL,
+  order_id uuid NOT NULL,
   updated_at TIMESTAMP NOT NULL,
-  FOREIGN KEY (merchant_id, order_id) REFERENCES orders (merchant_id, order_id)
+  FOREIGN KEY (order_id) REFERENCES orders (id)
 )

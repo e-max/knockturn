@@ -9,6 +9,7 @@ use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::{self, prelude::*};
 use serde::Deserialize;
 use std::collections::HashMap;
+use uuid::Uuid;
 
 pub struct DbExecutor(pub Pool<ConnectionManager<PgConnection>>);
 
@@ -31,8 +32,7 @@ pub struct GetMerchant {
 
 #[derive(Debug, Deserialize)]
 pub struct GetOrder {
-    pub merchant_id: String,
-    pub order_id: String,
+    pub id: Uuid,
 }
 
 #[derive(Debug, Deserialize)]
@@ -45,7 +45,7 @@ pub struct GetOrders {
 #[derive(Debug, Deserialize)]
 pub struct CreateOrder {
     pub merchant_id: String,
-    pub order_id: String,
+    pub external_id: String,
     pub amount: Money,
     pub confirmations: i32,
     pub email: Option<String>,
@@ -63,15 +63,13 @@ pub struct ConvertCurrency {
 }
 
 pub struct GetTxs {
-    pub merchant_id: String,
-    pub order_id: String,
+    pub order_id: Uuid,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct GetTx {
     pub slate_id: String,
-    pub merchant_id: String,
-    pub order_id: String,
+    pub order_id: Uuid,
 }
 
 #[derive(Debug, Deserialize)]
@@ -85,8 +83,7 @@ pub struct CreateTx {
     pub num_inputs: i64,
     pub num_outputs: i64,
     pub tx_type: String,
-    pub order_id: String,
-    pub merchant_id: String,
+    pub order_id: Uuid,
 }
 
 #[derive(Debug, Deserialize)]
@@ -187,10 +184,7 @@ impl Handler<GetOrder> for DbExecutor {
     fn handle(&mut self, msg: GetOrder, _: &mut Self::Context) -> Self::Result {
         use crate::schema::orders::dsl::*;
         let conn: &PgConnection = &self.0.get().unwrap();
-        orders
-            .find((msg.merchant_id, msg.order_id))
-            .get_result(conn)
-            .map_err(|e| e.into())
+        orders.find(msg.id).get_result(conn).map_err(|e| e.into())
     }
 }
 
@@ -239,7 +233,8 @@ impl Handler<CreateOrder> for DbExecutor {
         let grins = msg.amount.convert_to(Currency::GRIN, exch_rate.rate);
 
         let new_order = Order {
-            order_id: msg.order_id,
+            id: uuid::Uuid::new_v4(),
+            external_id: msg.external_id,
             merchant_id: msg.merchant_id,
             email: msg.email,
             amount: msg.amount,
@@ -301,7 +296,6 @@ impl Handler<CreateTx> for DbExecutor {
             num_outputs: msg.num_outputs,
             tx_type: msg.tx_type,
             order_id: msg.order_id,
-            merchant_id: msg.merchant_id,
             updated_at: Local::now().naive_local(),
         };
 
@@ -342,8 +336,7 @@ impl Handler<GetTxs> for DbExecutor {
     fn handle(&mut self, msg: GetTxs, _: &mut Self::Context) -> Self::Result {
         use crate::schema::txs::dsl::*;
         let conn: &PgConnection = &self.0.get().unwrap();
-        txs.filter(merchant_id.eq(msg.merchant_id))
-            .filter(order_id.eq(msg.order_id))
+        txs.filter(order_id.eq(msg.order_id))
             .load::<Tx>(conn)
             .map_err(|e| e.into())
     }
@@ -356,8 +349,7 @@ impl Handler<GetTx> for DbExecutor {
         use crate::schema::txs::dsl::*;
         let conn: &PgConnection = &self.0.get().unwrap();
         let sid = msg.slate_id.clone();
-        txs.filter(merchant_id.eq(msg.merchant_id))
-            .filter(order_id.eq(msg.order_id))
+        txs.filter(order_id.eq(msg.order_id))
             .filter(slate_id.eq(msg.slate_id))
             .load::<Tx>(conn)
             .map_err(|e| e.into())

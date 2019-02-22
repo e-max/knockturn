@@ -10,8 +10,9 @@ table! {
 }
 
 table! {
-    orders (merchant_id, order_id) {
-        order_id -> Text,
+    orders (id) {
+        id -> Uuid,
+        external_id -> Text,
         merchant_id -> Text,
         grin_amount -> Int8,
         amount -> Jsonb,
@@ -42,13 +43,13 @@ table! {
         num_inputs -> Int8,
         num_outputs -> Int8,
         tx_type -> Text,
-        merchant_id -> Text,
-        order_id -> Text,
+        order_id -> Uuid,
         updated_at -> Timestamp,
     }
 }
 
 joinable!(orders -> merchants (merchant_id));
+joinable!(txs -> orders (order_id));
 
 allow_tables_to_appear_in_same_query!(
     merchants,
