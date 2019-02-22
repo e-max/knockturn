@@ -1,6 +1,6 @@
 use crate::errors::*;
 use crate::schema::{merchants, orders, rates, txs};
-use chrono::NaiveDateTime;
+use chrono::{Duration, NaiveDateTime, Utc};
 use diesel::deserialize::{self, FromSql};
 use diesel::pg::Pg;
 use diesel::serialize::{self, Output, ToSql};
@@ -9,6 +9,8 @@ use diesel::BelongingToDsl;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use uuid::Uuid;
+
+const TTL_SECONDS: i64 = 20 * 60; //20 minutes
 
 #[derive(Debug, Serialize, Deserialize, Queryable, Insertable, Identifiable)]
 #[table_name = "merchants"]
@@ -57,6 +59,12 @@ pub struct Order {
     pub email: Option<String>,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
+}
+
+impl Order {
+    pub fn is_expired(&self) -> bool {
+        self.created_at + Duration::seconds(TTL_SECONDS) < Utc::now().naive_utc()
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
