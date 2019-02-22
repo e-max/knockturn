@@ -93,6 +93,10 @@ impl Order {
     pub fn is_expired(&self) -> bool {
         self.created_at + Duration::seconds(TTL_SECONDS) < Utc::now().naive_utc()
     }
+
+    pub fn grins(&self) -> Money {
+        Money::new(self.grin_amount, Currency::GRIN)
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
