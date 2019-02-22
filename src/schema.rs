@@ -16,7 +16,7 @@ table! {
         merchant_id -> Text,
         grin_amount -> Int8,
         amount -> Jsonb,
-        status -> Int4,
+        status -> Int2,
         confirmations -> Int4,
         email -> Nullable<Text>,
         created_at -> Timestamp,

@@ -1,13 +1,16 @@
 use crate::errors::*;
 use crate::schema::{merchants, orders, rates, txs};
 use chrono::{Duration, NaiveDateTime, Utc};
+use diesel::backend::Backend;
 use diesel::deserialize::{self, FromSql};
 use diesel::pg::Pg;
 use diesel::serialize::{self, Output, ToSql};
-use diesel::sql_types::Jsonb;
+use diesel::sql_types::{Jsonb, SmallInt};
 use diesel::BelongingToDsl;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::io;
+use strum_macros::{Display, EnumString};
 use uuid::Uuid;
 
 const TTL_SECONDS: i64 = 20 * 60; //20 minutes
@@ -23,26 +26,51 @@ pub struct Merchant {
     pub created_at: NaiveDateTime,
 }
 
-enum_from_primitive! {
-#[derive(Debug, PartialEq, AsExpression)]
+#[derive(
+    EnumString, Display, Debug, PartialEq, AsExpression, Serialize, Deserialize, FromSqlRow,
+)]
+#[sql_type = "SmallInt"]
 pub enum OrderStatus {
-    Unpaid  = 0,
-    Received = 1,
-    Rejected = 2,
-    Finalized = 3,
-    Confirmed = 4,
-}
+    Unpaid,
+    Received,
+    Rejected,
+    Finalized,
+    Confirmed,
 }
 
-impl ToString for OrderStatus {
-    fn to_string(&self) -> String {
-        match self {
-            OrderStatus::Unpaid => "Unpaid".to_owned(),
-            OrderStatus::Received => "Received".to_owned(),
-            OrderStatus::Rejected => "Rejected".to_owned(),
-            OrderStatus::Finalized => "Finalized".to_owned(),
-            OrderStatus::Confirmed => "Confirmed".to_owned(),
-        }
+impl<DB: Backend> ToSql<SmallInt, DB> for OrderStatus
+where
+    i16: ToSql<SmallInt, DB>,
+{
+    fn to_sql<W>(&self, out: &mut Output<W, DB>) -> serialize::Result
+    where
+        W: io::Write,
+    {
+        let v = match *self {
+            OrderStatus::Unpaid => 1,
+            OrderStatus::Received => 2,
+            OrderStatus::Rejected => 3,
+            OrderStatus::Finalized => 4,
+            OrderStatus::Confirmed => 5,
+        };
+        v.to_sql(out)
+    }
+}
+
+impl<DB: Backend> FromSql<SmallInt, DB> for OrderStatus
+where
+    i16: FromSql<SmallInt, DB>,
+{
+    fn from_sql(bytes: Option<&DB::RawValue>) -> deserialize::Result<Self> {
+        let v = i16::from_sql(bytes)?;
+        Ok(match v {
+            1 => OrderStatus::Unpaid,
+            2 => OrderStatus::Received,
+            3 => OrderStatus::Rejected,
+            4 => OrderStatus::Finalized,
+            5 => OrderStatus::Confirmed,
+            _ => return Err("replace me with a real error".into()),
+        })
     }
 }
 
@@ -54,7 +82,7 @@ pub struct Order {
     pub merchant_id: String,
     pub grin_amount: i64,
     pub amount: Money,
-    pub status: i32,
+    pub status: OrderStatus,
     pub confirmations: i32,
     pub email: Option<String>,
     pub created_at: NaiveDateTime,

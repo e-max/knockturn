@@ -217,7 +217,7 @@ impl Handler<GetUnpaidOrders> for DbExecutor {
         let conn: &PgConnection = &self.0.get().unwrap();
 
         let unpaid_orders = orders
-            .filter(status.eq(OrderStatus::Unpaid as i32))
+            .filter(status.eq(OrderStatus::Unpaid))
             .load::<Order>(conn)
             .map_err(|e| Error::Db(s!(e)))?;
 
@@ -265,7 +265,7 @@ impl Handler<CreateOrder> for DbExecutor {
             email: msg.email,
             amount: msg.amount,
             grin_amount: grins.amount,
-            status: OrderStatus::Unpaid as i32,
+            status: OrderStatus::Unpaid,
             confirmations: msg.confirmations,
             created_at: Local::now().naive_local(),
             updated_at: Local::now().naive_local(),

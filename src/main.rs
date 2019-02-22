@@ -15,8 +15,6 @@ mod wallet;
 extern crate diesel;
 #[macro_use]
 extern crate failure;
-#[macro_use]
-extern crate enum_primitive;
 
 use actix::prelude::*;
 use actix_web::server;

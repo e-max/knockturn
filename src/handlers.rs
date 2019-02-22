@@ -10,7 +10,6 @@ use actix_web::{
 };
 use askama::Template;
 use bcrypt;
-use enum_primitive::FromPrimitive;
 use futures::future::{err, ok, result, Future};
 use log::debug;
 use serde::Deserialize;
@@ -170,7 +169,7 @@ pub fn get_order(
                 amount: order.amount,
                 confirmations: order.confirmations,
                 grin_amount: Money::new(order.grin_amount, Currency::GRIN),
-                status: OrderStatus::from_i32(order.status).unwrap().to_string(),
+                status: order.status.to_string(),
             }
             .render()
             .map_err(|e| Error::from(e))?;
@@ -210,7 +209,7 @@ pub fn pay_order(
         .from_err()
         .and_then(move |db_response| {
             let order = db_response?;
-            if order.status != OrderStatus::Unpaid as i32 {
+            if order.status != OrderStatus::Unpaid {
                 return Err(Error::WrongOrderStatus(s!(order.status)));
             }
             if order.grin_amount != slate_amount as i64 {
