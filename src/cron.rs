@@ -1,4 +1,4 @@
-use crate::db::{DbExecutor, GetUnpaidOrders, UpdateTx};
+use crate::db::{DbExecutor, GetUnpaidOrders, UpdateOrderStatus, UpdateTx};
 use crate::errors::Error;
 use crate::rates::RatesFetcher;
 use crate::wallet::Wallet;
@@ -56,6 +56,9 @@ fn process_orders(cron: &mut Cron, ctx: &mut Context<Cron>) {
                 for tx in txs {
                     println!("\x1B[31;1m tx\x1B[0m = {:?}", tx);
                     let db = db_clone.clone();
+                    let db2 = db_clone.clone();
+                    let order_id = order.id.clone();
+                    let order_status = order.status.clone();
                     let res = wallet.get_tx(&tx.slate_id).and_then(move |wallet_tx| {
                         if wallet_tx.confirmed {
                             let mut msg = UpdateTx::from(tx);
@@ -67,6 +70,17 @@ fn process_orders(cron: &mut Cron, ctx: &mut Context<Cron>) {
                                 .and_then(|res| {
                                     res?;
                                     Ok(())
+                                })
+                                .and_then(move |_| {
+                                    db2.send(UpdateOrderStatus {
+                                        id: order_id,
+                                        status: order_status,
+                                    })
+                                    .map_err(|e| Error::General(s!("Cannot send message")))
+                                    .and_then(|db_response| {
+                                        db_response?;
+                                        Ok(())
+                                    })
                                 })
                                 .map(|_| ());
                             Either::A(res)

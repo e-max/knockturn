@@ -52,6 +52,12 @@ pub struct CreateOrder {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct UpdateOrderStatus {
+    pub id: Uuid,
+    pub status: OrderStatus,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct RegisterRate {
     pub rates: HashMap<String, f64>,
 }
@@ -136,6 +142,10 @@ impl Message for GetOrders {
 
 impl Message for CreateOrder {
     type Result = Result<Order, Error>;
+}
+
+impl Message for UpdateOrderStatus {
+    type Result = Result<(), Error>;
 }
 
 impl Message for RegisterRate {
@@ -291,6 +301,21 @@ impl Handler<CreateOrder> for DbExecutor {
             .values(&new_order)
             .get_result(conn)
             .map_err(|e| e.into())
+    }
+}
+
+impl Handler<UpdateOrderStatus> for DbExecutor {
+    type Result = Result<(), Error>;
+
+    fn handle(&mut self, msg: UpdateOrderStatus, _: &mut Self::Context) -> Self::Result {
+        use crate::schema::orders::dsl::*;
+        let conn: &PgConnection = &self.0.get().unwrap();
+
+        diesel::update(orders.filter(id.eq(msg.id)))
+            .set((status.eq(msg.status),))
+            .get_result(conn)
+            .map_err(|e| e.into())
+            .map(|order: Order| ())
     }
 }
 

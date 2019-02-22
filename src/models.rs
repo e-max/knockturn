@@ -27,7 +27,7 @@ pub struct Merchant {
 }
 
 #[derive(
-    EnumString, Display, Debug, PartialEq, AsExpression, Serialize, Deserialize, FromSqlRow,
+    Clone, EnumString, Display, Debug, PartialEq, AsExpression, Serialize, Deserialize, FromSqlRow,
 )]
 #[sql_type = "SmallInt"]
 pub enum OrderStatus {
