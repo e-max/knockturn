@@ -122,7 +122,7 @@ impl From<Tx> for UpdateTx {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct GetUnpaidOrders;
+pub struct GetReceivedOrders;
 
 impl Message for CreateMerchant {
     type Result = Result<Merchant, Error>;
@@ -170,7 +170,7 @@ impl Message for GetTx {
     type Result = Result<Option<Tx>, Error>;
 }
 
-impl Message for GetUnpaidOrders {
+impl Message for GetReceivedOrders {
     type Result = Result<Vec<(Order, Vec<Tx>)>, Error>;
 }
 
@@ -235,15 +235,15 @@ impl Handler<GetOrders> for DbExecutor {
     }
 }
 
-impl Handler<GetUnpaidOrders> for DbExecutor {
+impl Handler<GetReceivedOrders> for DbExecutor {
     type Result = Result<Vec<(Order, Vec<Tx>)>, Error>;
 
-    fn handle(&mut self, msg: GetUnpaidOrders, _: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: GetReceivedOrders, _: &mut Self::Context) -> Self::Result {
         use crate::schema::orders::dsl::*;
         let conn: &PgConnection = &self.0.get().unwrap();
 
         let unpaid_orders = orders
-            .filter(status.eq(OrderStatus::Unpaid))
+            .filter(status.eq(OrderStatus::Received))
             .load::<Order>(conn)
             .map_err(|e| Error::Db(s!(e)))?;
 
