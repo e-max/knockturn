@@ -1,5 +1,6 @@
 use crate::db::{DbExecutor, GetUnpaidOrders, UpdateOrderStatus, UpdateTx};
 use crate::errors::Error;
+use crate::models::OrderStatus;
 use crate::rates::RatesFetcher;
 use crate::wallet::Wallet;
 use actix::prelude::*;
@@ -74,7 +75,7 @@ fn process_orders(cron: &mut Cron, ctx: &mut Context<Cron>) {
                                 .and_then(move |_| {
                                     db2.send(UpdateOrderStatus {
                                         id: order_id,
-                                        status: order_status,
+                                        status: OrderStatus::Confirmed,
                                     })
                                     .from_err()
                                     .and_then(|db_response| {
