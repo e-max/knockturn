@@ -1,5 +1,7 @@
 use crate::app::AppState;
-use crate::db::{CreateMerchant, CreateOrder, CreateTx, GetMerchant, GetOrder, GetOrders};
+use crate::db::{
+    CreateMerchant, CreateOrder, CreateTx, GetMerchant, GetOrder, GetOrders, UpdateOrderStatus,
+};
 use crate::errors::*;
 use crate::models::{Currency, Money, Order, OrderStatus};
 use crate::wallet::Slate;
@@ -252,7 +254,23 @@ pub fn pay_order(
                         tx_type: format!("{:?}", tx.tx_type),
                         order_id: order_id,
                     };
-                    db.send(msg).from_err()
+                    db.send(msg)
+                        .from_err()
+                        .and_then(|db_response| {
+                            db_response?;
+                            Ok(())
+                        })
+                        .and_then({
+                            let db = db.clone();
+                            let order_id = order_id.clone();
+                            move |_| {
+                                db.send(UpdateOrderStatus {
+                                    id: order_id,
+                                    status: OrderStatus::Received,
+                                })
+                                .from_err()
+                            }
+                        })
                 })
                 .and_then(|_| ok(slate))
         })
