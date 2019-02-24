@@ -266,7 +266,7 @@ pub fn pay_order(
                             move |_| {
                                 db.send(UpdateOrderStatus {
                                     id: order_id,
-                                    status: OrderStatus::Received,
+                                    status: OrderStatus::Pending,
                                 })
                                 .from_err()
                             }

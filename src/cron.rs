@@ -1,4 +1,4 @@
-use crate::db::{DbExecutor, GetReceivedOrders, UpdateOrderStatus, UpdateTx};
+use crate::db::{DbExecutor, GetPendingOrders, UpdateOrderStatus, UpdateTx};
 use crate::errors::Error;
 use crate::models::OrderStatus;
 use crate::rates::RatesFetcher;
@@ -42,7 +42,7 @@ fn process_orders(cron: &mut Cron, ctx: &mut Context<Cron>) {
     let db_clone = cron.db.clone();
     let res = cron
         .db
-        .send(GetReceivedOrders)
+        .send(GetPendingOrders)
         .map_err(|e| Error::General(s!("error")))
         .and_then(move |db_response| {
             //let z: Result<(), _> = db_response;

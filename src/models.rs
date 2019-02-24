@@ -26,13 +26,21 @@ pub struct Merchant {
     pub created_at: NaiveDateTime,
 }
 
+/*
+ * The status changes flow is as follows:
+ * Unpaid - order was created but no attempts were maid to pay
+ * Hold - user sent a slate and we succesfully sent it to wallet
+ * Finalized - transaction was accepted to chain (Not used yet)
+ * Confirmed - we got required number of confirmation for this transaction
+ */
+
 #[derive(
     Clone, EnumString, Display, Debug, PartialEq, AsExpression, Serialize, Deserialize, FromSqlRow,
 )]
 #[sql_type = "SmallInt"]
 pub enum OrderStatus {
     Unpaid,
-    Received,
+    Pending,
     Rejected,
     Finalized,
     Confirmed,
@@ -48,7 +56,7 @@ where
     {
         let v = match *self {
             OrderStatus::Unpaid => 1,
-            OrderStatus::Received => 2,
+            OrderStatus::Pending => 2,
             OrderStatus::Rejected => 3,
             OrderStatus::Finalized => 4,
             OrderStatus::Confirmed => 5,
@@ -65,7 +73,7 @@ where
         let v = i16::from_sql(bytes)?;
         Ok(match v {
             1 => OrderStatus::Unpaid,
-            2 => OrderStatus::Received,
+            2 => OrderStatus::Pending,
             3 => OrderStatus::Rejected,
             4 => OrderStatus::Finalized,
             5 => OrderStatus::Confirmed,
