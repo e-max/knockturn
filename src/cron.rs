@@ -22,7 +22,7 @@ impl Actor for Cron {
                 rates.fetch();
             },
         );
-        ctx.run_interval(std::time::Duration::new(5, 0), process_orders);
+        ctx.run_interval(std::time::Duration::new(5, 0), process_pending_orders);
     }
 
     fn stopping(&mut self, _ctx: &mut Self::Context) -> Running {
@@ -36,7 +36,7 @@ impl Cron {
     }
 }
 
-fn process_orders(cron: &mut Cron, ctx: &mut Context<Cron>) {
+fn process_pending_orders(cron: &mut Cron, ctx: &mut Context<Cron>) {
     println!("hello");
     let wallet = cron.wallet.clone();
     let db_clone = cron.db.clone();
