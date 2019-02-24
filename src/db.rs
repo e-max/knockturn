@@ -124,6 +124,12 @@ impl From<Tx> for UpdateTx {
 #[derive(Debug, Deserialize)]
 pub struct GetPendingOrders;
 
+#[derive(Debug, Deserialize)]
+pub struct ConfirmTx {
+    pub slate_id: String,
+    pub confirmed_at: Option<NaiveDateTime>,
+}
+
 impl Message for CreateMerchant {
     type Result = Result<Merchant, Error>;
 }
@@ -159,6 +165,10 @@ impl Message for CreateTx {
     type Result = Result<Tx, Error>;
 }
 impl Message for UpdateTx {
+    type Result = Result<(), Error>;
+}
+
+impl Message for ConfirmTx {
     type Result = Result<(), Error>;
 }
 
@@ -391,6 +401,21 @@ impl Handler<UpdateTx> for DbExecutor {
                 num_outputs.eq(msg.num_outputs),
                 updated_at.eq(Local::now().naive_local()),
             ))
+            .get_result(conn)
+            .map_err(|e| e.into())
+            .map(|tx: Tx| ())
+    }
+}
+
+impl Handler<ConfirmTx> for DbExecutor {
+    type Result = Result<(), Error>;
+
+    fn handle(&mut self, msg: ConfirmTx, _: &mut Self::Context) -> Self::Result {
+        use crate::schema::txs::dsl::*;
+        let conn: &PgConnection = &self.0.get().unwrap();
+
+        diesel::update(txs.filter(slate_id.eq(msg.slate_id)))
+            .set((confirmed.eq(true), confirmed_at.eq(msg.confirmed_at)))
             .get_result(conn)
             .map_err(|e| e.into())
             .map(|tx: Tx| ())

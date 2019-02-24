@@ -5,6 +5,7 @@ mod app;
 mod cron;
 mod db;
 mod errors;
+mod fsm;
 mod handlers;
 mod models;
 mod rates;
@@ -20,6 +21,7 @@ use actix::prelude::*;
 use actix_web::server;
 //use actix_web::{http, server, App, HttpRequest, Path};
 use crate::db::DbExecutor;
+use crate::fsm::Fsm;
 use crate::wallet::Wallet;
 use diesel::{r2d2::ConnectionManager, PgConnection};
 use dotenv::dotenv;
@@ -49,9 +51,18 @@ fn main() {
 
     info!("Starting");
     let cron_db = address.clone();
+
+    let fsm: Addr<Fsm> = Arbiter::start({
+        let wallet = wallet.clone();
+        let db = address.clone();
+        move |_| Fsm {
+            db: db,
+            wallet: wallet,
+        }
+    });
     let _cron = Arbiter::start({
         let wallet = wallet.clone();
-        move |_| cron::Cron::new(cron_db, wallet.clone())
+        move |_| cron::Cron::new(cron_db, wallet.clone(), fsm)
     });
 
     server::new(move || app::create_app(address.clone(), wallet.clone()))

@@ -82,7 +82,7 @@ where
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Queryable, Insertable, Identifiable)]
+#[derive(Debug, Serialize, Deserialize, Queryable, Insertable, Identifiable, Clone)]
 #[table_name = "orders"]
 pub struct Order {
     pub id: Uuid,
