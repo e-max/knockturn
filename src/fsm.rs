@@ -6,6 +6,7 @@ use crate::models::{Order, Tx};
 use crate::wallet::TxLogEntry;
 use crate::wallet::Wallet;
 use actix::{Actor, Addr, Context, Handler, Message, ResponseActFuture, ResponseFuture};
+use derive_deref::Deref;
 use futures::future::{join_all, ok, Either, Future};
 use serde::Deserialize;
 use std::ops::Deref;
@@ -29,16 +30,8 @@ impl Message for GetUnpaidOrder {
     type Result = Result<UnpaidOrder, Error>;
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Deref)]
 pub struct UnpaidOrder(Order);
-
-impl Deref for UnpaidOrder {
-    type Target = Order;
-
-    fn deref(&self) -> &Order {
-        &self.0
-    }
-}
 
 impl Handler<GetUnpaidOrder> for Fsm {
     type Result = ResponseFuture<UnpaidOrder, Error>;
@@ -133,16 +126,8 @@ impl Message for GetPendingOrders {
     type Result = Result<Vec<(PendingOrder, Vec<Tx>)>, Error>;
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Deref)]
 pub struct PendingOrder(Order);
-
-impl Deref for PendingOrder {
-    type Target = Order;
-
-    fn deref(&self) -> &Order {
-        &self.0
-    }
-}
 
 impl Handler<GetPendingOrders> for Fsm {
     //type Result = Result<Vec<(PendingOrder, Vec<Tx>)>, Error>;
