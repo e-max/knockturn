@@ -2,9 +2,11 @@
 mod macros;
 
 mod app;
+mod clients;
 mod cron;
 mod db;
 mod errors;
+mod fsm;
 mod handlers;
 mod models;
 mod rates;
@@ -20,6 +22,7 @@ use actix::prelude::*;
 use actix_web::server;
 //use actix_web::{http, server, App, HttpRequest, Path};
 use crate::db::DbExecutor;
+use crate::fsm::Fsm;
 use crate::wallet::Wallet;
 use diesel::{r2d2::ConnectionManager, PgConnection};
 use dotenv::dotenv;
@@ -28,9 +31,10 @@ use log::info;
 use std::env;
 
 fn main() {
-    std::env::set_var("RUST_LOG", "actix_web=info");
-    env_logger::init();
     dotenv().ok();
+
+    env_logger::init();
+
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     let sys = actix::System::new("Knockout");
 
@@ -49,12 +53,22 @@ fn main() {
 
     info!("Starting");
     let cron_db = address.clone();
+
+    let fsm: Addr<Fsm> = Arbiter::start({
+        let wallet = wallet.clone();
+        let db = address.clone();
+        move |_| Fsm {
+            db: db,
+            wallet: wallet,
+        }
+    });
     let _cron = Arbiter::start({
         let wallet = wallet.clone();
-        move |_| cron::Cron::new(cron_db, wallet.clone())
+        let fsm = fsm.clone();
+        move |_| cron::Cron::new(cron_db, wallet, fsm)
     });
 
-    server::new(move || app::create_app(address.clone(), wallet.clone()))
+    server::new(move || app::create_app(address.clone(), wallet.clone(), fsm.clone()))
         .bind("0.0.0.0:3000")
         .expect("Can not bind to '0.0.0.0:3000'")
         .start();

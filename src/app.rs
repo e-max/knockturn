@@ -1,4 +1,5 @@
 use crate::db::DbExecutor;
+use crate::fsm::Fsm;
 use crate::handlers::*;
 use crate::wallet::Wallet;
 use actix::prelude::*;
@@ -8,10 +9,11 @@ use actix_web::{http::Method, middleware, App};
 pub struct AppState {
     pub db: Addr<DbExecutor>,
     pub wallet: Wallet,
+    pub fsm: Addr<Fsm>,
 }
 
-pub fn create_app(db: Addr<DbExecutor>, wallet: Wallet) -> App<AppState> {
-    App::with_state(AppState { db, wallet })
+pub fn create_app(db: Addr<DbExecutor>, wallet: Wallet, fsm: Addr<Fsm>) -> App<AppState> {
+    App::with_state(AppState { db, wallet, fsm })
         .middleware(middleware::Logger::new("\"%r\" %s %b %Dms"))
         .middleware(IdentityService::new(
             CookieIdentityPolicy::new(&[0; 32])

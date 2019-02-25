@@ -1,3 +1,4 @@
+use crate::clients::PlainHttpAuth;
 use crate::errors::Error;
 use actix::fut::ActorFuture;
 use actix::{Actor, Addr, Context};
@@ -20,7 +21,8 @@ use uuid::Uuid;
 #[derive(Clone)]
 pub struct Wallet {
     conn: Addr<ClientConnector>,
-    auth_header: String,
+    username: String,
+    password: String,
     url: String,
 }
 
@@ -29,14 +31,13 @@ const RECEIVE_URL: &'static str = "v1/wallet/foreign/receive_tx";
 
 impl Wallet {
     pub fn new(url: &str, username: &str, password: &str) -> Self {
-        let auth = format!("{}:{}", username, password);
-        let header_value = format!("Basic {}", encode(&auth));
         let connector = ClientConnector::default()
             .conn_lifetime(Duration::from_secs(300))
             .conn_keep_alive(Duration::from_secs(300));
         Wallet {
             url: url.trim_end_matches('/').to_owned(),
-            auth_header: header_value,
+            username: username.to_owned(),
+            password: password.to_owned(),
             conn: connector.start(),
         }
     }
@@ -45,7 +46,7 @@ impl Wallet {
         let tx_id = tx_id.to_owned();
         let url = format!("{}/{}?tx_id={}", self.url, RETRIEVE_TXS_URL, tx_id);
         client::get(&url) // <- Create request builder
-            .header(header::AUTHORIZATION, self.auth_header.clone())
+            .auth(&self.username, &self.password)
             .finish()
             .unwrap()
             .send() // <- Send http request
@@ -86,7 +87,7 @@ impl Wallet {
     pub fn receive(&self, slate: &Slate) -> impl Future<Item = Slate, Error = Error> {
         let url = format!("{}/{}", self.url, RECEIVE_URL);
         client::post(&url) // <- Create request builder
-            .header(header::AUTHORIZATION, self.auth_header.clone())
+            .auth(&self.username, &self.password)
             .json(slate)
             .unwrap()
             .send() // <- Send http request

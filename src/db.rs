@@ -124,6 +124,15 @@ impl From<Tx> for UpdateTx {
 #[derive(Debug, Deserialize)]
 pub struct GetPendingOrders;
 
+#[derive(Debug, Deserialize)]
+pub struct GetConfirmedOrders;
+
+#[derive(Debug, Deserialize)]
+pub struct ConfirmTx {
+    pub slate_id: String,
+    pub confirmed_at: Option<NaiveDateTime>,
+}
+
 impl Message for CreateMerchant {
     type Result = Result<Merchant, Error>;
 }
@@ -162,6 +171,10 @@ impl Message for UpdateTx {
     type Result = Result<(), Error>;
 }
 
+impl Message for ConfirmTx {
+    type Result = Result<(), Error>;
+}
+
 impl Message for GetTxs {
     type Result = Result<Vec<Tx>, Error>;
 }
@@ -172,6 +185,10 @@ impl Message for GetTx {
 
 impl Message for GetPendingOrders {
     type Result = Result<Vec<(Order, Vec<Tx>)>, Error>;
+}
+
+impl Message for GetConfirmedOrders {
+    type Result = Result<Vec<(Order, Merchant)>, Error>;
 }
 
 impl Handler<CreateMerchant> for DbExecutor {
@@ -252,6 +269,25 @@ impl Handler<GetPendingOrders> for DbExecutor {
             .grouped_by(&unpaid_orders);
         let data = unpaid_orders.into_iter().zip(txs).collect::<Vec<_>>();
         Ok(data)
+    }
+}
+
+impl Handler<GetConfirmedOrders> for DbExecutor {
+    type Result = Result<Vec<(Order, Merchant)>, Error>;
+
+    fn handle(&mut self, msg: GetConfirmedOrders, _: &mut Self::Context) -> Self::Result {
+        use crate::schema::merchants::dsl::*;
+        use crate::schema::orders::dsl::*;
+        let conn: &PgConnection = &self.0.get().unwrap();
+
+        let confirmed_orders = orders
+            .inner_join(merchants)
+            .filter(status.eq(OrderStatus::Confirmed))
+            .load::<(Order, Merchant)>(conn)
+            .map_err(|e| Error::Db(s!(e)))?;
+
+        //let data = unpaid_orders.into_iter().zip(txs).collect::<Vec<_>>();
+        Ok(confirmed_orders)
     }
 }
 
@@ -391,6 +427,21 @@ impl Handler<UpdateTx> for DbExecutor {
                 num_outputs.eq(msg.num_outputs),
                 updated_at.eq(Local::now().naive_local()),
             ))
+            .get_result(conn)
+            .map_err(|e| e.into())
+            .map(|tx: Tx| ())
+    }
+}
+
+impl Handler<ConfirmTx> for DbExecutor {
+    type Result = Result<(), Error>;
+
+    fn handle(&mut self, msg: ConfirmTx, _: &mut Self::Context) -> Self::Result {
+        use crate::schema::txs::dsl::*;
+        let conn: &PgConnection = &self.0.get().unwrap();
+
+        diesel::update(txs.filter(slate_id.eq(msg.slate_id)))
+            .set((confirmed.eq(true), confirmed_at.eq(msg.confirmed_at)))
             .get_result(conn)
             .map_err(|e| e.into())
             .map(|tx: Tx| ())
