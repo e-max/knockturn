@@ -2,6 +2,7 @@
 mod macros;
 
 mod app;
+mod clients;
 mod cron;
 mod db;
 mod errors;
@@ -30,9 +31,10 @@ use log::info;
 use std::env;
 
 fn main() {
-    std::env::set_var("RUST_LOG", "actix_web=info");
-    env_logger::init();
     dotenv().ok();
+
+    env_logger::init();
+
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     let sys = actix::System::new("Knockout");
 
