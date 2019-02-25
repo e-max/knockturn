@@ -204,7 +204,6 @@ pub fn pay_order(
     (order, slate, state): (Path<GetUnpaidOrder>, Json<Slate>, State<AppState>),
 ) -> FutureResponse<HttpResponse, Error> {
     let slate_amount = slate.amount;
-    let order_id = order.id.clone();
 
     state
         .fsm
