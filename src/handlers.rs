@@ -3,7 +3,7 @@ use crate::db::{
     CreateMerchant, CreateOrder, CreateTx, GetMerchant, GetOrder, GetOrders, UpdateOrderStatus,
 };
 use crate::errors::*;
-use crate::fsm::GetUnpaidOrder;
+use crate::fsm::{GetUnpaidOrder, PayOrder};
 use crate::models::{Currency, Money, Order, OrderStatus};
 use crate::wallet::Slate;
 use actix_web::middleware::identity::RequestIdentity;
@@ -222,53 +222,22 @@ pub fn pay_order(
         })
         .and_then({
             let wallet = state.wallet.clone();
-            let db = state.db.clone();
+            let fsm = state.fsm.clone();
             move |unpaid_order| {
                 let slate = wallet.receive(&slate);
                 slate.and_then(move |slate| {
                     wallet
                         .get_tx(&slate.id.hyphenated().to_string())
-                        .and_then(move |tx| {
-                            let messages: Vec<String> = if let Some(pm) = tx.messages {
-                                pm.messages
-                                    .into_iter()
-                                    .map(|pmd| pmd.message)
-                                    .filter_map(|x| x)
-                                    .collect()
-                            } else {
-                                vec![]
-                            };
-
-                            let msg = CreateTx {
-                                slate_id: tx.tx_slate_id.unwrap(),
-                                created_at: tx.creation_ts.naive_utc(),
-                                confirmed: tx.confirmed,
-                                confirmed_at: tx.confirmation_ts.map(|dt| dt.naive_utc()),
-                                fee: tx.fee.map(|f| f as i64),
-                                messages: messages,
-                                num_inputs: tx.num_inputs as i64,
-                                num_outputs: tx.num_outputs as i64,
-                                //FIXME
-                                tx_type: format!("{:?}", tx.tx_type),
-                                order_id: order_id,
-                            };
-                            db.send(msg)
-                                .from_err()
-                                .and_then(|db_response| {
-                                    db_response?;
-                                    Ok(())
-                                })
-                                .and_then({
-                                    let db = db.clone();
-                                    let order_id = order_id.clone();
-                                    move |_| {
-                                        db.send(UpdateOrderStatus {
-                                            id: order_id,
-                                            status: OrderStatus::Pending,
-                                        })
-                                        .from_err()
-                                    }
-                                })
+                        .and_then(move |wallet_tx| {
+                            fsm.send(PayOrder {
+                                unpaid_order,
+                                wallet_tx,
+                            })
+                            .from_err()
+                            .and_then(|db_response| {
+                                db_response?;
+                                Ok(())
+                            })
                         })
                         .and_then(|_| ok(slate))
                 })
