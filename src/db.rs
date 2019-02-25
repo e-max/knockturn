@@ -125,6 +125,9 @@ impl From<Tx> for UpdateTx {
 pub struct GetPendingOrders;
 
 #[derive(Debug, Deserialize)]
+pub struct GetConfirmedOrders;
+
+#[derive(Debug, Deserialize)]
 pub struct ConfirmTx {
     pub slate_id: String,
     pub confirmed_at: Option<NaiveDateTime>,
@@ -182,6 +185,10 @@ impl Message for GetTx {
 
 impl Message for GetPendingOrders {
     type Result = Result<Vec<(Order, Vec<Tx>)>, Error>;
+}
+
+impl Message for GetConfirmedOrders {
+    type Result = Result<Vec<(Order, Merchant)>, Error>;
 }
 
 impl Handler<CreateMerchant> for DbExecutor {
@@ -262,6 +269,25 @@ impl Handler<GetPendingOrders> for DbExecutor {
             .grouped_by(&unpaid_orders);
         let data = unpaid_orders.into_iter().zip(txs).collect::<Vec<_>>();
         Ok(data)
+    }
+}
+
+impl Handler<GetConfirmedOrders> for DbExecutor {
+    type Result = Result<Vec<(Order, Merchant)>, Error>;
+
+    fn handle(&mut self, msg: GetConfirmedOrders, _: &mut Self::Context) -> Self::Result {
+        use crate::schema::merchants::dsl::*;
+        use crate::schema::orders::dsl::*;
+        let conn: &PgConnection = &self.0.get().unwrap();
+
+        let confirmed_orders = orders
+            .inner_join(merchants)
+            .filter(status.eq(OrderStatus::Confirmed))
+            .load::<(Order, Merchant)>(conn)
+            .map_err(|e| Error::Db(s!(e)))?;
+
+        //let data = unpaid_orders.into_iter().zip(txs).collect::<Vec<_>>();
+        Ok(confirmed_orders)
     }
 }
 

@@ -1,8 +1,7 @@
 use crate::db;
 use crate::db::{ConfirmTx, CreateTx, DbExecutor, GetOrder, UpdateOrderStatus};
 use crate::errors::Error;
-use crate::models::OrderStatus;
-use crate::models::{Order, Tx};
+use crate::models::{Merchant, Order, OrderStatus, Tx};
 use crate::wallet::TxLogEntry;
 use crate::wallet::Wallet;
 use actix::{Actor, Addr, Context, Handler, Message, ResponseActFuture, ResponseFuture};
@@ -189,6 +188,36 @@ impl Handler<ConfirmOrder> for Fsm {
                             Ok(())
                         })
                     }
+                }),
+        )
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetConfirmedOrders;
+
+impl Message for GetConfirmedOrders {
+    type Result = Result<Vec<(ConfirmedOrder, Merchant)>, Error>;
+}
+
+#[derive(Debug, Deserialize, Clone, Deref)]
+pub struct ConfirmedOrder(Order);
+
+impl Handler<GetConfirmedOrders> for Fsm {
+    //type Result = Result<Vec<(PendingOrder, Vec<Tx>)>, Error>;
+    type Result = ResponseFuture<Vec<(ConfirmedOrder, Merchant)>, Error>;
+
+    fn handle(&mut self, msg: GetConfirmedOrders, _: &mut Self::Context) -> Self::Result {
+        Box::new(
+            self.db
+                .send(db::GetConfirmedOrders)
+                .from_err()
+                .and_then(|db_response| {
+                    let data = db_response?;
+                    Ok(data
+                        .into_iter()
+                        .map(|(order, merchant)| (ConfirmedOrder(order), merchant))
+                        .collect())
                 }),
         )
     }

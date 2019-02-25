@@ -1,6 +1,6 @@
 use crate::db::DbExecutor;
 use crate::errors::Error;
-use crate::fsm::{ConfirmOrder, Fsm, GetPendingOrders};
+use crate::fsm::{ConfirmOrder, Fsm, GetConfirmedOrders, GetPendingOrders};
 use crate::models::OrderStatus;
 use crate::rates::RatesFetcher;
 use crate::wallet::Wallet;
@@ -25,6 +25,7 @@ impl Actor for Cron {
             },
         );
         ctx.run_interval(std::time::Duration::new(5, 0), process_pending_orders);
+        ctx.run_interval(std::time::Duration::new(5, 0), process_confirmed_orders);
     }
 
     fn stopping(&mut self, _ctx: &mut Self::Context) -> Running {
@@ -85,5 +86,24 @@ fn process_pending_orders(cron: &mut Cron, ctx: &mut Context<Cron>) {
             //Ok(())
         });
     //ctx.spawn(res.into_actor());
+    actix::spawn(res.map_err(|e| ()));
+}
+fn process_confirmed_orders(cron: &mut Cron, ctx: &mut Context<Cron>) {
+    let res = cron
+        .fsm
+        .send(GetConfirmedOrders)
+        .map_err(|e| Error::General(s!("error")))
+        .and_then(move |db_response| {
+            //let z: Result<(), _> = db_response;
+            let orders = db_response?;
+            Ok(orders)
+        })
+        .and_then(|confirmed_orders| {
+            for (confirmed_order, merchant) in confirmed_orders {
+                println!("\x1B[31;1m confirmed_order\x1B[0m = {:?}", confirmed_order);
+            }
+            ok(())
+        });
+
     actix::spawn(res.map_err(|e| ()));
 }
