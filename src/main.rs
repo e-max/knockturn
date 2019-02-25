@@ -62,10 +62,11 @@ fn main() {
     });
     let _cron = Arbiter::start({
         let wallet = wallet.clone();
-        move |_| cron::Cron::new(cron_db, wallet.clone(), fsm)
+        let fsm = fsm.clone();
+        move |_| cron::Cron::new(cron_db, wallet, fsm)
     });
 
-    server::new(move || app::create_app(address.clone(), wallet.clone()))
+    server::new(move || app::create_app(address.clone(), wallet.clone(), fsm.clone()))
         .bind("0.0.0.0:3000")
         .expect("Can not bind to '0.0.0.0:3000'")
         .start();
