@@ -34,6 +34,7 @@ pub struct Merchant {
  * Hold - user sent a slate and we succesfully sent it to wallet
  * Finalized - transaction was accepted to chain (Not used yet)
  * Confirmed - we got required number of confirmation for this transaction
+ * Reported - we've reported result to merchant
  */
 
 #[derive(
@@ -46,6 +47,7 @@ pub enum OrderStatus {
     Rejected,
     Finalized,
     Confirmed,
+    Reported,
 }
 
 impl<DB: Backend> ToSql<SmallInt, DB> for OrderStatus
@@ -62,6 +64,7 @@ where
             OrderStatus::Rejected => 3,
             OrderStatus::Finalized => 4,
             OrderStatus::Confirmed => 5,
+            OrderStatus::Reported => 6,
         };
         v.to_sql(out)
     }
@@ -79,6 +82,7 @@ where
             3 => OrderStatus::Rejected,
             4 => OrderStatus::Finalized,
             5 => OrderStatus::Confirmed,
+            6 => OrderStatus::Reported,
             _ => return Err("replace me with a real error".into()),
         })
     }

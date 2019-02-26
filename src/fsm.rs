@@ -1,12 +1,17 @@
+use crate::clients::BearerTokenAuth;
 use crate::db;
-use crate::db::{ConfirmTx, CreateTx, DbExecutor, GetOrder, UpdateOrderStatus};
+use crate::db::{
+    ConfirmTx, CreateTx, DbExecutor, GetMerchant, GetOrder, ReportAttempt, UpdateOrderStatus,
+};
 use crate::errors::Error;
 use crate::models::{Merchant, Order, OrderStatus, Tx};
 use crate::wallet::TxLogEntry;
 use crate::wallet::Wallet;
 use actix::{Actor, Addr, Context, Handler, Message, ResponseActFuture, ResponseFuture};
+use actix_web::client;
 use derive_deref::Deref;
 use futures::future::{join_all, ok, Either, Future};
+use log::error;
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 use uuid::Uuid;
@@ -220,5 +225,98 @@ impl Handler<GetConfirmedOrders> for Fsm {
                         .collect())
                 }),
         )
+    }
+}
+
+#[derive(Debug, Deserialize, Deref)]
+pub struct ReportOrder {
+    pub confirmed_order: ConfirmedOrder,
+}
+
+impl Message for ReportOrder {
+    type Result = Result<(), Error>;
+}
+
+impl Handler<ReportOrder> for Fsm {
+    type Result = ResponseFuture<(), Error>;
+
+    fn handle(&mut self, msg: ReportOrder, _: &mut Self::Context) -> Self::Result {
+        let tx_msg = GetMerchant {
+            id: msg.confirmed_order.merchant_id.clone(),
+        };
+        let res = self
+            .db
+            .send(tx_msg)
+            .from_err()
+            .and_then(|res| {
+                let merchant = res?;
+                Ok(merchant)
+            })
+            .and_then({
+                let db = self.db.clone();
+                let order_id = msg.confirmed_order.id.clone();
+                move |merchant| {
+                    if let Some(callback_url) = merchant.callback_url.clone() {
+                        let res = db
+                            .send(ReportAttempt {
+                                order_id: order_id.clone(),
+                            })
+                            .from_err()
+                            .and_then(|db_response| {
+                                db_response?;
+                                Ok(())
+                            })
+                            .and_then(move |_| {
+                                client::post(callback_url) // <- Create request builder
+                                    .bearer_token(&merchant.token)
+                                    .json(msg.confirmed_order)
+                                    .unwrap()
+                                    .send() // <- Send http request
+                                    .map_err({
+                                        let email = merchant.email.clone();
+                                        move |e| Error::MerchantCallbackError {
+                                            merchant_email: email,
+                                            error: s!(e),
+                                        }
+                                    })
+                                    .and_then(|resp| {
+                                        // <- server http response
+                                        println!("Response: {:?}", resp);
+                                        Ok(())
+                                    })
+                            })
+                            .and_then({
+                                let db = db.clone();
+                                let order_id = order_id.clone();
+                                move |_| {
+                                    db.send(UpdateOrderStatus {
+                                        id: order_id,
+                                        status: OrderStatus::Reported,
+                                    })
+                                    .from_err()
+                                    .and_then(|db_response| {
+                                        db_response?;
+                                        Ok(())
+                                    })
+                                }
+                            });
+                        Either::A(res)
+                    } else {
+                        let res = db
+                            .send(UpdateOrderStatus {
+                                id: msg.confirmed_order.id,
+                                status: OrderStatus::Reported,
+                            })
+                            .from_err()
+                            .and_then(|db_response| {
+                                db_response?;
+                                Ok(())
+                            });
+                        Either::B(res)
+                    }
+                }
+            });
+
+        Box::new(res)
     }
 }

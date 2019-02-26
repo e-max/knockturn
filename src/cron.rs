@@ -1,7 +1,7 @@
 use crate::clients::BearerTokenAuth;
 use crate::db::DbExecutor;
 use crate::errors::Error;
-use crate::fsm::{ConfirmOrder, Fsm, GetConfirmedOrders, GetPendingOrders};
+use crate::fsm::{ConfirmOrder, Fsm, GetConfirmedOrders, GetPendingOrders, ReportOrder};
 use crate::models::OrderStatus;
 use crate::rates::RatesFetcher;
 use crate::wallet::Wallet;
@@ -105,41 +105,22 @@ fn process_confirmed_orders(cron: &mut Cron, ctx: &mut Context<Cron>) {
             let orders = db_response?;
             Ok(orders)
         })
-        .and_then(|confirmed_orders| {
-            let mut futures = vec![];
-            debug!("Found {} confirmed orders", confirmed_orders.len());
-            for (confirmed_order, merchant) in confirmed_orders {
-                //println!("\x1B[31;1m confirmed_order\x1B[0m = {:?}", confirmed_order);
-                if let Some(callback_url) = merchant.callback_url {
-                    futures.push(
-                        client::post(callback_url) // <- Create request builder
-                            .bearer_token(&merchant.token)
-                            .json(confirmed_order)
-                            .unwrap()
-                            .send() // <- Send http request
-                            .map_err({
-                                let email = merchant.email.clone();
-                                move |e| Error::MerchantCallbackError {
-                                    merchant_email: email,
-                                    error: s!(e),
-                                }
-                            })
-                            .and_then(|resp| {
-                                // <- server http response
-                                println!("Response: {:?}", resp);
-                                Ok(())
-                            })
-                            .or_else(|e| -> Result<(), Error> {
-                                error!("{}", e);
-                                Ok(())
-                            }),
-                    );
+        .and_then({
+            let fsm = cron.fsm.clone();
+            move |confirmed_orders| {
+                let mut futures = vec![];
+                debug!("Found {} confirmed orders", confirmed_orders.len());
+                for (confirmed_order, merchant) in confirmed_orders {
+                    //println!("\x1B[31;1m confirmed_order\x1B[0m = {:?}", confirmed_order);
+                    if let Some(callback_url) = merchant.callback_url {
+                        futures.push(fsm.send(ReportOrder { confirmed_order }).from_err());
+                    }
                 }
+                join_all(futures).map(|_| ()).map_err(|e| {
+                    error!("got an error {}", e);
+                    e
+                })
             }
-            join_all(futures).map(|_| ()).map_err(|e| {
-                error!("got an error {}", e);
-                e
-            })
         });
 
     actix::spawn(res.map_err(|e| {

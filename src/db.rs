@@ -3,7 +3,7 @@ use crate::models::{Currency, Merchant, Money, Order, OrderStatus, Rate, Tx};
 use actix::{Actor, SyncContext};
 use actix::{Handler, Message};
 use chrono::NaiveDateTime;
-use chrono::{Duration, Local};
+use chrono::{Duration, Local, Utc};
 use diesel::pg::PgConnection;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::{self, prelude::*};
@@ -136,6 +136,11 @@ pub struct ConfirmTx {
     pub confirmed_at: Option<NaiveDateTime>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct ReportAttempt {
+    pub order_id: Uuid,
+}
+
 impl Message for CreateMerchant {
     type Result = Result<Merchant, Error>;
 }
@@ -192,6 +197,10 @@ impl Message for GetPendingOrders {
 
 impl Message for GetConfirmedOrders {
     type Result = Result<Vec<(Order, Merchant)>, Error>;
+}
+
+impl Message for ReportAttempt {
+    type Result = Result<(), Error>;
 }
 
 impl Handler<CreateMerchant> for DbExecutor {
@@ -494,5 +503,22 @@ impl Handler<GetTx> for DbExecutor {
                     sid
                 ))),
             })
+    }
+}
+
+impl Handler<ReportAttempt> for DbExecutor {
+    type Result = Result<(), Error>;
+
+    fn handle(&mut self, msg: ReportAttempt, _: &mut Self::Context) -> Self::Result {
+        use crate::schema::orders::dsl::*;
+        let conn: &PgConnection = &self.0.get().unwrap();
+        diesel::update(orders.filter(id.eq(msg.order_id)))
+            .set((
+                report_attempts.eq(report_attempts + 1),
+                last_report_attempt.eq(Utc::now().naive_utc()),
+            ))
+            .get_result(conn)
+            .map_err(|e| e.into())
+            .map(|order: Order| ())
     }
 }
