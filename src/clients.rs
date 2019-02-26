@@ -13,3 +13,14 @@ impl PlainHttpAuth for ClientRequestBuilder {
         self.header(header::AUTHORIZATION, auth_header)
     }
 }
+
+pub trait BearerTokenAuth {
+    fn bearer_token(&mut self, token: &str) -> &mut Self;
+}
+
+impl BearerTokenAuth for ClientRequestBuilder {
+    fn bearer_token(&mut self, token: &str) -> &mut Self {
+        let auth_header = format!("Bearer {}", token);
+        self.header(header::AUTHORIZATION, auth_header)
+    }
+}

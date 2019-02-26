@@ -1,3 +1,4 @@
+use crate::clients::BearerTokenAuth;
 use crate::db::DbExecutor;
 use crate::errors::Error;
 use crate::fsm::{ConfirmOrder, Fsm, GetConfirmedOrders, GetPendingOrders};
@@ -5,7 +6,9 @@ use crate::models::OrderStatus;
 use crate::rates::RatesFetcher;
 use crate::wallet::Wallet;
 use actix::prelude::*;
+use actix_web::client;
 use futures::future::{join_all, ok, Either, Future};
+use log::*;
 
 pub struct Cron {
     db: Addr<DbExecutor>,
@@ -17,6 +20,7 @@ impl Actor for Cron {
     type Context = Context<Self>;
 
     fn started(&mut self, ctx: &mut Self::Context) {
+        info!("Starting cron process");
         let rates = RatesFetcher::new(self.db.clone());
         ctx.run_interval(
             std::time::Duration::new(5, 0),
@@ -41,6 +45,7 @@ impl Cron {
 
 fn process_pending_orders(cron: &mut Cron, ctx: &mut Context<Cron>) {
     println!("hello");
+    debug!("run process_pending_orders");
     let wallet = cron.wallet.clone();
     let db_clone = cron.db.clone();
     let fsm = cron.fsm.clone();
@@ -55,6 +60,7 @@ fn process_pending_orders(cron: &mut Cron, ctx: &mut Context<Cron>) {
         })
         .and_then(move |orders| {
             let mut futures = vec![];
+            debug!("Found {} pending orders", orders.len());
             for (order, txs) in orders {
                 println!("\x1B[31;1m order\x1B[0m = {:?}", order);
                 println!("\x1B[31;1m txs\x1B[0m = {:?}", txs);
@@ -66,6 +72,7 @@ fn process_pending_orders(cron: &mut Cron, ctx: &mut Context<Cron>) {
                         move |wallet_tx| {
                             println!("\x1B[31;1m wallet_tx\x1B[0m = {:?}", wallet_tx);
                             if wallet_tx.confirmed {
+                                info!("Order {} confirmed", order.id);
                                 let res = fsm
                                     .send(ConfirmOrder { order, wallet_tx })
                                     .from_err()
@@ -99,11 +106,44 @@ fn process_confirmed_orders(cron: &mut Cron, ctx: &mut Context<Cron>) {
             Ok(orders)
         })
         .and_then(|confirmed_orders| {
+            let mut futures = vec![];
+            debug!("Found {} confirmed orders", confirmed_orders.len());
             for (confirmed_order, merchant) in confirmed_orders {
-                println!("\x1B[31;1m confirmed_order\x1B[0m = {:?}", confirmed_order);
+                //println!("\x1B[31;1m confirmed_order\x1B[0m = {:?}", confirmed_order);
+                if let Some(callback_url) = merchant.callback_url {
+                    futures.push(
+                        client::post(callback_url) // <- Create request builder
+                            .bearer_token(&merchant.token)
+                            .json(confirmed_order)
+                            .unwrap()
+                            .send() // <- Send http request
+                            .map_err({
+                                let email = merchant.email.clone();
+                                move |e| Error::MerchantCallbackError {
+                                    merchant_email: email,
+                                    error: s!(e),
+                                }
+                            })
+                            .and_then(|resp| {
+                                // <- server http response
+                                println!("Response: {:?}", resp);
+                                Ok(())
+                            })
+                            .or_else(|e| -> Result<(), Error> {
+                                error!("{}", e);
+                                Ok(())
+                            }),
+                    );
+                }
             }
-            ok(())
+            join_all(futures).map(|_| ()).map_err(|e| {
+                error!("got an error {}", e);
+                e
+            })
         });
 
-    actix::spawn(res.map_err(|e| ()));
+    actix::spawn(res.map_err(|e| {
+        error!("got an error {}", e);
+        ()
+    }));
 }

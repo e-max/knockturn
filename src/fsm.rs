@@ -7,7 +7,7 @@ use crate::wallet::Wallet;
 use actix::{Actor, Addr, Context, Handler, Message, ResponseActFuture, ResponseFuture};
 use derive_deref::Deref;
 use futures::future::{join_all, ok, Either, Future};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 use uuid::Uuid;
 
@@ -200,7 +200,7 @@ impl Message for GetConfirmedOrders {
     type Result = Result<Vec<(ConfirmedOrder, Merchant)>, Error>;
 }
 
-#[derive(Debug, Deserialize, Clone, Deref)]
+#[derive(Debug, Deserialize, Clone, Deref, Serialize)]
 pub struct ConfirmedOrder(Order);
 
 impl Handler<GetConfirmedOrders> for Fsm {
