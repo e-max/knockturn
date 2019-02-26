@@ -7,6 +7,8 @@ use chrono::{Duration, Local};
 use diesel::pg::PgConnection;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::{self, prelude::*};
+use rand::seq::SliceRandom;
+use rand::thread_rng;
 use serde::Deserialize;
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -23,6 +25,7 @@ pub struct CreateMerchant {
     pub email: String,
     pub password: String,
     pub wallet_url: Option<String>,
+    pub callback_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -197,6 +200,14 @@ impl Handler<CreateMerchant> for DbExecutor {
     fn handle(&mut self, msg: CreateMerchant, _: &mut Self::Context) -> Self::Result {
         use crate::schema::merchants::dsl::*;
         let conn: &PgConnection = &self.0.get().unwrap();
+        const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ\
+    abcdefghijklmnopqrstuvwxyz\
+    0123456789-._~+/";
+
+        let mut rng = thread_rng();
+        let new_token: Option<String> = (0..64)
+            .map(|_| Some(*CHARSET.choose(&mut rng)? as char))
+            .collect();
 
         let new_merchant = Merchant {
             id: msg.id,
@@ -205,6 +216,8 @@ impl Handler<CreateMerchant> for DbExecutor {
             wallet_url: msg.wallet_url,
             balance: 0,
             created_at: Local::now().naive_local() + Duration::hours(24),
+            callback_url: msg.callback_url,
+            token: new_token.ok_or(Error::General(s!("cannot generate rangom token")))?,
         };
 
         diesel::insert_into(merchants)

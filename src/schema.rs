@@ -6,6 +6,8 @@ table! {
         wallet_url -> Nullable<Text>,
         balance -> Int8,
         created_at -> Timestamp,
+        token -> Text,
+        callback_url -> Nullable<Text>,
     }
 }
 

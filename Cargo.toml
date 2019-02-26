@@ -25,6 +25,7 @@ uuid = { version = "0.6", features = ["serde", "v4"] }
 strum = "0.13.0"
 strum_macros = "0.13.0"
 derive_deref = "1.0.2"
+rand = "0.6.5"
 
 [build-dependencies]
 askama = "0.6"
