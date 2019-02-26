@@ -97,6 +97,10 @@ pub struct Order {
     pub email: Option<String>,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
+    #[serde(skip_serializing)]
+    pub report_attempts: i32,
+    #[serde(skip_serializing)]
+    pub last_report_attempt: Option<NaiveDateTime>,
 }
 
 impl Order {

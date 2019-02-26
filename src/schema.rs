@@ -23,6 +23,8 @@ table! {
         email -> Nullable<Text>,
         created_at -> Timestamp,
         updated_at -> Timestamp,
+        report_attempts -> Int4,
+        last_report_attempt -> Nullable<Timestamp>,
     }
 }
 

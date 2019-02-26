@@ -344,6 +344,8 @@ impl Handler<CreateOrder> for DbExecutor {
             confirmations: msg.confirmations,
             created_at: Local::now().naive_local(),
             updated_at: Local::now().naive_local(),
+            report_attempts: 0,
+            last_report_attempt: None,
         };
 
         diesel::insert_into(orders)
