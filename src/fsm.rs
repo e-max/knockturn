@@ -44,7 +44,7 @@ impl Handler<GetUnpaidOrder> for Fsm {
         let id = msg.id.clone();
         let res = self
             .db
-            .send(GetOrder { id: msg.id })
+            .send(GetOrder { order_id: msg.id })
             .from_err()
             .and_then(move |db_response| {
                 let order = db_response?;

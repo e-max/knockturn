@@ -35,7 +35,7 @@ pub struct GetMerchant {
 
 #[derive(Debug, Deserialize)]
 pub struct GetOrder {
-    pub id: Uuid,
+    pub order_id: Uuid,
 }
 
 #[derive(Debug, Deserialize)]
@@ -255,7 +255,10 @@ impl Handler<GetOrder> for DbExecutor {
     fn handle(&mut self, msg: GetOrder, _: &mut Self::Context) -> Self::Result {
         use crate::schema::orders::dsl::*;
         let conn: &PgConnection = &self.0.get().unwrap();
-        orders.find(msg.id).get_result(conn).map_err(|e| e.into())
+        orders
+            .find(msg.order_id)
+            .get_result(conn)
+            .map_err(|e| e.into())
     }
 }
 
