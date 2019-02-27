@@ -66,26 +66,35 @@ fn process_pending_orders(cron: &mut Cron, ctx: &mut Context<Cron>) {
                 println!("\x1B[31;1m txs\x1B[0m = {:?}", txs);
                 for tx in txs {
                     println!("\x1B[31;1m tx\x1B[0m = {:?}", tx);
-                    let res = wallet.get_tx(&tx.slate_id).and_then({
-                        let fsm = fsm.clone();
-                        let order = order.clone();
-                        move |wallet_tx| {
-                            println!("\x1B[31;1m wallet_tx\x1B[0m = {:?}", wallet_tx);
-                            if wallet_tx.confirmed {
-                                info!("Order {} confirmed", order.id);
-                                let res = fsm
-                                    .send(ConfirmOrder { order, wallet_tx })
-                                    .from_err()
-                                    .and_then(|msg_response| {
-                                        msg_response?;
-                                        Ok(())
-                                    });
-                                Either::A(res)
-                            } else {
-                                Either::B(ok(()))
+                    let res = wallet
+                        .get_tx(&tx.slate_id)
+                        .and_then({
+                            let fsm = fsm.clone();
+                            let order = order.clone();
+                            move |wallet_tx| {
+                                println!("\x1B[31;1m wallet_tx\x1B[0m = {:?}", wallet_tx);
+                                if wallet_tx.confirmed {
+                                    info!("Order {} confirmed", order.id);
+                                    let res = fsm
+                                        .send(ConfirmOrder { order, wallet_tx })
+                                        .from_err()
+                                        .and_then(|msg_response| {
+                                            msg_response?;
+                                            Ok(())
+                                        });
+                                    Either::A(res)
+                                } else {
+                                    Either::B(ok(()))
+                                }
                             }
-                        }
-                    });
+                        })
+                        .or_else({
+                            let order_id = order.id.clone();
+                            move |e| {
+                                warn!("Couldn't confirm order {}: {}", order_id, e);
+                                Ok(())
+                            }
+                        });
                     futures.push(res);
                 }
             }
@@ -120,7 +129,7 @@ fn process_confirmed_orders(cron: &mut Cron, ctx: &mut Context<Cron>) {
                             })
                             .or_else({
                                 move |e| {
-                                    warn!("Couldn't confirm order {}: {}", order_id, e);
+                                    warn!("Couldn't report order {}: {}", order_id, e);
                                     Ok(())
                                 }
                             }),
