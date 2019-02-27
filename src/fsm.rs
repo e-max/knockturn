@@ -265,7 +265,7 @@ impl Handler<ReportOrder> for Fsm {
                                 Ok(())
                             })
                             .and_then(move |_| {
-                                run_callback(&callback_url, &msg.confirmed_order, &merchant)
+                                run_callback(&callback_url, &msg.confirmed_order.0, &merchant)
                             })
                             .and_then({
                                 let db = db.clone();
@@ -309,7 +309,7 @@ impl Handler<ReportOrder> for Fsm {
 
 fn run_callback(
     callback_url: &str,
-    confirmed_order: &ConfirmedOrder,
+    confirmed_order: &Order,
     merchant: &Merchant,
 ) -> impl Future<Item = (), Error = Error> {
     debug!("Run callback for merchant {}", merchant.email);
@@ -330,4 +330,41 @@ fn run_callback(
             println!("Response: {:?}", resp);
             Ok(())
         })
+}
+
+#[derive(Debug, Deserialize, Deref)]
+pub struct RejectOrder<T> {
+    pub order: T,
+}
+
+impl<T> Message for RejectOrder<T> {
+    type Result = Result<(), Error>;
+}
+
+impl Handler<RejectOrder<ConfirmedOrder>> for Fsm {
+    type Result = ResponseFuture<(), Error>;
+
+    fn handle(&mut self, msg: RejectOrder<ConfirmedOrder>, _: &mut Self::Context) -> Self::Result {
+        Box::new(reject_order(&self.db, &msg.order.id))
+    }
+}
+
+impl Handler<RejectOrder<PendingOrder>> for Fsm {
+    type Result = ResponseFuture<(), Error>;
+
+    fn handle(&mut self, msg: RejectOrder<PendingOrder>, _: &mut Self::Context) -> Self::Result {
+        Box::new(reject_order(&self.db, &msg.order.id))
+    }
+}
+
+fn reject_order(db: &Addr<DbExecutor>, id: &Uuid) -> impl Future<Item = (), Error = Error> {
+    db.send(UpdateOrderStatus {
+        id: id.clone(),
+        status: OrderStatus::Rejected,
+    })
+    .from_err()
+    .and_then(|db_response| {
+        db_response?;
+        Ok(())
+    })
 }

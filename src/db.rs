@@ -373,7 +373,7 @@ impl Handler<UpdateOrderStatus> for DbExecutor {
         let conn: &PgConnection = &self.0.get().unwrap();
 
         diesel::update(orders.filter(id.eq(msg.id)))
-            .set((status.eq(msg.status),))
+            .set((status.eq(msg.status), updated_at.eq(Utc::now().naive_utc())))
             .get_result(conn)
             .map_err(|e| e.into())
             .map(|order: Order| ())

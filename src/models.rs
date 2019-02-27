@@ -31,10 +31,12 @@ pub struct Merchant {
 /*
  * The status changes flow is as follows:
  * Unpaid - order was created but no attempts were maid to pay
- * Hold - user sent a slate and we succesfully sent it to wallet
+ * Pending - user sent a slate and we succesfully sent it to wallet
  * Finalized - transaction was accepted to chain (Not used yet)
  * Confirmed - we got required number of confirmation for this transaction
  * Reported - we've reported result to merchant
+ * Rejected - order spent too much time in Unpaid or Pending state
+ * Dead - We mark Rejected order as Dead as soon as we report it to merchant
  */
 
 #[derive(
@@ -48,6 +50,7 @@ pub enum OrderStatus {
     Finalized,
     Confirmed,
     Reported,
+    Dead,
 }
 
 impl<DB: Backend> ToSql<SmallInt, DB> for OrderStatus
@@ -65,6 +68,7 @@ where
             OrderStatus::Finalized => 4,
             OrderStatus::Confirmed => 5,
             OrderStatus::Reported => 6,
+            OrderStatus::Dead => 7,
         };
         v.to_sql(out)
     }
@@ -83,6 +87,7 @@ where
             4 => OrderStatus::Finalized,
             5 => OrderStatus::Confirmed,
             6 => OrderStatus::Reported,
+            7 => OrderStatus::Dead,
             _ => return Err("replace me with a real error".into()),
         })
     }

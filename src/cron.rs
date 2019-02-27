@@ -1,7 +1,9 @@
 use crate::clients::BearerTokenAuth;
 use crate::db::DbExecutor;
 use crate::errors::Error;
-use crate::fsm::{ConfirmOrder, Fsm, GetConfirmedOrders, GetPendingOrders, ReportOrder};
+use crate::fsm::{
+    ConfirmOrder, Fsm, GetConfirmedOrders, GetPendingOrders, RejectOrder, ReportOrder,
+};
 use crate::models::OrderStatus;
 use crate::rates::RatesFetcher;
 use crate::wallet::Wallet;
@@ -62,6 +64,27 @@ fn process_pending_orders(cron: &mut Cron, ctx: &mut Context<Cron>) {
             let mut futures = vec![];
             debug!("Found {} pending orders", orders.len());
             for (order, txs) in orders {
+                if order.is_expired() {
+                    debug!("Order {} expired: try to reject it", order.id);
+                    futures.push(Either::A(
+                        fsm.send(RejectOrder {
+                            order: order.clone(),
+                        })
+                        .map_err(|e| Error::General(s!(e)))
+                        .and_then(|db_response| {
+                            db_response?;
+                            Ok(())
+                        })
+                        .or_else({
+                            let order_id = order.id.clone();
+                            move |e| {
+                                error!("Cannot reject order {}: {}", order.id, e);
+                                Ok(())
+                            }
+                        }),
+                    ));
+                    continue;
+                }
                 println!("\x1B[31;1m order\x1B[0m = {:?}", order);
                 println!("\x1B[31;1m txs\x1B[0m = {:?}", txs);
                 for tx in txs {
@@ -95,7 +118,7 @@ fn process_pending_orders(cron: &mut Cron, ctx: &mut Context<Cron>) {
                                 Ok(())
                             }
                         });
-                    futures.push(res);
+                    futures.push(Either::B(res));
                 }
             }
             join_all(futures).map(|_| ())
