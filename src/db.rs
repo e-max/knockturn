@@ -196,7 +196,7 @@ impl Message for GetPendingOrders {
 }
 
 impl Message for GetConfirmedOrders {
-    type Result = Result<Vec<(Order, Merchant)>, Error>;
+    type Result = Result<Vec<Order>, Error>;
 }
 
 impl Message for ReportAttempt {
@@ -295,7 +295,7 @@ impl Handler<GetPendingOrders> for DbExecutor {
 }
 
 impl Handler<GetConfirmedOrders> for DbExecutor {
-    type Result = Result<Vec<(Order, Merchant)>, Error>;
+    type Result = Result<Vec<Order>, Error>;
 
     fn handle(&mut self, msg: GetConfirmedOrders, _: &mut Self::Context) -> Self::Result {
         use crate::schema::merchants::dsl::*;
@@ -303,12 +303,10 @@ impl Handler<GetConfirmedOrders> for DbExecutor {
         let conn: &PgConnection = &self.0.get().unwrap();
 
         let confirmed_orders = orders
-            .inner_join(merchants)
             .filter(status.eq(OrderStatus::Confirmed))
-            .load::<(Order, Merchant)>(conn)
+            .load::<Order>(conn)
             .map_err(|e| Error::Db(s!(e)))?;
 
-        //let data = unpaid_orders.into_iter().zip(txs).collect::<Vec<_>>();
         Ok(confirmed_orders)
     }
 }

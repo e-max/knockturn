@@ -11,7 +11,7 @@ use actix::{Actor, Addr, Context, Handler, Message, ResponseActFuture, ResponseF
 use actix_web::client;
 use derive_deref::Deref;
 use futures::future::{join_all, ok, Either, Future};
-use log::error;
+use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 use uuid::Uuid;
@@ -202,7 +202,7 @@ impl Handler<ConfirmOrder> for Fsm {
 pub struct GetConfirmedOrders;
 
 impl Message for GetConfirmedOrders {
-    type Result = Result<Vec<(ConfirmedOrder, Merchant)>, Error>;
+    type Result = Result<Vec<ConfirmedOrder>, Error>;
 }
 
 #[derive(Debug, Deserialize, Clone, Deref, Serialize)]
@@ -210,7 +210,7 @@ pub struct ConfirmedOrder(Order);
 
 impl Handler<GetConfirmedOrders> for Fsm {
     //type Result = Result<Vec<(PendingOrder, Vec<Tx>)>, Error>;
-    type Result = ResponseFuture<Vec<(ConfirmedOrder, Merchant)>, Error>;
+    type Result = ResponseFuture<Vec<ConfirmedOrder>, Error>;
 
     fn handle(&mut self, msg: GetConfirmedOrders, _: &mut Self::Context) -> Self::Result {
         Box::new(
@@ -219,10 +219,7 @@ impl Handler<GetConfirmedOrders> for Fsm {
                 .from_err()
                 .and_then(|db_response| {
                     let data = db_response?;
-                    Ok(data
-                        .into_iter()
-                        .map(|(order, merchant)| (ConfirmedOrder(order), merchant))
-                        .collect())
+                    Ok(data.into_iter().map(ConfirmedOrder).collect())
                 }),
         )
     }
@@ -241,6 +238,7 @@ impl Handler<ReportOrder> for Fsm {
     type Result = ResponseFuture<(), Error>;
 
     fn handle(&mut self, msg: ReportOrder, _: &mut Self::Context) -> Self::Result {
+        debug!("Try to confirm order {}", msg.confirmed_order.id);
         let tx_msg = GetMerchant {
             id: msg.confirmed_order.merchant_id.clone(),
         };
@@ -267,23 +265,7 @@ impl Handler<ReportOrder> for Fsm {
                                 Ok(())
                             })
                             .and_then(move |_| {
-                                client::post(callback_url) // <- Create request builder
-                                    .bearer_token(&merchant.token)
-                                    .json(msg.confirmed_order)
-                                    .unwrap()
-                                    .send() // <- Send http request
-                                    .map_err({
-                                        let email = merchant.email.clone();
-                                        move |e| Error::MerchantCallbackError {
-                                            merchant_email: email,
-                                            error: s!(e),
-                                        }
-                                    })
-                                    .and_then(|resp| {
-                                        // <- server http response
-                                        println!("Response: {:?}", resp);
-                                        Ok(())
-                                    })
+                                run_callback(&callback_url, &msg.confirmed_order, &merchant)
                             })
                             .and_then({
                                 let db = db.clone();
@@ -302,6 +284,10 @@ impl Handler<ReportOrder> for Fsm {
                             });
                         Either::A(res)
                     } else {
+                        debug!(
+                            "confirm order {} because callback_url is empty",
+                            msg.confirmed_order.id
+                        );
                         let res = db
                             .send(UpdateOrderStatus {
                                 id: msg.confirmed_order.id,
@@ -319,4 +305,29 @@ impl Handler<ReportOrder> for Fsm {
 
         Box::new(res)
     }
+}
+
+fn run_callback(
+    callback_url: &str,
+    confirmed_order: &ConfirmedOrder,
+    merchant: &Merchant,
+) -> impl Future<Item = (), Error = Error> {
+    debug!("Run callback for merchant {}", merchant.email);
+    client::post(callback_url) // <- Create request builder
+        .bearer_token(&merchant.token)
+        .json(confirmed_order)
+        .unwrap()
+        .send() // <- Send http request
+        .map_err({
+            let email = merchant.email.clone();
+            move |e| Error::MerchantCallbackError {
+                merchant_email: email,
+                error: s!(e),
+            }
+        })
+        .and_then(|resp| {
+            // <- server http response
+            println!("Response: {:?}", resp);
+            Ok(())
+        })
 }

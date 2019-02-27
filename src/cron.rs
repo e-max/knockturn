@@ -101,7 +101,6 @@ fn process_confirmed_orders(cron: &mut Cron, ctx: &mut Context<Cron>) {
         .send(GetConfirmedOrders)
         .map_err(|e| Error::General(s!("error")))
         .and_then(move |db_response| {
-            //let z: Result<(), _> = db_response;
             let orders = db_response?;
             Ok(orders)
         })
@@ -110,11 +109,22 @@ fn process_confirmed_orders(cron: &mut Cron, ctx: &mut Context<Cron>) {
             move |confirmed_orders| {
                 let mut futures = vec![];
                 debug!("Found {} confirmed orders", confirmed_orders.len());
-                for (confirmed_order, merchant) in confirmed_orders {
-                    //println!("\x1B[31;1m confirmed_order\x1B[0m = {:?}", confirmed_order);
-                    if let Some(callback_url) = merchant.callback_url {
-                        futures.push(fsm.send(ReportOrder { confirmed_order }).from_err());
-                    }
+                for confirmed_order in confirmed_orders {
+                    let order_id = confirmed_order.id.clone();
+                    futures.push(
+                        fsm.send(ReportOrder { confirmed_order })
+                            .map_err(|e| Error::General(s!(e)))
+                            .and_then(|db_response| {
+                                db_response?;
+                                Ok(())
+                            })
+                            .or_else({
+                                move |e| {
+                                    warn!("Couldn't confirm order {}: {}", order_id, e);
+                                    Ok(())
+                                }
+                            }),
+                    );
                 }
                 join_all(futures).map(|_| ()).map_err(|e| {
                     error!("got an error {}", e);
