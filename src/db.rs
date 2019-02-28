@@ -162,7 +162,7 @@ impl Message for CreateOrder {
 }
 
 impl Message for UpdateOrderStatus {
-    type Result = Result<(), Error>;
+    type Result = Result<Order, Error>;
 }
 
 impl Message for RegisterRate {
@@ -366,7 +366,7 @@ impl Handler<CreateOrder> for DbExecutor {
 }
 
 impl Handler<UpdateOrderStatus> for DbExecutor {
-    type Result = Result<(), Error>;
+    type Result = Result<Order, Error>;
 
     fn handle(&mut self, msg: UpdateOrderStatus, _: &mut Self::Context) -> Self::Result {
         use crate::schema::orders::dsl::*;
@@ -376,7 +376,6 @@ impl Handler<UpdateOrderStatus> for DbExecutor {
             .set((status.eq(msg.status), updated_at.eq(Utc::now().naive_utc())))
             .get_result(conn)
             .map_err(|e| e.into())
-            .map(|order: Order| ())
     }
 }
 

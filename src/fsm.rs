@@ -364,7 +364,7 @@ fn reject_order(db: &Addr<DbExecutor>, id: &Uuid) -> impl Future<Item = (), Erro
     })
     .from_err()
     .and_then(|db_response| {
-        db_response?;
+        let order = db_response?;
         Ok(())
     })
 }
