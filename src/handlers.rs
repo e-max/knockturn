@@ -13,8 +13,12 @@ use actix_web::{
 };
 use askama::Template;
 use bcrypt;
+use data_encoding::BASE32;
 use futures::future::{err, ok, result, Future};
 use log::debug;
+use qrcode::render::svg;
+use qrcode::QrCode;
+use rand::Rng;
 use serde::Deserialize;
 use std::iter::Iterator;
 
@@ -198,6 +202,37 @@ pub fn get_tx(state: State<AppState>) -> Box<Future<Item = HttpResponse, Error =
         .get_tx("c3b4be4a-b72c-46f5-8fb0-e318ca19ba2b")
         .and_then(|body| Ok(HttpResponse::Ok().json(body)))
         .responder()
+}
+
+#[derive(Template)]
+#[template(path = "totp.html")]
+struct TotpTemplate<'a> {
+    code: &'a str,
+}
+
+pub fn get_totp(req: HttpRequest<AppState>) -> Result<HttpResponse, Error> {
+    /*
+    let merchant_id = match req.identity() {
+        Some(v) => v,
+        None => return Ok(HttpResponse::Found().header("location", "/login").finish()),
+    };
+    */
+    //let random_bytes = rand::thread_rng().gen::<[u8; 10]>();
+    //let code = BASE32.encode(&random_bytes);
+    let code = s!("676GFXYGWOORUTGD");
+    //let code = s!("123456");
+    let html = TotpTemplate { code: &code }
+        .render()
+        .map_err(|e| Error::from(e))?;
+    Ok(HttpResponse::Ok().content_type("text/html").body(html))
+}
+
+pub fn get_qrcode(state: State<AppState>) -> Result<HttpResponse, Error> {
+    let code = QrCode::new(b"Hello").unwrap();
+    let svg_xml = code.render::<svg::Color>().build();
+    Ok(HttpResponse::Ok()
+        .content_type("image/svg+xml;")
+        .body(svg_xml))
 }
 
 pub fn pay_order(
