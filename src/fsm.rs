@@ -341,9 +341,7 @@ fn report_order(db: Addr<DbExecutor>, order: Order) -> impl Future<Item = (), Er
                         // try call ReportAttempt but ignore errors and return
                         // error from callback
                         let next_attempt = Utc::now().naive_utc()
-                            + Duration::seconds(
-                                10 * order.report_attempts as i64 * order.report_attempts as i64,
-                            );
+                            + Duration::seconds(10 * (order.report_attempts + 1).pow(2) as i64);
                         db.send(ReportAttempt {
                             order_id: order.id,
                             next_attempt: Some(next_attempt),
@@ -374,7 +372,14 @@ fn report_order(db: Addr<DbExecutor>, order: Order) -> impl Future<Item = (), Er
                 });
             Either::A(res)
         } else {
-            Either::B(ok(()))
+            Either::B(
+                db.send(MarkAsReported { order_id: order.id })
+                    .from_err()
+                    .and_then(|db_response| {
+                        db_response?;
+                        Ok(())
+                    }),
+            )
         }
     })
 }

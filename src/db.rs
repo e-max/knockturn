@@ -4,9 +4,12 @@ use actix::{Actor, SyncContext};
 use actix::{Handler, Message};
 use chrono::NaiveDateTime;
 use chrono::{Duration, Local, Utc};
+use diesel::backend::Backend;
+use diesel::debug_query;
 use diesel::pg::PgConnection;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::{self, prelude::*};
+use log::info;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
 use serde::Deserialize;
@@ -550,6 +553,7 @@ impl Handler<MarkAsReported> for DbExecutor {
     type Result = Result<(), Error>;
 
     fn handle(&mut self, msg: MarkAsReported, _: &mut Self::Context) -> Self::Result {
+        info!("Mark order {} as reported", msg.order_id);
         use crate::schema::orders::dsl::*;
         let conn: &PgConnection = &self.0.get().unwrap();
         diesel::update(orders.filter(id.eq(msg.order_id)))
@@ -567,12 +571,17 @@ impl Handler<GetUnreportedOrders> for DbExecutor {
         use crate::schema::orders::dsl::*;
         let conn: &PgConnection = &self.0.get().unwrap();
 
-        let confirmed_orders = orders
+        let query = orders
+            .filter(reported.ne(true))
             .filter(status.eq_any(vec![OrderStatus::Confirmed, OrderStatus::Rejected]))
             .filter(report_attempts.lt(MAX_REPORT_ATTEMPTS))
-            .filter(next_report_attempt.ge(Utc::now().naive_utc()))
-            .load::<Order>(conn)
-            .map_err(|e| Error::Db(s!(e)))?;
+            .filter(
+                next_report_attempt
+                    .le(Utc::now().naive_utc())
+                    .or(next_report_attempt.is_null()),
+            );
+
+        let confirmed_orders = query.load::<Order>(conn).map_err(|e| Error::Db(s!(e)))?;
 
         Ok(confirmed_orders)
     }

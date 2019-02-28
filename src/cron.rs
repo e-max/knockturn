@@ -47,7 +47,6 @@ impl Cron {
 }
 
 fn process_pending_orders(cron: &mut Cron, ctx: &mut Context<Cron>) {
-    println!("hello");
     debug!("run process_pending_orders");
     let wallet = cron.wallet.clone();
     let db_clone = cron.db.clone();
