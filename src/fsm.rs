@@ -341,10 +341,10 @@ impl<T> Message for RejectOrder<T> {
     type Result = Result<(), Error>;
 }
 
-impl Handler<RejectOrder<ConfirmedOrder>> for Fsm {
+impl Handler<RejectOrder<UnpaidOrder>> for Fsm {
     type Result = ResponseFuture<(), Error>;
 
-    fn handle(&mut self, msg: RejectOrder<ConfirmedOrder>, _: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: RejectOrder<UnpaidOrder>, _: &mut Self::Context) -> Self::Result {
         Box::new(reject_order(&self.db, &msg.order.id))
     }
 }
