@@ -33,14 +33,8 @@ pub enum Error {
     #[fail(display = "Wrong order status {}", _0)]
     WrongOrderStatus(String),
 
-    #[fail(
-        display = "Cannot call merchant {} callback: {}",
-        merchant_email, error
-    )]
-    MerchantCallbackError {
-        merchant_email: String,
-        error: String,
-    },
+    #[fail(display = "Cannot call callback_url {} : {}", callback_url, error)]
+    MerchantCallbackError { callback_url: String, error: String },
 }
 
 impl From<MailboxError> for Error {

@@ -13,6 +13,8 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use uuid::Uuid;
 
+const MAX_REPORT_ATTEMPTS: i32 = 10; //Number or attemps we try to run merchant's callback
+
 pub struct DbExecutor(pub Pool<ConnectionManager<PgConnection>>);
 
 impl Actor for DbExecutor {
@@ -141,6 +143,14 @@ pub struct ReportAttempt {
     pub order_id: Uuid,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct MarkAsReported {
+    pub order_id: Uuid,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetUnreportedOrders;
+
 impl Message for CreateMerchant {
     type Result = Result<Merchant, Error>;
 }
@@ -201,6 +211,14 @@ impl Message for GetConfirmedOrders {
 
 impl Message for ReportAttempt {
     type Result = Result<(), Error>;
+}
+
+impl Message for MarkAsReported {
+    type Result = Result<(), Error>;
+}
+
+impl Message for GetUnreportedOrders {
+    type Result = Result<Vec<Order>, Error>;
 }
 
 impl Handler<CreateMerchant> for DbExecutor {
@@ -355,7 +373,8 @@ impl Handler<CreateOrder> for DbExecutor {
             created_at: Local::now().naive_local(),
             updated_at: Local::now().naive_local(),
             report_attempts: 0,
-            last_report_attempt: None,
+            next_report_attempt: None,
+            reported: false,
         };
 
         diesel::insert_into(orders)
@@ -515,10 +534,42 @@ impl Handler<ReportAttempt> for DbExecutor {
         diesel::update(orders.filter(id.eq(msg.order_id)))
             .set((
                 report_attempts.eq(report_attempts + 1),
-                last_report_attempt.eq(Utc::now().naive_utc()),
+                next_report_attempt.eq(Utc::now().naive_utc() + Duration::seconds(10)),
             ))
             .get_result(conn)
             .map_err(|e| e.into())
             .map(|order: Order| ())
+    }
+}
+
+impl Handler<MarkAsReported> for DbExecutor {
+    type Result = Result<(), Error>;
+
+    fn handle(&mut self, msg: MarkAsReported, _: &mut Self::Context) -> Self::Result {
+        use crate::schema::orders::dsl::*;
+        let conn: &PgConnection = &self.0.get().unwrap();
+        diesel::update(orders.filter(id.eq(msg.order_id)))
+            .set((reported.eq(true),))
+            .get_result(conn)
+            .map_err(|e| e.into())
+            .map(|order: Order| ())
+    }
+}
+
+impl Handler<GetUnreportedOrders> for DbExecutor {
+    type Result = Result<Vec<Order>, Error>;
+
+    fn handle(&mut self, msg: GetUnreportedOrders, _: &mut Self::Context) -> Self::Result {
+        use crate::schema::orders::dsl::*;
+        let conn: &PgConnection = &self.0.get().unwrap();
+
+        let confirmed_orders = orders
+            .filter(status.eq_any(vec![OrderStatus::Confirmed, OrderStatus::Rejected]))
+            .filter(report_attempts.lt(MAX_REPORT_ATTEMPTS))
+            .filter(next_report_attempt.ge(Utc::now().naive_utc()))
+            .load::<Order>(conn)
+            .map_err(|e| Error::Db(s!(e)))?;
+
+        Ok(confirmed_orders)
     }
 }

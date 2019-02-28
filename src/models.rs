@@ -49,8 +49,6 @@ pub enum OrderStatus {
     Rejected,
     Finalized,
     Confirmed,
-    Reported,
-    Dead,
 }
 
 impl<DB: Backend> ToSql<SmallInt, DB> for OrderStatus
@@ -67,8 +65,6 @@ where
             OrderStatus::Rejected => 3,
             OrderStatus::Finalized => 4,
             OrderStatus::Confirmed => 5,
-            OrderStatus::Reported => 6,
-            OrderStatus::Dead => 7,
         };
         v.to_sql(out)
     }
@@ -86,14 +82,14 @@ where
             3 => OrderStatus::Rejected,
             4 => OrderStatus::Finalized,
             5 => OrderStatus::Confirmed,
-            6 => OrderStatus::Reported,
-            7 => OrderStatus::Dead,
             _ => return Err("replace me with a real error".into()),
         })
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Queryable, Insertable, Identifiable, Clone)]
+#[derive(
+    Debug, Serialize, Deserialize, Queryable, Insertable, Identifiable, Clone, AsExpression,
+)]
 #[table_name = "orders"]
 pub struct Order {
     pub id: Uuid,
@@ -107,9 +103,11 @@ pub struct Order {
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
     #[serde(skip_serializing)]
+    pub reported: bool,
+    #[serde(skip_serializing)]
     pub report_attempts: i32,
     #[serde(skip_serializing)]
-    pub last_report_attempt: Option<NaiveDateTime>,
+    pub next_report_attempt: Option<NaiveDateTime>,
 }
 
 impl Order {

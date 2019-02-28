@@ -1,7 +1,8 @@
 use crate::clients::BearerTokenAuth;
 use crate::db;
 use crate::db::{
-    ConfirmTx, CreateTx, DbExecutor, GetMerchant, GetOrder, ReportAttempt, UpdateOrderStatus,
+    ConfirmTx, CreateTx, DbExecutor, GetMerchant, GetOrder, MarkAsReported, ReportAttempt,
+    UpdateOrderStatus,
 };
 use crate::errors::Error;
 use crate::models::{Merchant, Order, OrderStatus, Tx};
@@ -11,7 +12,7 @@ use actix::{Actor, Addr, Context, Handler, Message, ResponseActFuture, ResponseF
 use actix_web::client;
 use derive_deref::Deref;
 use futures::future::{join_all, ok, Either, Future};
-use log::{debug, info, warn};
+use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 use uuid::Uuid;
@@ -224,20 +225,20 @@ impl Handler<GetConfirmedOrders> for Fsm {
         )
     }
 }
-
+/*
 #[derive(Debug, Deserialize, Deref)]
-pub struct ReportOrder {
+pub struct ReportOrder1 {
     pub confirmed_order: ConfirmedOrder,
 }
 
-impl Message for ReportOrder {
+impl Message for ReportOrder1 {
     type Result = Result<(), Error>;
 }
 
-impl Handler<ReportOrder> for Fsm {
+impl Handler<ReportOrder1> for Fsm {
     type Result = ResponseFuture<(), Error>;
 
-    fn handle(&mut self, msg: ReportOrder, _: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: ReportOrder1, _: &mut Self::Context) -> Self::Result {
         debug!("Try to confirm order {}", msg.confirmed_order.id);
         let tx_msg = GetMerchant {
             id: msg.confirmed_order.merchant_id.clone(),
@@ -331,6 +332,31 @@ fn run_callback(
             Ok(())
         })
 }
+*/
+
+fn run_callback(
+    callback_url: &str,
+    token: &String,
+    order: Order,
+) -> impl Future<Item = (), Error = Error> {
+    client::post(callback_url) // <- Create request builder
+        .bearer_token(token)
+        .json(order)
+        .unwrap()
+        .send() // <- Send http request
+        .and_then(|resp| {
+            // <- server http response
+            println!("Response: {:?}", resp);
+            Ok(())
+        })
+        .map_err({
+            let callback_url = callback_url.to_owned();
+            move |e| Error::MerchantCallbackError {
+                callback_url: callback_url,
+                error: s!(e),
+            }
+        })
+}
 
 #[derive(Debug, Deserialize, Deref)]
 pub struct RejectOrder<T> {
@@ -367,4 +393,117 @@ fn reject_order(db: &Addr<DbExecutor>, id: &Uuid) -> impl Future<Item = (), Erro
         let order = db_response?;
         Ok(())
     })
+}
+
+#[derive(Debug, Deserialize, Deref)]
+pub struct ReportOrder<T> {
+    pub order: T,
+}
+
+impl<T> Message for ReportOrder<T> {
+    type Result = Result<(), Error>;
+}
+
+impl Handler<ReportOrder<ConfirmedOrder>> for Fsm {
+    type Result = ResponseFuture<(), Error>;
+
+    fn handle(&mut self, msg: ReportOrder<ConfirmedOrder>, _: &mut Self::Context) -> Self::Result {
+        Box::new(report_order(self.db.clone(), msg.order.0))
+    }
+}
+
+impl Handler<ReportOrder<RejectedOrder>> for Fsm {
+    type Result = ResponseFuture<(), Error>;
+
+    fn handle(&mut self, msg: ReportOrder<RejectedOrder>, _: &mut Self::Context) -> Self::Result {
+        Box::new(report_order(self.db.clone(), msg.order.0))
+    }
+}
+
+impl Handler<ReportOrder<UnreportedOrder>> for Fsm {
+    type Result = ResponseFuture<(), Error>;
+
+    fn handle(&mut self, msg: ReportOrder<UnreportedOrder>, _: &mut Self::Context) -> Self::Result {
+        Box::new(report_order(self.db.clone(), msg.order.0))
+    }
+}
+
+fn report_order(db: Addr<DbExecutor>, order: Order) -> impl Future<Item = (), Error = Error> {
+    debug!("Try to report order {}", order.id);
+    db.send(GetMerchant {
+        id: order.merchant_id.clone(),
+    })
+    .from_err()
+    .and_then(|res| {
+        let merchant = res?;
+        Ok(merchant)
+    })
+    .and_then(move |merchant| {
+        if let Some(callback_url) = merchant.callback_url.clone() {
+            debug!("Run callback for merchant {}", merchant.email);
+            let res = run_callback(&callback_url, &merchant.token, order.clone())
+                .or_else({
+                    let db = db.clone();
+                    let order_id = order.id.clone();
+                    move |callback_err| {
+                        // try call ReportAttempt but ignore errors and return
+                        // error from callback
+                        db.send(ReportAttempt { order_id })
+                            .map_err(|e| Error::General(s!(e)))
+                            .and_then(|db_response| {
+                                db_response?;
+                                Ok(())
+                            })
+                            .or_else(|e| {
+                                error!("Get error in ReportAttempt {}", e);
+                                Ok(())
+                            })
+                            .and_then(|_| Err(callback_err))
+                    }
+                })
+                .and_then({
+                    let db = db.clone();
+                    let order_id = order.id.clone();
+                    move |_| {
+                        db.send(MarkAsReported { order_id })
+                            .from_err()
+                            .and_then(|db_response| {
+                                db_response?;
+                                Ok(())
+                            })
+                    }
+                });
+            Either::A(res)
+        } else {
+            Either::B(ok(()))
+        }
+    })
+}
+
+pub struct RejectedOrder(Order);
+
+#[derive(Debug, Deserialize)]
+pub struct GetUnreportedOrders;
+
+impl Message for GetUnreportedOrders {
+    type Result = Result<Vec<UnreportedOrder>, Error>;
+}
+
+#[derive(Debug, Deserialize, Clone, Deref)]
+pub struct UnreportedOrder(Order);
+
+impl Handler<GetUnreportedOrders> for Fsm {
+    type Result = ResponseFuture<Vec<UnreportedOrder>, Error>;
+
+    fn handle(&mut self, msg: GetUnreportedOrders, _: &mut Self::Context) -> Self::Result {
+        Box::new(
+            self.db
+                .send(db::GetUnreportedOrders)
+                .from_err()
+                .and_then(|db_response| {
+                    let data = db_response?;
+                    Ok(data.into_iter().map(UnreportedOrder).collect())
+                }),
+        )
+    }
 }

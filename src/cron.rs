@@ -2,7 +2,8 @@ use crate::clients::BearerTokenAuth;
 use crate::db::DbExecutor;
 use crate::errors::Error;
 use crate::fsm::{
-    ConfirmOrder, Fsm, GetConfirmedOrders, GetPendingOrders, RejectOrder, ReportOrder,
+    ConfirmOrder, Fsm, GetConfirmedOrders, GetPendingOrders, GetUnreportedOrders, RejectOrder,
+    ReportOrder,
 };
 use crate::models::OrderStatus;
 use crate::rates::RatesFetcher;
@@ -31,7 +32,7 @@ impl Actor for Cron {
             },
         );
         ctx.run_interval(std::time::Duration::new(5, 0), process_pending_orders);
-        ctx.run_interval(std::time::Duration::new(5, 0), process_confirmed_orders);
+        ctx.run_interval(std::time::Duration::new(5, 0), process_unreported_orders);
     }
 
     fn stopping(&mut self, _ctx: &mut Self::Context) -> Running {
@@ -127,10 +128,10 @@ fn process_pending_orders(cron: &mut Cron, ctx: &mut Context<Cron>) {
     //ctx.spawn(res.into_actor());
     actix::spawn(res.map_err(|e| ()));
 }
-fn process_confirmed_orders(cron: &mut Cron, ctx: &mut Context<Cron>) {
+fn process_unreported_orders(cron: &mut Cron, ctx: &mut Context<Cron>) {
     let res = cron
         .fsm
-        .send(GetConfirmedOrders)
+        .send(GetUnreportedOrders)
         .map_err(|e| Error::General(s!("error")))
         .and_then(move |db_response| {
             let orders = db_response?;
@@ -138,13 +139,13 @@ fn process_confirmed_orders(cron: &mut Cron, ctx: &mut Context<Cron>) {
         })
         .and_then({
             let fsm = cron.fsm.clone();
-            move |confirmed_orders| {
+            move |orders| {
                 let mut futures = vec![];
-                debug!("Found {} confirmed orders", confirmed_orders.len());
-                for confirmed_order in confirmed_orders {
-                    let order_id = confirmed_order.id.clone();
+                debug!("Found {} unreported orders", orders.len());
+                for order in orders {
+                    let order_id = order.id.clone();
                     futures.push(
-                        fsm.send(ReportOrder { confirmed_order })
+                        fsm.send(ReportOrder { order })
                             .map_err(|e| Error::General(s!(e)))
                             .and_then(|db_response| {
                                 db_response?;
