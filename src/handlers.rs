@@ -8,12 +8,14 @@ use crate::models::{Currency, Money, Order, OrderStatus};
 use crate::wallet::Slate;
 use actix_web::middleware::identity::RequestIdentity;
 use actix_web::{
-    AsyncResponder, Form, FromRequest, FutureResponse, HttpRequest, HttpResponse, Json, Path,
-    Responder, State,
+    error, AsyncResponder, Form, FromRequest, FutureResponse, HttpMessage, HttpRequest,
+    HttpResponse, Json, Path, Responder, State,
 };
 use askama::Template;
 use bcrypt;
+use bytes::BytesMut;
 use futures::future::{err, ok, result, Future};
+use futures::stream::Stream;
 use log::debug;
 use serde::Deserialize;
 use std::iter::Iterator;
@@ -167,7 +169,7 @@ pub fn get_order(
         .and_then(|db_response| {
             let order = db_response?;
             let html = OrderTemplate {
-                order_id: order.external_id,
+                order_id: order.id.to_string(),
                 merchant_id: order.merchant_id,
                 amount: order.amount,
                 confirmations: order.confirmations,
@@ -200,48 +202,66 @@ pub fn get_tx(state: State<AppState>) -> Box<Future<Item = HttpResponse, Error =
         .responder()
 }
 
-pub fn pay_order(
-    (order, slate, state): (Path<GetUnpaidOrder>, Json<Slate>, State<AppState>),
-) -> FutureResponse<HttpResponse, Error> {
-    let slate_amount = slate.amount;
+const MAX_SIZE: usize = 262_144; // max payload size is 256k
 
-    state
-        .fsm
-        .send(order.into_inner())
-        .from_err()
-        .and_then(move |db_response| {
-            let unpaid_order = db_response?;
-            if unpaid_order.grin_amount != slate_amount as i64 {
-                return Err(Error::WrongAmount(
-                    unpaid_order.grin_amount as u64,
-                    slate_amount,
-                ));
+pub fn pay_order(
+    (order, req, state): (Path<GetUnpaidOrder>, HttpRequest<AppState>, State<AppState>),
+) -> FutureResponse<HttpResponse, Error> {
+    req.payload()
+        .map_err(|e| Error::Internal(format!("Payload error: {:?}", e)))
+        //.from_err()
+        .fold(BytesMut::new(), move |mut body, chunk| {
+            if (body.len() + chunk.len()) > MAX_SIZE {
+                Err(Error::Internal("overflow".to_owned()))
+            } else {
+                body.extend_from_slice(&chunk);
+                Ok(body)
             }
-            Ok(unpaid_order)
         })
-        .and_then({
-            let wallet = state.wallet.clone();
-            let fsm = state.fsm.clone();
-            move |unpaid_order| {
-                let slate = wallet.receive(&slate);
-                slate.and_then(move |slate| {
-                    wallet
-                        .get_tx(&slate.id.hyphenated().to_string())
-                        .and_then(move |wallet_tx| {
-                            fsm.send(PayOrder {
-                                unpaid_order,
-                                wallet_tx,
-                            })
-                            .from_err()
-                            .and_then(|db_response| {
-                                db_response?;
-                                Ok(())
-                            })
-                        })
-                        .and_then(|_| ok(slate))
+        .and_then(|body| {
+            let slate = serde_json::from_slice::<Slate>(&body)?;
+            Ok(slate)
+        })
+        .and_then(move |slate| {
+            let slate_amount = slate.amount;
+            state
+                .fsm
+                .send(order.into_inner())
+                .from_err()
+                .and_then(move |db_response| {
+                    let unpaid_order = db_response?;
+                    if unpaid_order.grin_amount != slate_amount as i64 {
+                        return Err(Error::WrongAmount(
+                            unpaid_order.grin_amount as u64,
+                            slate_amount,
+                        ));
+                    }
+                    Ok(unpaid_order)
                 })
-            }
+                .and_then({
+                    let wallet = state.wallet.clone();
+                    let fsm = state.fsm.clone();
+                    move |unpaid_order| {
+                        let slate = wallet.receive(&slate);
+                        slate.and_then(move |slate| {
+                            wallet
+                                .get_tx(&slate.id.hyphenated().to_string())
+                                .and_then(move |wallet_tx| {
+                                    fsm.send(PayOrder {
+                                        unpaid_order,
+                                        wallet_tx,
+                                    })
+                                    .from_err()
+                                    .and_then(|db_response| {
+                                        db_response?;
+                                        Ok(())
+                                    })
+                                })
+                                .and_then(|_| ok(slate))
+                        })
+                    }
+                })
+                .and_then(|slate| Ok(HttpResponse::Ok().json(slate)))
         })
-        .and_then(|slate| Ok(HttpResponse::Ok().json(slate)))
         .responder()
 }

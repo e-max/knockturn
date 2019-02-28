@@ -29,7 +29,7 @@ impl Actor for Fsm {
 
 #[derive(Debug, Deserialize)]
 pub struct GetUnpaidOrder {
-    pub id: Uuid,
+    pub order_id: Uuid,
 }
 
 impl Message for GetUnpaidOrder {
@@ -43,10 +43,12 @@ impl Handler<GetUnpaidOrder> for Fsm {
     type Result = ResponseFuture<UnpaidOrder, Error>;
 
     fn handle(&mut self, msg: GetUnpaidOrder, _: &mut Self::Context) -> Self::Result {
-        let id = msg.id.clone();
+        let id = msg.order_id.clone();
         let res = self
             .db
-            .send(GetOrder { order_id: msg.id })
+            .send(GetOrder {
+                order_id: msg.order_id,
+            })
             .from_err()
             .and_then(move |db_response| {
                 let order = db_response?;

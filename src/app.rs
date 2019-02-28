@@ -33,6 +33,12 @@ pub fn create_app(db: Addr<DbExecutor>, wallet: Wallet, fsm: Addr<Fsm>) -> App<A
             r.method(Method::GET).with(get_order);
             r.method(Method::POST).with(pay_order);
         })
+        .resource(
+            "/merchants/{merchant_id}/orders/{order_id}/{grin_path:.*}",
+            |r| {
+                r.method(Method::POST).with(pay_order);
+            },
+        )
         .resource("/tx", |r| r.method(Method::GET).with(get_tx))
         .resource("/login", |r| {
             r.method(Method::POST).with(login);

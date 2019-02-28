@@ -11,7 +11,7 @@ use chrono::{DateTime, Utc};
 use failure::ResultExt;
 use futures::future::ok;
 use futures::Future;
-use log::error;
+use log::{debug, error};
 use serde::{Deserialize, Serialize};
 use serde_json::{from_slice, Value};
 use std::str::from_utf8;
@@ -44,7 +44,7 @@ impl Wallet {
 
     pub fn get_tx(&self, tx_id: &str) -> impl Future<Item = TxLogEntry, Error = Error> {
         let tx_id = tx_id.to_owned();
-        let url = format!("{}/{}?tx_id={}", self.url, RETRIEVE_TXS_URL, tx_id);
+        let url = format!("{}/{}?tx_id={}&refresh", self.url, RETRIEVE_TXS_URL, tx_id);
         client::get(&url) // <- Create request builder
             .auth(&self.username, &self.password)
             .finish()
@@ -86,6 +86,7 @@ impl Wallet {
 
     pub fn receive(&self, slate: &Slate) -> impl Future<Item = Slate, Error = Error> {
         let url = format!("{}/{}", self.url, RECEIVE_URL);
+        debug!("Receive as {} {}: {}", self.username, self.password, url);
         client::post(&url) // <- Create request builder
             .auth(&self.username, &self.password)
             .json(slate)

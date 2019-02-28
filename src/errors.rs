@@ -35,6 +35,9 @@ pub enum Error {
 
     #[fail(display = "Cannot call callback_url {} : {}", callback_url, error)]
     MerchantCallbackError { callback_url: String, error: String },
+
+    #[fail(display = "Internal error {}", _0)]
+    Internal(String),
 }
 
 impl From<MailboxError> for Error {
