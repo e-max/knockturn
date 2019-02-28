@@ -141,6 +141,7 @@ pub struct ConfirmTx {
 #[derive(Debug, Deserialize)]
 pub struct ReportAttempt {
     pub order_id: Uuid,
+    pub next_attempt: Option<NaiveDateTime>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -531,10 +532,13 @@ impl Handler<ReportAttempt> for DbExecutor {
     fn handle(&mut self, msg: ReportAttempt, _: &mut Self::Context) -> Self::Result {
         use crate::schema::orders::dsl::*;
         let conn: &PgConnection = &self.0.get().unwrap();
+        let next_attempt = msg
+            .next_attempt
+            .unwrap_or(Utc::now().naive_utc() + Duration::seconds(10));
         diesel::update(orders.filter(id.eq(msg.order_id)))
             .set((
                 report_attempts.eq(report_attempts + 1),
-                next_report_attempt.eq(Utc::now().naive_utc() + Duration::seconds(10)),
+                next_report_attempt.eq(next_attempt),
             ))
             .get_result(conn)
             .map_err(|e| e.into())

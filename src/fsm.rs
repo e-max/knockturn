@@ -10,6 +10,7 @@ use crate::wallet::TxLogEntry;
 use crate::wallet::Wallet;
 use actix::{Actor, Addr, Context, Handler, Message, ResponseActFuture, ResponseFuture};
 use actix_web::client;
+use chrono::{Duration, Utc};
 use derive_deref::Deref;
 use futures::future::{join_all, ok, Either, Future};
 use log::{debug, error, info, warn};
@@ -335,21 +336,28 @@ fn report_order(db: Addr<DbExecutor>, order: Order) -> impl Future<Item = (), Er
             let res = run_callback(&callback_url, &merchant.token, order.clone())
                 .or_else({
                     let db = db.clone();
-                    let order_id = order.id.clone();
+                    let order = order.clone();
                     move |callback_err| {
                         // try call ReportAttempt but ignore errors and return
                         // error from callback
-                        db.send(ReportAttempt { order_id })
-                            .map_err(|e| Error::General(s!(e)))
-                            .and_then(|db_response| {
-                                db_response?;
-                                Ok(())
-                            })
-                            .or_else(|e| {
-                                error!("Get error in ReportAttempt {}", e);
-                                Ok(())
-                            })
-                            .and_then(|_| Err(callback_err))
+                        let next_attempt = Utc::now().naive_utc()
+                            + Duration::seconds(
+                                10 * order.report_attempts as i64 * order.report_attempts as i64,
+                            );
+                        db.send(ReportAttempt {
+                            order_id: order.id,
+                            next_attempt: Some(next_attempt),
+                        })
+                        .map_err(|e| Error::General(s!(e)))
+                        .and_then(|db_response| {
+                            db_response?;
+                            Ok(())
+                        })
+                        .or_else(|e| {
+                            error!("Get error in ReportAttempt {}", e);
+                            Ok(())
+                        })
+                        .and_then(|_| Err(callback_err))
                     }
                 })
                 .and_then({
