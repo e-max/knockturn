@@ -13,8 +13,9 @@ use actix_web::{
 };
 use askama::Template;
 use bcrypt;
-use data_encoding::BASE32;
+use data_encoding::{BASE32, BASE64};
 use futures::future::{err, ok, result, Future};
+use image::Luma;
 use log::debug;
 use qrcode::render::svg;
 use qrcode::QrCode;
@@ -208,23 +209,55 @@ pub fn get_tx(state: State<AppState>) -> Box<Future<Item = HttpResponse, Error =
 #[template(path = "totp.html")]
 struct TotpTemplate<'a> {
     code: &'a str,
+    image: &'a str,
+    totp: &'a str,
 }
 
-pub fn get_totp(req: HttpRequest<AppState>) -> Result<HttpResponse, Error> {
-    /*
+pub fn get_totp(req: HttpRequest<AppState>) -> FutureResponse<HttpResponse, Error> {
     let merchant_id = match req.identity() {
         Some(v) => v,
-        None => return Ok(HttpResponse::Found().header("location", "/login").finish()),
+        None => {
+            return Box::new(ok(HttpResponse::Found()
+                .header("location", "/login")
+                .finish()));
+        }
     };
-    */
-    //let random_bytes = rand::thread_rng().gen::<[u8; 10]>();
-    //let code = BASE32.encode(&random_bytes);
-    let code = s!("676GFXYGWOORUTGD");
-    //let code = s!("123456");
-    let html = TotpTemplate { code: &code }
-        .render()
-        .map_err(|e| Error::from(e))?;
-    Ok(HttpResponse::Ok().content_type("text/html").body(html))
+    req.state()
+        .db
+        .send(GetMerchant { id: merchant_id })
+        .from_err()
+        .and_then(move |db_response| {
+            let merchant = db_response?;
+            //let random_bytes = rand::thread_rng().gen::<[u8; 10]>();
+            //let code = BASE32.encode(&random_bytes);
+            //let code = s!("676GFXYGWOORUTGD");
+            let code = merchant.token.clone();
+            let code_str = format!(
+                "otpauth://totp/Knockout:{}?secret={}&issuer=Knockout",
+                merchant.id, code
+            );
+            let qrcode = QrCode::new(&code_str).unwrap();
+            let svg_xml = qrcode.render::<svg::Color>().build();
+            //let image = qrcode.render::<Luma<u8>>().build();
+            //
+            //
+            //
+
+            let mut totp = boringauth::oath::TOTPBuilder::new()
+                .base32_key(&code)
+                .finalize()
+                .unwrap();
+
+            let html = TotpTemplate {
+                code: &code,
+                image: &BASE64.encode(svg_xml.as_bytes()),
+                totp: &totp.generate(),
+            }
+            .render()
+            .map_err(|e| Error::from(e))?;
+            Ok(HttpResponse::Ok().content_type("text/html").body(html))
+        })
+        .responder()
 }
 
 pub fn get_qrcode(state: State<AppState>) -> Result<HttpResponse, Error> {
