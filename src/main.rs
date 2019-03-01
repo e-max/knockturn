@@ -36,6 +36,7 @@ fn main() {
 
     env_logger::init();
 
+    let cookie_secret = env::var("COOKIE_SECRET").expect("COOKIE_SECRET must be set");
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     let sys = actix::System::new("Knockout");
 
@@ -69,10 +70,17 @@ fn main() {
         move |_| cron::Cron::new(cron_db, wallet, fsm)
     });
 
-    server::new(move || app::create_app(address.clone(), wallet.clone(), fsm.clone()))
-        .bind("0.0.0.0:3000")
-        .expect("Can not bind to '0.0.0.0:3000'")
-        .start();
+    server::new(move || {
+        app::create_app(
+            address.clone(),
+            wallet.clone(),
+            fsm.clone(),
+            cookie_secret.as_bytes(),
+        )
+    })
+    .bind("0.0.0.0:3000")
+    .expect("Can not bind to '0.0.0.0:3000'")
+    .start();
 
     sys.run();
 }

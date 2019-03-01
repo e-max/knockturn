@@ -10,6 +10,7 @@ use crate::totp::Totp;
 use crate::wallet::Slate;
 use actix_web::http::Method;
 use actix_web::middleware::identity::RequestIdentity;
+use actix_web::middleware::session::RequestSession;
 use actix_web::{
     AsyncResponder, Form, FromRequest, FutureResponse, HttpRequest, HttpResponse, Json, Path,
     Responder, State,
@@ -75,8 +76,14 @@ pub fn login(
             match bcrypt::verify(&login_form.password, &merchant.password) {
                 Ok(res) => {
                     if res {
-                        req.remember(merchant.id);
-                        Ok(HttpResponse::Found().header("location", "/").finish())
+                        req.session().set("merchant", merchant.id)?;
+                        if merchant.confirmed_2fa {
+                            Ok(HttpResponse::Found().header("location", "/2fa").finish())
+                        } else {
+                            Ok(HttpResponse::Found()
+                                .header("location", "/set_2fa")
+                                .finish())
+                        }
                     } else {
                         Ok(HttpResponse::Found().header("location", "/login").finish())
                     }
@@ -95,6 +102,7 @@ pub fn login_form(req: HttpRequest<AppState>) -> HttpResponse {
 
 pub fn logout(req: HttpRequest<AppState>) -> Result<HttpResponse, Error> {
     req.forget();
+    req.session().clear();
     Ok(HttpResponse::Found().header("location", "/login").finish())
 }
 
@@ -219,9 +227,9 @@ pub struct TotpRequest {
 }
 
 pub fn get_totp(req: HttpRequest<AppState>) -> FutureResponse<HttpResponse, Error> {
-    let merchant_id = match req.identity() {
-        Some(v) => v,
-        None => {
+    let merchant_id = match req.session().get::<String>("merchant") {
+        Ok(Some(v)) => v,
+        _ => {
             return Box::new(ok(HttpResponse::Found()
                 .header("location", "/login")
                 .finish()));
@@ -250,12 +258,13 @@ pub fn get_totp(req: HttpRequest<AppState>) -> FutureResponse<HttpResponse, Erro
         })
         .responder()
 }
+
 pub fn post_totp(
     (req, totp_form): (HttpRequest<AppState>, Form<TotpRequest>),
 ) -> FutureResponse<HttpResponse, Error> {
-    let merchant_id = match req.identity() {
-        Some(v) => v,
-        None => {
+    let merchant_id = match req.session().get::<String>("merchant") {
+        Ok(Some(v)) => v,
+        _ => {
             return Box::new(ok(HttpResponse::Found()
                 .header("location", "/login")
                 .finish()));
@@ -392,5 +401,47 @@ pub fn pay_order(
             }
         })
         .and_then(|slate| Ok(HttpResponse::Ok().json(slate)))
+        .responder()
+}
+
+pub fn form_2fa(req: HttpRequest<AppState>) -> HttpResponse {
+    HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(include_str!("../templates/2fa.html"))
+}
+
+pub fn post_2fa(
+    (req, totp_form): (HttpRequest<AppState>, Form<TotpRequest>),
+) -> FutureResponse<HttpResponse, Error> {
+    let merchant_id = match req.session().get::<String>("merchant") {
+        Ok(Some(v)) => v,
+        _ => {
+            return Box::new(ok(HttpResponse::Found()
+                .header("location", "/login")
+                .finish()));
+        }
+    };
+    req.state()
+        .db
+        .send(GetMerchant {
+            id: merchant_id.clone(),
+        })
+        .from_err()
+        .and_then({
+            let db = req.state().db.clone();
+            let request_method = req.method().clone();
+            move |db_response| {
+                let merchant = db_response?;
+
+                let totp = Totp::new(merchant.id.clone(), merchant.token.clone());
+
+                if totp.check(&totp_form.code)? {
+                    req.remember(merchant.id);
+                    return Ok(HttpResponse::Found().header("location", "/").finish());
+                } else {
+                    Ok(HttpResponse::Found().header("location", "/2fa").finish())
+                }
+            }
+        })
         .responder()
 }
