@@ -19,7 +19,7 @@ use askama::Template;
 use bcrypt;
 use bytes::BytesMut;
 use data_encoding::BASE64;
-use futures::future::{err, ok, result, Future};
+use futures::future::{err, ok, result, Either, Future};
 use futures::stream::Stream;
 use log::debug;
 use rand::Rng;
@@ -317,12 +317,16 @@ pub fn post_totp(
         .and_then({
             let db = req.state().db.clone();
             move |(confirm, response)| {
-                db.send(Confirm2FA { merchant_id })
-                    .from_err()
-                    .and_then(move |db_response| {
-                        db_response?;
-                        Ok(response)
-                    })
+                if confirm {
+                    Either::A(db.send(Confirm2FA { merchant_id }).from_err().and_then(
+                        move |db_response| {
+                            db_response?;
+                            Ok(response)
+                        },
+                    ))
+                } else {
+                    Either::B(ok(response))
+                }
             }
         })
         .responder()
