@@ -5,17 +5,16 @@ use crate::db::{
     UpdateOrderStatus,
 };
 use crate::errors::Error;
-use crate::models::{Merchant, Order, OrderStatus, Tx};
+use crate::models::{Order, OrderStatus, Tx};
 use crate::wallet::TxLogEntry;
 use crate::wallet::Wallet;
-use actix::{Actor, Addr, Context, Handler, Message, ResponseActFuture, ResponseFuture};
+use actix::{Actor, Addr, Context, Handler, Message, ResponseFuture};
 use actix_web::client;
 use chrono::{Duration, Utc};
 use derive_deref::Deref;
-use futures::future::{join_all, ok, Either, Future};
-use log::{debug, error, info, warn};
+use futures::future::{Either, Future};
+use log::{debug, error};
 use serde::{Deserialize, Serialize};
-use std::ops::Deref;
 use uuid::Uuid;
 
 pub struct Fsm {
@@ -283,7 +282,7 @@ fn reject_order(db: &Addr<DbExecutor>, id: &Uuid) -> impl Future<Item = (), Erro
     })
     .from_err()
     .and_then(|db_response| {
-        let order = db_response?;
+        db_response?;
         Ok(())
     })
 }

@@ -6,7 +6,6 @@ use diesel::deserialize::{self, FromSql};
 use diesel::pg::Pg;
 use diesel::serialize::{self, Output, ToSql};
 use diesel::sql_types::{Jsonb, SmallInt};
-use diesel::BelongingToDsl;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::io;

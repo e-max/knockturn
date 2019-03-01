@@ -5,8 +5,6 @@ use actix::{Handler, Message};
 use chrono::NaiveDateTime;
 use chrono::{Duration, Local, Utc};
 use data_encoding::BASE32;
-use diesel::backend::Backend;
-use diesel::debug_query;
 use diesel::pg::PgConnection;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::{self, prelude::*};
@@ -344,7 +342,6 @@ impl Handler<GetConfirmedOrders> for DbExecutor {
     type Result = Result<Vec<Order>, Error>;
 
     fn handle(&mut self, _: GetConfirmedOrders, _: &mut Self::Context) -> Self::Result {
-        use crate::schema::merchants::dsl::*;
         use crate::schema::orders::dsl::*;
         let conn: &PgConnection = &self.0.get().unwrap();
 

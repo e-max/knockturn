@@ -4,7 +4,7 @@ use crate::handlers::*;
 use crate::wallet::Wallet;
 use actix::prelude::*;
 use actix_web::middleware::identity::{CookieIdentityPolicy, IdentityService};
-use actix_web::middleware::session::{CookieSessionBackend, RequestSession, SessionStorage};
+use actix_web::middleware::session::{CookieSessionBackend, SessionStorage};
 use actix_web::{http::Method, middleware, App};
 
 pub struct AppState {

@@ -1,15 +1,11 @@
-use crate::clients::BearerTokenAuth;
 use crate::db::DbExecutor;
 use crate::errors::Error;
 use crate::fsm::{
-    ConfirmOrder, Fsm, GetConfirmedOrders, GetPendingOrders, GetUnreportedOrders, RejectOrder,
-    ReportOrder,
+    ConfirmOrder, Fsm, GetPendingOrders, GetUnreportedOrders, RejectOrder, ReportOrder,
 };
-use crate::models::OrderStatus;
 use crate::rates::RatesFetcher;
 use crate::wallet::Wallet;
 use actix::prelude::*;
-use actix_web::client;
 use futures::future::{join_all, ok, Either, Future};
 use log::*;
 
@@ -46,17 +42,15 @@ impl Cron {
     }
 }
 
-fn process_pending_orders(cron: &mut Cron, ctx: &mut Context<Cron>) {
+fn process_pending_orders(cron: &mut Cron, _: &mut Context<Cron>) {
     debug!("run process_pending_orders");
     let wallet = cron.wallet.clone();
-    let db_clone = cron.db.clone();
     let fsm = cron.fsm.clone();
     let res = cron
         .fsm
         .send(GetPendingOrders)
-        .map_err(|e| Error::General(s!("error")))
+        .map_err(|e| Error::General(s!(e)))
         .and_then(move |db_response| {
-            //let z: Result<(), _> = db_response;
             let orders = db_response?;
             Ok(orders)
         })
@@ -75,12 +69,9 @@ fn process_pending_orders(cron: &mut Cron, ctx: &mut Context<Cron>) {
                             db_response?;
                             Ok(())
                         })
-                        .or_else({
-                            let order_id = order.id.clone();
-                            move |e| {
-                                error!("Cannot reject order {}: {}", order.id, e);
-                                Ok(())
-                            }
+                        .or_else(move |e| {
+                            error!("Cannot reject order {}: {}", order.id, e);
+                            Ok(())
                         }),
                     ));
                     continue;
@@ -122,16 +113,15 @@ fn process_pending_orders(cron: &mut Cron, ctx: &mut Context<Cron>) {
                 }
             }
             join_all(futures).map(|_| ())
-            //Ok(())
         });
-    //ctx.spawn(res.into_actor());
-    actix::spawn(res.map_err(|e| ()));
+    actix::spawn(res.map_err(|e| error!("Got an error in processing penging orders {}", e)));
 }
-fn process_unreported_orders(cron: &mut Cron, ctx: &mut Context<Cron>) {
+
+fn process_unreported_orders(cron: &mut Cron, _: &mut Context<Cron>) {
     let res = cron
         .fsm
         .send(GetUnreportedOrders)
-        .map_err(|e| Error::General(s!("error")))
+        .map_err(|e| Error::General(s!(e)))
         .and_then(move |db_response| {
             let orders = db_response?;
             Ok(orders)

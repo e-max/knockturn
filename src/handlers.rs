@@ -1,28 +1,22 @@
 use crate::app::AppState;
-use crate::db::{
-    Confirm2FA, CreateMerchant, CreateOrder, CreateTx, GetMerchant, GetOrder, GetOrders,
-    UpdateOrderStatus,
-};
+use crate::db::{Confirm2FA, CreateMerchant, CreateOrder, GetMerchant, GetOrder, GetOrders};
 use crate::errors::*;
 use crate::fsm::{GetUnpaidOrder, PayOrder};
-use crate::models::{Currency, Money, Order, OrderStatus};
+use crate::models::{Currency, Money, Order};
 use crate::totp::Totp;
 use crate::wallet::Slate;
 use actix_web::http::Method;
 use actix_web::middleware::identity::RequestIdentity;
 use actix_web::middleware::session::RequestSession;
 use actix_web::{
-    error, AsyncResponder, Form, FromRequest, FutureResponse, HttpMessage, HttpRequest,
-    HttpResponse, Json, Path, Responder, State,
+    AsyncResponder, Form, FutureResponse, HttpMessage, HttpRequest, HttpResponse, Json, Path, State,
 };
 use askama::Template;
 use bcrypt;
 use bytes::BytesMut;
 use data_encoding::BASE64;
-use futures::future::{err, ok, result, Either, Future};
+use futures::future::{ok, result, Either, Future};
 use futures::stream::Stream;
-use log::debug;
-use rand::Rng;
 use serde::Deserialize;
 use std::iter::Iterator;
 
@@ -96,7 +90,7 @@ pub fn login(
         .responder()
 }
 
-pub fn login_form(req: HttpRequest<AppState>) -> HttpResponse {
+pub fn login_form(_: HttpRequest<AppState>) -> HttpResponse {
     HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
         .body(include_str!("../templates/login.html"))

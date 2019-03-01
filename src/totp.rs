@@ -1,6 +1,5 @@
 use crate::errors::Error;
 use consistenttime::ct_u8_slice_eq;
-use data_encoding::BASE32;
 use image::png::PNGEncoder;
 use image::{Luma, Pixel};
 use qrcode::QrCode;
