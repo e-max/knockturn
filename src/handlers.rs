@@ -5,6 +5,7 @@ use crate::db::{
 use crate::errors::*;
 use crate::fsm::{GetUnpaidOrder, PayOrder};
 use crate::models::{Currency, Money, Order, OrderStatus};
+use crate::totp::Totp;
 use crate::wallet::Slate;
 use actix_web::middleware::identity::RequestIdentity;
 use actix_web::{
@@ -13,14 +14,9 @@ use actix_web::{
 };
 use askama::Template;
 use bcrypt;
-use data_encoding::{BASE32, BASE64};
+use data_encoding::BASE64;
 use futures::future::{err, ok, result, Future};
-use image::png::PNGEncoder;
-use image::Luma;
-use image::Pixel;
 use log::debug;
-use qrcode::render::svg;
-use qrcode::QrCode;
 use rand::Rng;
 use serde::Deserialize;
 use std::iter::Iterator;
@@ -230,36 +226,14 @@ pub fn get_totp(req: HttpRequest<AppState>) -> FutureResponse<HttpResponse, Erro
         .from_err()
         .and_then(move |db_response| {
             let merchant = db_response?;
-            //let random_bytes = rand::thread_rng().gen::<[u8; 10]>();
-            //let code = BASE32.encode(&random_bytes);
-            //let code = s!("676GFXYGWOORUTGD");
-            let code = merchant.token.clone();
-            let code_str = format!(
-                "otpauth://totp/Knockout:{}?secret={}&issuer=Knockout",
-                merchant.id, code
-            );
-            let qrcode = QrCode::new(&code_str).unwrap();
-            let svg_xml = qrcode.render::<svg::Color>().build();
 
-            let png = qrcode.render::<Luma<u8>>().build();
-            let mut buf: Vec<u8> = Vec::new();
-            PNGEncoder::new(&mut buf).encode(
-                &png,
-                png.width(),
-                png.height(),
-                Luma::<u8>::color_type(),
-            );
-
-            let mut totp = boringauth::oath::TOTPBuilder::new()
-                .base32_key(&code)
-                .finalize()
-                .unwrap();
+            let totp = Totp::new(merchant.id.clone(), merchant.token.clone());
 
             let html = TotpTemplate {
-                code: &code,
+                code: &merchant.token,
                 //image: &BASE64.encode(&svg_xml.as_bytes()),
-                image: &BASE64.encode(&buf),
-                totp: &totp.generate(),
+                image: &BASE64.encode(&totp.get_png()?),
+                totp: &totp.generate()?,
             }
             .render()
             .map_err(|e| Error::from(e))?;
@@ -269,11 +243,7 @@ pub fn get_totp(req: HttpRequest<AppState>) -> FutureResponse<HttpResponse, Erro
 }
 
 pub fn get_qrcode(state: State<AppState>) -> Result<HttpResponse, Error> {
-    let code = QrCode::new(b"Hello").unwrap();
-    let svg_xml = code.render::<svg::Color>().build();
-    Ok(HttpResponse::Ok()
-        .content_type("image/svg+xml;")
-        .body(svg_xml))
+    Ok(HttpResponse::Ok().content_type("image/svg+xml;").body(""))
 }
 
 pub fn pay_order(

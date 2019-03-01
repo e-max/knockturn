@@ -11,6 +11,7 @@ mod handlers;
 mod models;
 mod rates;
 mod schema;
+mod totp;
 mod wallet;
 
 #[macro_use]
