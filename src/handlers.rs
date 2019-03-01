@@ -15,7 +15,9 @@ use askama::Template;
 use bcrypt;
 use data_encoding::{BASE32, BASE64};
 use futures::future::{err, ok, result, Future};
+use image::png::PNGEncoder;
 use image::Luma;
+use image::Pixel;
 use log::debug;
 use qrcode::render::svg;
 use qrcode::QrCode;
@@ -238,10 +240,15 @@ pub fn get_totp(req: HttpRequest<AppState>) -> FutureResponse<HttpResponse, Erro
             );
             let qrcode = QrCode::new(&code_str).unwrap();
             let svg_xml = qrcode.render::<svg::Color>().build();
-            //let image = qrcode.render::<Luma<u8>>().build();
-            //
-            //
-            //
+
+            let png = qrcode.render::<Luma<u8>>().build();
+            let mut buf: Vec<u8> = Vec::new();
+            PNGEncoder::new(&mut buf).encode(
+                &png,
+                png.width(),
+                png.height(),
+                Luma::<u8>::color_type(),
+            );
 
             let mut totp = boringauth::oath::TOTPBuilder::new()
                 .base32_key(&code)
@@ -250,7 +257,8 @@ pub fn get_totp(req: HttpRequest<AppState>) -> FutureResponse<HttpResponse, Erro
 
             let html = TotpTemplate {
                 code: &code,
-                image: &BASE64.encode(svg_xml.as_bytes()),
+                //image: &BASE64.encode(&svg_xml.as_bytes()),
+                image: &BASE64.encode(&buf),
                 totp: &totp.generate(),
             }
             .render()
