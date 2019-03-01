@@ -236,16 +236,27 @@ fn run_callback(
         .json(order)
         .unwrap()
         .send() // <- Send http request
-        .and_then(|resp| {
-            // <- server http response
-            println!("Response: {:?}", resp);
-            Ok(())
-        })
         .map_err({
             let callback_url = callback_url.to_owned();
             move |e| Error::MerchantCallbackError {
                 callback_url: callback_url,
                 error: s!(e),
+            }
+        })
+        .and_then({
+            let callback_url = callback_url.to_owned();
+            |resp| {
+                // <- server http response
+
+                debug!("Response: {:?}", resp);
+                if resp.status().is_success() {
+                    Ok(())
+                } else {
+                    Err(Error::MerchantCallbackError {
+                        callback_url: callback_url,
+                        error: s!("aaa"),
+                    })
+                }
             }
         })
 }
