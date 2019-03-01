@@ -185,7 +185,6 @@ pub fn get_order(
                 order_id: order.id.to_string(),
                 merchant_id: order.merchant_id,
                 amount: order.amount,
-                confirmations: order.confirmations,
                 grin_amount: Money::new(order.grin_amount, Currency::GRIN),
                 status: order.status.to_string(),
             }
@@ -204,7 +203,6 @@ struct OrderTemplate {
     status: String,
     amount: Money,
     grin_amount: Money,
-    confirmations: i32,
 }
 
 pub fn get_tx(state: State<AppState>) -> Box<Future<Item = HttpResponse, Error = Error>> {
@@ -328,10 +326,6 @@ pub fn post_totp(
             }
         })
         .responder()
-}
-
-pub fn get_qrcode(state: State<AppState>) -> Result<HttpResponse, Error> {
-    Ok(HttpResponse::Ok().content_type("image/svg+xml;").body(""))
 }
 
 pub fn pay_order(

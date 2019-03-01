@@ -24,12 +24,14 @@ impl Totp {
 
         let png = qrcode.render::<Luma<u8>>().build();
         let mut buf: Vec<u8> = Vec::new();
-        PNGEncoder::new(&mut buf).encode(&png, png.width(), png.height(), Luma::<u8>::color_type());
+        PNGEncoder::new(&mut buf)
+            .encode(&png, png.width(), png.height(), Luma::<u8>::color_type())
+            .map_err(|e| Error::General(format!("Cannot write PNG file: {}", e)))?;
         Ok(buf)
     }
 
     pub fn generate(&self) -> Result<String, Error> {
-        let mut totp = boringauth::oath::TOTPBuilder::new()
+        let totp = boringauth::oath::TOTPBuilder::new()
             .base32_key(&self.token)
             .finalize()
             .map_err(|e| Error::General(format!("Got error code from boringauth {:?}", e)))?;
