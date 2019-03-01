@@ -1,12 +1,16 @@
 use crate::app::AppState;
 use crate::db::{
-    CreateMerchant, CreateOrder, CreateTx, GetMerchant, GetOrder, GetOrders, UpdateOrderStatus,
+    Confirm2FA, CreateMerchant, CreateOrder, CreateTx, GetMerchant, GetOrder, GetOrders,
+    UpdateOrderStatus,
 };
 use crate::errors::*;
 use crate::fsm::{GetUnpaidOrder, PayOrder};
 use crate::models::{Currency, Money, Order, OrderStatus};
+use crate::totp::Totp;
 use crate::wallet::Slate;
+use actix_web::http::Method;
 use actix_web::middleware::identity::RequestIdentity;
+use actix_web::middleware::session::RequestSession;
 use actix_web::{
     error, AsyncResponder, Form, FromRequest, FutureResponse, HttpMessage, HttpRequest,
     HttpResponse, Json, Path, Responder, State,
@@ -14,9 +18,11 @@ use actix_web::{
 use askama::Template;
 use bcrypt;
 use bytes::BytesMut;
+use data_encoding::BASE64;
 use futures::future::{err, ok, result, Future};
 use futures::stream::Stream;
 use log::debug;
+use rand::Rng;
 use serde::Deserialize;
 use std::iter::Iterator;
 
@@ -72,8 +78,14 @@ pub fn login(
             match bcrypt::verify(&login_form.password, &merchant.password) {
                 Ok(res) => {
                     if res {
-                        req.remember(merchant.id);
-                        Ok(HttpResponse::Found().header("location", "/").finish())
+                        req.session().set("merchant", merchant.id)?;
+                        if merchant.confirmed_2fa {
+                            Ok(HttpResponse::Found().header("location", "/2fa").finish())
+                        } else {
+                            Ok(HttpResponse::Found()
+                                .header("location", "/set_2fa")
+                                .finish())
+                        }
                     } else {
                         Ok(HttpResponse::Found().header("location", "/login").finish())
                     }
@@ -92,6 +104,7 @@ pub fn login_form(req: HttpRequest<AppState>) -> HttpResponse {
 
 pub fn logout(req: HttpRequest<AppState>) -> Result<HttpResponse, Error> {
     req.forget();
+    req.session().clear();
     Ok(HttpResponse::Found().header("location", "/login").finish())
 }
 
@@ -204,6 +217,151 @@ pub fn get_tx(state: State<AppState>) -> Box<Future<Item = HttpResponse, Error =
 
 const MAX_SIZE: usize = 262_144; // max payload size is 256k
 
+#[derive(Template)]
+#[template(path = "totp.html")]
+struct TotpTemplate<'a> {
+    msg: &'a str,
+    token: &'a str,
+    image: &'a str,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TotpRequest {
+    pub code: String,
+}
+
+pub fn get_totp(req: HttpRequest<AppState>) -> FutureResponse<HttpResponse, Error> {
+    let merchant_id = match req.session().get::<String>("merchant") {
+        Ok(Some(v)) => v,
+        _ => {
+            return Box::new(ok(HttpResponse::Found()
+                .header("location", "/login")
+                .finish()));
+        }
+    };
+    req.state()
+        .db
+        .send(GetMerchant {
+            id: merchant_id.clone(),
+        })
+        .from_err()
+        .and_then(move |db_response| {
+            let merchant = db_response?;
+
+            let totp = Totp::new(merchant.id.clone(), merchant.token.clone());
+
+            let html = TotpTemplate {
+                msg: "",
+                token: &merchant.token,
+                image: &BASE64.encode(&totp.get_png()?),
+            }
+            .render()
+            .map_err(|e| Error::from(e))?;
+            let resp = HttpResponse::Ok().content_type("text/html").body(html);
+            Ok(resp)
+        })
+        .responder()
+}
+
+pub fn post_totp(
+    (req, totp_form): (HttpRequest<AppState>, Form<TotpRequest>),
+) -> FutureResponse<HttpResponse, Error> {
+    let merchant_id = match req.session().get::<String>("merchant") {
+        Ok(Some(v)) => v,
+        _ => {
+            return Box::new(ok(HttpResponse::Found()
+                .header("location", "/login")
+                .finish()));
+        }
+    };
+    req.state()
+        .db
+        .send(GetMerchant {
+            id: merchant_id.clone(),
+        })
+        .from_err()
+        .and_then({
+            let db = req.state().db.clone();
+            let request_method = req.method().clone();
+            move |db_response| {
+                let merchant = db_response?;
+
+                let mut msg = String::new();
+
+                let totp = Totp::new(merchant.id.clone(), merchant.token.clone());
+
+                println!("\x1B[31;1m AAAA\x1B[0m");
+                if request_method == Method::POST {
+                    if totp.check(&totp_form.code)? {
+                        let resp = HttpResponse::Found().header("location", "/").finish();
+                        return Ok((true, resp));
+                    }
+                    msg.push_str("Incorrect code, please try one more time");
+                }
+                println!("\x1B[31;1m msg\x1B[0m = {:?}", msg);
+                let html = TotpTemplate {
+                    msg: &msg,
+                    token: &merchant.token,
+                    //image: &BASE64.encode(&svg_xml.as_bytes()),
+                    image: &BASE64.encode(&totp.get_png()?),
+                }
+                .render()
+                .map_err(|e| Error::from(e))?;
+                let resp = HttpResponse::Ok().content_type("text/html").body(html);
+                Ok((false, resp))
+            }
+        })
+        .and_then({
+            let db = req.state().db.clone();
+            move |(confirm, response)| {
+                db.send(Confirm2FA { merchant_id })
+                    .from_err()
+                    .and_then(move |db_response| {
+                        db_response?;
+                        Ok(response)
+                    })
+            }
+        })
+        .responder()
+}
+/*
+#[derive(Debug, Deserialize)]
+pub struct TotpRequest {
+    pub code: String,
+}
+pub fn confirm_totp(
+    (req, totp_form): (HttpRequest<AppState>, Form<TotpRequest>),
+) -> FutureResponse<HttpResponse> {
+    let merchant_id = match req.identity() {
+        Some(v) => v,
+        None => {
+            return Box::new(ok(HttpResponse::Found()
+                .header("location", "/login")
+                .finish()));
+        }
+    };
+    req.state()
+        .db
+        .send(GetMerchant { id: merchant_id })
+        .from_err()
+        .and_then(move |db_response| {
+            let merchant = db_response?;
+
+            let totp = Totp::new(merchant.id.clone(), merchant.token.clone());
+            if totp.check(totp_form.code)? {
+                return Box::new(ok(HttpResponse::Found()
+                    .header("location", "/login")
+                    .finish()));
+            }
+        })
+        .responder()
+}
+*/
+
+pub fn get_qrcode(state: State<AppState>) -> Result<HttpResponse, Error> {
+    Ok(HttpResponse::Ok().content_type("image/svg+xml;").body(""))
+}
+
 pub fn pay_order(
     (order, req, state): (Path<GetUnpaidOrder>, HttpRequest<AppState>, State<AppState>),
 ) -> FutureResponse<HttpResponse, Error> {
@@ -262,6 +420,48 @@ pub fn pay_order(
                     }
                 })
                 .and_then(|slate| Ok(HttpResponse::Ok().json(slate)))
+        })
+        .responder()
+}
+
+pub fn form_2fa(req: HttpRequest<AppState>) -> HttpResponse {
+    HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(include_str!("../templates/2fa.html"))
+}
+
+pub fn post_2fa(
+    (req, totp_form): (HttpRequest<AppState>, Form<TotpRequest>),
+) -> FutureResponse<HttpResponse, Error> {
+    let merchant_id = match req.session().get::<String>("merchant") {
+        Ok(Some(v)) => v,
+        _ => {
+            return Box::new(ok(HttpResponse::Found()
+                .header("location", "/login")
+                .finish()));
+        }
+    };
+    req.state()
+        .db
+        .send(GetMerchant {
+            id: merchant_id.clone(),
+        })
+        .from_err()
+        .and_then({
+            let db = req.state().db.clone();
+            let request_method = req.method().clone();
+            move |db_response| {
+                let merchant = db_response?;
+
+                let totp = Totp::new(merchant.id.clone(), merchant.token.clone());
+
+                if totp.check(&totp_form.code)? {
+                    req.remember(merchant.id);
+                    return Ok(HttpResponse::Found().header("location", "/").finish());
+                } else {
+                    Ok(HttpResponse::Found().header("location", "/2fa").finish())
+                }
+            }
         })
         .responder()
 }

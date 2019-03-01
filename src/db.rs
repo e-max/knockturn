@@ -4,6 +4,7 @@ use actix::{Actor, SyncContext};
 use actix::{Handler, Message};
 use chrono::NaiveDateTime;
 use chrono::{Duration, Local, Utc};
+use data_encoding::BASE32;
 use diesel::backend::Backend;
 use diesel::debug_query;
 use diesel::pg::PgConnection;
@@ -11,7 +12,7 @@ use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::{self, prelude::*};
 use log::info;
 use rand::seq::SliceRandom;
-use rand::thread_rng;
+use rand::{thread_rng, Rng};
 use serde::Deserialize;
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -155,6 +156,16 @@ pub struct MarkAsReported {
 #[derive(Debug, Deserialize)]
 pub struct GetUnreportedOrders;
 
+#[derive(Debug, Deserialize)]
+pub struct Confirm2FA {
+    pub merchant_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Reset2FA {
+    pub merchant_id: String,
+}
+
 impl Message for CreateMerchant {
     type Result = Result<Merchant, Error>;
 }
@@ -225,6 +236,14 @@ impl Message for GetUnreportedOrders {
     type Result = Result<Vec<Order>, Error>;
 }
 
+impl Message for Confirm2FA {
+    type Result = Result<(), Error>;
+}
+
+impl Message for Reset2FA {
+    type Result = Result<(), Error>;
+}
+
 impl Handler<CreateMerchant> for DbExecutor {
     type Result = Result<Merchant, Error>;
 
@@ -239,7 +258,7 @@ impl Handler<CreateMerchant> for DbExecutor {
         let new_token: Option<String> = (0..64)
             .map(|_| Some(*CHARSET.choose(&mut rng)? as char))
             .collect();
-
+        let new_token_2fa = BASE32.encode(&rng.gen::<[u8; 10]>());
         let new_merchant = Merchant {
             id: msg.id,
             email: msg.email,
@@ -249,6 +268,8 @@ impl Handler<CreateMerchant> for DbExecutor {
             created_at: Local::now().naive_local() + Duration::hours(24),
             callback_url: msg.callback_url,
             token: new_token.ok_or(Error::General(s!("cannot generate rangom token")))?,
+            token_2fa: Some(new_token_2fa),
+            confirmed_2fa: false,
         };
 
         diesel::insert_into(merchants)
@@ -584,5 +605,37 @@ impl Handler<GetUnreportedOrders> for DbExecutor {
         let confirmed_orders = query.load::<Order>(conn).map_err(|e| Error::Db(s!(e)))?;
 
         Ok(confirmed_orders)
+    }
+}
+
+impl Handler<Confirm2FA> for DbExecutor {
+    type Result = Result<(), Error>;
+
+    fn handle(&mut self, msg: Confirm2FA, _: &mut Self::Context) -> Self::Result {
+        info!("Confirm 2fa token for merchant {}", msg.merchant_id);
+        use crate::schema::merchants::dsl::*;
+        let conn: &PgConnection = &self.0.get().unwrap();
+        diesel::update(merchants.filter(id.eq(msg.merchant_id)))
+            .set((confirmed_2fa.eq(true),))
+            .get_result(conn)
+            .map_err(|e| e.into())
+            .map(|merchant: Merchant| ())
+    }
+}
+
+impl Handler<Reset2FA> for DbExecutor {
+    type Result = Result<(), Error>;
+
+    fn handle(&mut self, msg: Reset2FA, _: &mut Self::Context) -> Self::Result {
+        info!("Confirm 2fa token for merchant {}", msg.merchant_id);
+        use crate::schema::merchants::dsl::*;
+        let conn: &PgConnection = &self.0.get().unwrap();
+
+        let new_token_2fa = BASE32.encode(&thread_rng().gen::<[u8; 10]>());
+        diesel::update(merchants.filter(id.eq(msg.merchant_id)))
+            .set((confirmed_2fa.eq(false), token_2fa.eq(new_token_2fa)))
+            .get_result(conn)
+            .map_err(|e| e.into())
+            .map(|merchant: Merchant| ())
     }
 }

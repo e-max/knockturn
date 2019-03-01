@@ -26,6 +26,10 @@ pub struct Merchant {
     pub created_at: NaiveDateTime,
     pub token: String,
     pub callback_url: Option<String>,
+    #[serde(skip_serializing)]
+    pub token_2fa: Option<String>,
+    #[serde(skip_serializing)]
+    pub confirmed_2fa: bool,
 }
 
 /*

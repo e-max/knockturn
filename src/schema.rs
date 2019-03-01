@@ -8,6 +8,8 @@ table! {
         created_at -> Timestamp,
         token -> Text,
         callback_url -> Nullable<Text>,
+        token_2fa -> Nullable<Varchar>,
+        confirmed_2fa -> Bool,
     }
 }
 
