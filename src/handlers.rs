@@ -248,11 +248,14 @@ pub fn get_totp(req: HttpRequest<AppState>) -> FutureResponse<HttpResponse, Erro
         .and_then(move |db_response| {
             let merchant = db_response?;
 
-            let totp = Totp::new(merchant.id.clone(), merchant.token.clone());
+            let token = merchant
+                .token_2fa
+                .ok_or(Error::General(s!("No 2fa token")))?;
+            let totp = Totp::new(merchant.id.clone(), token.clone());
 
             let html = TotpTemplate {
                 msg: "",
-                token: &merchant.token,
+                token: &token,
                 image: &BASE64.encode(&totp.get_png()?),
             }
             .render()
@@ -288,9 +291,11 @@ pub fn post_totp(
 
                 let mut msg = String::new();
 
-                let totp = Totp::new(merchant.id.clone(), merchant.token.clone());
+                let token = merchant
+                    .token_2fa
+                    .ok_or(Error::General(s!("No 2fa token")))?;
+                let totp = Totp::new(merchant.id.clone(), token.clone());
 
-                println!("\x1B[31;1m AAAA\x1B[0m");
                 if request_method == Method::POST {
                     if totp.check(&totp_form.code)? {
                         let resp = HttpResponse::Found().header("location", "/").finish();
@@ -298,10 +303,10 @@ pub fn post_totp(
                     }
                     msg.push_str("Incorrect code, please try one more time");
                 }
-                println!("\x1B[31;1m msg\x1B[0m = {:?}", msg);
+
                 let html = TotpTemplate {
                     msg: &msg,
-                    token: &merchant.token,
+                    token: &token,
                     //image: &BASE64.encode(&svg_xml.as_bytes()),
                     image: &BASE64.encode(&totp.get_png()?),
                 }
@@ -324,39 +329,6 @@ pub fn post_totp(
         })
         .responder()
 }
-/*
-#[derive(Debug, Deserialize)]
-pub struct TotpRequest {
-    pub code: String,
-}
-pub fn confirm_totp(
-    (req, totp_form): (HttpRequest<AppState>, Form<TotpRequest>),
-) -> FutureResponse<HttpResponse> {
-    let merchant_id = match req.identity() {
-        Some(v) => v,
-        None => {
-            return Box::new(ok(HttpResponse::Found()
-                .header("location", "/login")
-                .finish()));
-        }
-    };
-    req.state()
-        .db
-        .send(GetMerchant { id: merchant_id })
-        .from_err()
-        .and_then(move |db_response| {
-            let merchant = db_response?;
-
-            let totp = Totp::new(merchant.id.clone(), merchant.token.clone());
-            if totp.check(totp_form.code)? {
-                return Box::new(ok(HttpResponse::Found()
-                    .header("location", "/login")
-                    .finish()));
-            }
-        })
-        .responder()
-}
-*/
 
 pub fn get_qrcode(state: State<AppState>) -> Result<HttpResponse, Error> {
     Ok(HttpResponse::Ok().content_type("image/svg+xml;").body(""))
@@ -453,7 +425,10 @@ pub fn post_2fa(
             move |db_response| {
                 let merchant = db_response?;
 
-                let totp = Totp::new(merchant.id.clone(), merchant.token.clone());
+                let token = merchant
+                    .token_2fa
+                    .ok_or(Error::General(s!("No 2fa token")))?;
+                let totp = Totp::new(merchant.id.clone(), token.clone());
 
                 if totp.check(&totp_form.code)? {
                     req.remember(merchant.id);
