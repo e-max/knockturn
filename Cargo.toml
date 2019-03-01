@@ -30,6 +30,7 @@ qrcode = "0.9.0"
 boringauth = "0.7.0"
 data-encoding = "2.1.2"
 image = { version="0.20.0", default-features = false, features=["png_codec"]}
+consistenttime = "0.2.0"
 
 [build-dependencies]
 askama = "0.6"

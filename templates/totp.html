@@ -4,9 +4,16 @@
   <title>Knokturn Alee</title>
 </head>
 <body>
+
 	<img src="data:image/png;base64,{{image}}">
-	code = {{code}}<br/>
-	totp = {{totp}}<br/>
+	token = {{token}}<br/>
+
+	{{msg}}<br/>
+	<form method="POST" >
+		code: <input name="code" type="text">
+		<input type="submit" value="Login">
+	</form>
+
 
 
 </body>

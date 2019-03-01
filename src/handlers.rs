@@ -1,12 +1,14 @@
 use crate::app::AppState;
 use crate::db::{
-    CreateMerchant, CreateOrder, CreateTx, GetMerchant, GetOrder, GetOrders, UpdateOrderStatus,
+    ConfirmTotp, CreateMerchant, CreateOrder, CreateTx, GetMerchant, GetOrder, GetOrders,
+    UpdateOrderStatus,
 };
 use crate::errors::*;
 use crate::fsm::{GetUnpaidOrder, PayOrder};
 use crate::models::{Currency, Money, Order, OrderStatus};
 use crate::totp::Totp;
 use crate::wallet::Slate;
+use actix_web::http::Method;
 use actix_web::middleware::identity::RequestIdentity;
 use actix_web::{
     AsyncResponder, Form, FromRequest, FutureResponse, HttpRequest, HttpResponse, Json, Path,
@@ -206,12 +208,117 @@ pub fn get_tx(state: State<AppState>) -> Box<Future<Item = HttpResponse, Error =
 #[derive(Template)]
 #[template(path = "totp.html")]
 struct TotpTemplate<'a> {
-    code: &'a str,
+    msg: &'a str,
+    token: &'a str,
     image: &'a str,
-    totp: &'a str,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TotpRequest {
+    pub code: String,
 }
 
 pub fn get_totp(req: HttpRequest<AppState>) -> FutureResponse<HttpResponse, Error> {
+    let merchant_id = match req.identity() {
+        Some(v) => v,
+        None => {
+            return Box::new(ok(HttpResponse::Found()
+                .header("location", "/login")
+                .finish()));
+        }
+    };
+    req.state()
+        .db
+        .send(GetMerchant {
+            id: merchant_id.clone(),
+        })
+        .from_err()
+        .and_then(move |db_response| {
+            let merchant = db_response?;
+
+            let totp = Totp::new(merchant.id.clone(), merchant.token.clone());
+
+            let html = TotpTemplate {
+                msg: "",
+                token: &merchant.token,
+                image: &BASE64.encode(&totp.get_png()?),
+            }
+            .render()
+            .map_err(|e| Error::from(e))?;
+            let resp = HttpResponse::Ok().content_type("text/html").body(html);
+            Ok(resp)
+        })
+        .responder()
+}
+pub fn post_totp(
+    (req, totp_form): (HttpRequest<AppState>, Form<TotpRequest>),
+) -> FutureResponse<HttpResponse, Error> {
+    let merchant_id = match req.identity() {
+        Some(v) => v,
+        None => {
+            return Box::new(ok(HttpResponse::Found()
+                .header("location", "/login")
+                .finish()));
+        }
+    };
+    req.state()
+        .db
+        .send(GetMerchant {
+            id: merchant_id.clone(),
+        })
+        .from_err()
+        .and_then({
+            let db = req.state().db.clone();
+            let request_method = req.method().clone();
+            move |db_response| {
+                let merchant = db_response?;
+
+                let mut msg = String::new();
+
+                let totp = Totp::new(merchant.id.clone(), merchant.token.clone());
+
+                println!("\x1B[31;1m AAAA\x1B[0m");
+                if request_method == Method::POST {
+                    if totp.check(&totp_form.code)? {
+                        let resp = HttpResponse::Found().header("location", "/").finish();
+                        return Ok((true, resp));
+                    }
+                    msg.push_str("Incorrect code, please try one more time");
+                }
+                println!("\x1B[31;1m msg\x1B[0m = {:?}", msg);
+                let html = TotpTemplate {
+                    msg: &msg,
+                    token: &merchant.token,
+                    //image: &BASE64.encode(&svg_xml.as_bytes()),
+                    image: &BASE64.encode(&totp.get_png()?),
+                }
+                .render()
+                .map_err(|e| Error::from(e))?;
+                let resp = HttpResponse::Ok().content_type("text/html").body(html);
+                Ok((false, resp))
+            }
+        })
+        .and_then({
+            let db = req.state().db.clone();
+            move |(confirm, response)| {
+                db.send(ConfirmTotp { merchant_id })
+                    .from_err()
+                    .and_then(move |db_response| {
+                        db_response?;
+                        Ok(response)
+                    })
+            }
+        })
+        .responder()
+}
+/*
+#[derive(Debug, Deserialize)]
+pub struct TotpRequest {
+    pub code: String,
+}
+pub fn confirm_totp(
+    (req, totp_form): (HttpRequest<AppState>, Form<TotpRequest>),
+) -> FutureResponse<HttpResponse> {
     let merchant_id = match req.identity() {
         Some(v) => v,
         None => {
@@ -228,19 +335,15 @@ pub fn get_totp(req: HttpRequest<AppState>) -> FutureResponse<HttpResponse, Erro
             let merchant = db_response?;
 
             let totp = Totp::new(merchant.id.clone(), merchant.token.clone());
-
-            let html = TotpTemplate {
-                code: &merchant.token,
-                //image: &BASE64.encode(&svg_xml.as_bytes()),
-                image: &BASE64.encode(&totp.get_png()?),
-                totp: &totp.generate()?,
+            if totp.check(totp_form.code)? {
+                return Box::new(ok(HttpResponse::Found()
+                    .header("location", "/login")
+                    .finish()));
             }
-            .render()
-            .map_err(|e| Error::from(e))?;
-            Ok(HttpResponse::Ok().content_type("text/html").body(html))
         })
         .responder()
 }
+*/
 
 pub fn get_qrcode(state: State<AppState>) -> Result<HttpResponse, Error> {
     Ok(HttpResponse::Ok().content_type("image/svg+xml;").body(""))

@@ -155,6 +155,11 @@ pub struct MarkAsReported {
 #[derive(Debug, Deserialize)]
 pub struct GetUnreportedOrders;
 
+#[derive(Debug, Deserialize)]
+pub struct ConfirmTotp {
+    pub merchant_id: String,
+}
+
 impl Message for CreateMerchant {
     type Result = Result<Merchant, Error>;
 }
@@ -225,6 +230,10 @@ impl Message for GetUnreportedOrders {
     type Result = Result<Vec<Order>, Error>;
 }
 
+impl Message for ConfirmTotp {
+    type Result = Result<(), Error>;
+}
+
 impl Handler<CreateMerchant> for DbExecutor {
     type Result = Result<Merchant, Error>;
 
@@ -249,6 +258,8 @@ impl Handler<CreateMerchant> for DbExecutor {
             created_at: Local::now().naive_local() + Duration::hours(24),
             callback_url: msg.callback_url,
             token: new_token.ok_or(Error::General(s!("cannot generate rangom token")))?,
+            token_2fa: None,
+            confirmed_2fa: false,
         };
 
         diesel::insert_into(merchants)
@@ -584,5 +595,20 @@ impl Handler<GetUnreportedOrders> for DbExecutor {
         let confirmed_orders = query.load::<Order>(conn).map_err(|e| Error::Db(s!(e)))?;
 
         Ok(confirmed_orders)
+    }
+}
+
+impl Handler<ConfirmTotp> for DbExecutor {
+    type Result = Result<(), Error>;
+
+    fn handle(&mut self, msg: ConfirmTotp, _: &mut Self::Context) -> Self::Result {
+        info!("Confirm 2fa token for merchant {}", msg.merchant_id);
+        use crate::schema::merchants::dsl::*;
+        let conn: &PgConnection = &self.0.get().unwrap();
+        diesel::update(merchants.filter(id.eq(msg.merchant_id)))
+            .set((confirmed_2fa.eq(true),))
+            .get_result(conn)
+            .map_err(|e| e.into())
+            .map(|merchant: Merchant| ())
     }
 }

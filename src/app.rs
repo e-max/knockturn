@@ -40,5 +40,8 @@ pub fn create_app(db: Addr<DbExecutor>, wallet: Wallet, fsm: Addr<Fsm>) -> App<A
         })
         .resource("/logout", |r| r.method(Method::POST).with(logout))
         .resource("/", |r| r.method(Method::GET).f(index))
-        .resource("/totp", |r| r.method(Method::GET).with(get_totp))
+        .resource("/totp", |r| {
+            r.method(Method::GET).with(get_totp);
+            r.method(Method::POST).with(post_totp);
+        })
 }
