@@ -1,6 +1,6 @@
 use crate::app::AppState;
 use crate::db::{
-    ConfirmTotp, CreateMerchant, CreateOrder, CreateTx, GetMerchant, GetOrder, GetOrders,
+    Confirm2FA, CreateMerchant, CreateOrder, CreateTx, GetMerchant, GetOrder, GetOrders,
     UpdateOrderStatus,
 };
 use crate::errors::*;
@@ -301,7 +301,7 @@ pub fn post_totp(
         .and_then({
             let db = req.state().db.clone();
             move |(confirm, response)| {
-                db.send(ConfirmTotp { merchant_id })
+                db.send(Confirm2FA { merchant_id })
                     .from_err()
                     .and_then(move |db_response| {
                         db_response?;
