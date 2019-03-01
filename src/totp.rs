@@ -17,7 +17,7 @@ impl Totp {
 
     pub fn get_png(&self) -> Result<Vec<u8>, Error> {
         let code_str = format!(
-            "otpauth://totp/Knockout:{}?secret={}&issuer=Knockout",
+            "otpauth://totp/Knockturn:{}?secret={}&issuer=Knockturn",
             self.merchant, self.token
         );
         let qrcode = QrCode::new(&code_str).map_err(|e| Error::General(s!(e)))?;
