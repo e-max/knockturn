@@ -282,7 +282,6 @@ pub fn post_totp(
         })
         .from_err()
         .and_then({
-            let db = req.state().db.clone();
             let request_method = req.method().clone();
             move |db_response| {
                 let merchant = db_response?;
@@ -305,7 +304,6 @@ pub fn post_totp(
                 let html = TotpTemplate {
                     msg: &msg,
                     token: &token,
-                    //image: &BASE64.encode(&svg_xml.as_bytes()),
                     image: &BASE64.encode(&totp.get_png()?),
                 }
                 .render()
@@ -394,7 +392,7 @@ pub fn pay_order(
         .responder()
 }
 
-pub fn form_2fa(req: HttpRequest<AppState>) -> HttpResponse {
+pub fn form_2fa(_: HttpRequest<AppState>) -> HttpResponse {
     HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
         .body(include_str!("../templates/2fa.html"))
@@ -417,23 +415,19 @@ pub fn post_2fa(
             id: merchant_id.clone(),
         })
         .from_err()
-        .and_then({
-            let db = req.state().db.clone();
-            let request_method = req.method().clone();
-            move |db_response| {
-                let merchant = db_response?;
+        .and_then(move |db_response| {
+            let merchant = db_response?;
 
-                let token = merchant
-                    .token_2fa
-                    .ok_or(Error::General(s!("No 2fa token")))?;
-                let totp = Totp::new(merchant.id.clone(), token.clone());
+            let token = merchant
+                .token_2fa
+                .ok_or(Error::General(s!("No 2fa token")))?;
+            let totp = Totp::new(merchant.id.clone(), token.clone());
 
-                if totp.check(&totp_form.code)? {
-                    req.remember(merchant.id);
-                    return Ok(HttpResponse::Found().header("location", "/").finish());
-                } else {
-                    Ok(HttpResponse::Found().header("location", "/2fa").finish())
-                }
+            if totp.check(&totp_form.code)? {
+                req.remember(merchant.id);
+                return Ok(HttpResponse::Found().header("location", "/").finish());
+            } else {
+                Ok(HttpResponse::Found().header("location", "/2fa").finish())
             }
         })
         .responder()

@@ -43,7 +43,6 @@ impl Handler<GetUnpaidOrder> for Fsm {
     type Result = ResponseFuture<UnpaidOrder, Error>;
 
     fn handle(&mut self, msg: GetUnpaidOrder, _: &mut Self::Context) -> Self::Result {
-        let id = msg.order_id.clone();
         let res = self
             .db
             .send(GetOrder {
@@ -141,7 +140,7 @@ impl Handler<GetPendingOrders> for Fsm {
     //type Result = Result<Vec<(PendingOrder, Vec<Tx>)>, Error>;
     type Result = ResponseFuture<Vec<(PendingOrder, Vec<Tx>)>, Error>;
 
-    fn handle(&mut self, msg: GetPendingOrders, _: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, _: GetPendingOrders, _: &mut Self::Context) -> Self::Result {
         Box::new(
             self.db
                 .send(db::GetPendingOrders)
@@ -215,7 +214,7 @@ pub struct ConfirmedOrder(Order);
 impl Handler<GetConfirmedOrders> for Fsm {
     type Result = ResponseFuture<Vec<ConfirmedOrder>, Error>;
 
-    fn handle(&mut self, msg: GetConfirmedOrders, _: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, _: GetConfirmedOrders, _: &mut Self::Context) -> Self::Result {
         Box::new(
             self.db
                 .send(db::GetConfirmedOrders)
@@ -401,7 +400,7 @@ pub struct UnreportedOrder(Order);
 impl Handler<GetUnreportedOrders> for Fsm {
     type Result = ResponseFuture<Vec<UnreportedOrder>, Error>;
 
-    fn handle(&mut self, msg: GetUnreportedOrders, _: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, _: GetUnreportedOrders, _: &mut Self::Context) -> Self::Result {
         Box::new(
             self.db
                 .send(db::GetUnreportedOrders)

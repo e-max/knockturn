@@ -323,7 +323,7 @@ impl Handler<GetOrders> for DbExecutor {
 impl Handler<GetPendingOrders> for DbExecutor {
     type Result = Result<Vec<(Order, Vec<Tx>)>, Error>;
 
-    fn handle(&mut self, msg: GetPendingOrders, _: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, _: GetPendingOrders, _: &mut Self::Context) -> Self::Result {
         use crate::schema::orders::dsl::*;
         let conn: &PgConnection = &self.0.get().unwrap();
 
@@ -343,7 +343,7 @@ impl Handler<GetPendingOrders> for DbExecutor {
 impl Handler<GetConfirmedOrders> for DbExecutor {
     type Result = Result<Vec<Order>, Error>;
 
-    fn handle(&mut self, msg: GetConfirmedOrders, _: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, _: GetConfirmedOrders, _: &mut Self::Context) -> Self::Result {
         use crate::schema::merchants::dsl::*;
         use crate::schema::orders::dsl::*;
         let conn: &PgConnection = &self.0.get().unwrap();
@@ -497,7 +497,7 @@ impl Handler<UpdateTx> for DbExecutor {
             ))
             .get_result(conn)
             .map_err(|e| e.into())
-            .map(|tx: Tx| ())
+            .map(|_: Tx| ())
     }
 }
 
@@ -512,7 +512,7 @@ impl Handler<ConfirmTx> for DbExecutor {
             .set((confirmed.eq(true), confirmed_at.eq(msg.confirmed_at)))
             .get_result(conn)
             .map_err(|e| e.into())
-            .map(|tx: Tx| ())
+            .map(|_: Tx| ())
     }
 }
 
@@ -566,7 +566,7 @@ impl Handler<ReportAttempt> for DbExecutor {
             ))
             .get_result(conn)
             .map_err(|e| e.into())
-            .map(|order: Order| ())
+            .map(|_: Order| ())
     }
 }
 
@@ -581,14 +581,14 @@ impl Handler<MarkAsReported> for DbExecutor {
             .set((reported.eq(true),))
             .get_result(conn)
             .map_err(|e| e.into())
-            .map(|order: Order| ())
+            .map(|_: Order| ())
     }
 }
 
 impl Handler<GetUnreportedOrders> for DbExecutor {
     type Result = Result<Vec<Order>, Error>;
 
-    fn handle(&mut self, msg: GetUnreportedOrders, _: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, _: GetUnreportedOrders, _: &mut Self::Context) -> Self::Result {
         use crate::schema::orders::dsl::*;
         let conn: &PgConnection = &self.0.get().unwrap();
 
@@ -619,7 +619,7 @@ impl Handler<Confirm2FA> for DbExecutor {
             .set((confirmed_2fa.eq(true),))
             .get_result(conn)
             .map_err(|e| e.into())
-            .map(|merchant: Merchant| ())
+            .map(|_: Merchant| ())
     }
 }
 
@@ -636,6 +636,6 @@ impl Handler<Reset2FA> for DbExecutor {
             .set((confirmed_2fa.eq(false), token_2fa.eq(new_token_2fa)))
             .get_result(conn)
             .map_err(|e| e.into())
-            .map(|merchant: Merchant| ())
+            .map(|_: Merchant| ())
     }
 }
