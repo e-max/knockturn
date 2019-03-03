@@ -1,10 +1,10 @@
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>Knokturn Alee</title>
-</head>
-<body>
-	<h1>Merchant {{merchant_id}}</h1>
+{% extends "base.html" %}
+
+{% block title %} Orders {% endblock %}
+
+{% block content %}
+
+<h1>Merchant {{merchant_id}}</h1>
 	<p>Orders: {{orders.len()}}</p>
 	<table>
 	<tr>
@@ -35,3 +35,4 @@
 </body>
 </html>
 
+{% endblock %}

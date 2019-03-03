@@ -1,11 +1,16 @@
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>Knokturn Alee</title>
-</head>
-<body>
+{% extends "base.html" %}
+
+{% block title %} Set 2FA {% endblock %}
+
+{% block head %}
+  <style>
+  </style>
+{% endblock %}
+
+{% block content %}
 
 	<img src="data:image/png;base64,{{image}}">
+	<br/>
 	token = {{token}}<br/>
 
 	{{msg}}<br/>
@@ -14,8 +19,4 @@
 		<input type="submit" value="Login">
 	</form>
 
-
-
-</body>
-</html>
-
+{% endblock %}

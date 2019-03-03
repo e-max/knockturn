@@ -17,8 +17,8 @@ use bytes::BytesMut;
 use data_encoding::BASE64;
 use futures::future::{ok, result, Either, Future};
 use futures::stream::Stream;
+use mime_guess::get_mime_type;
 use serde::Deserialize;
-use std::iter::Iterator;
 
 #[derive(Template)]
 #[template(path = "index.html")]
@@ -90,10 +90,12 @@ pub fn login(
         .responder()
 }
 
-pub fn login_form(_: HttpRequest<AppState>) -> HttpResponse {
-    HttpResponse::Ok()
-        .content_type("text/html; charset=utf-8")
-        .body(include_str!("../templates/login.html"))
+#[derive(Template)]
+#[template(path = "login.html")]
+struct LoginTemplate;
+
+pub fn login_form(_: HttpRequest<AppState>) -> Result<HttpResponse, Error> {
+    LoginTemplate.into_response()
 }
 
 pub fn logout(req: HttpRequest<AppState>) -> Result<HttpResponse, Error> {
@@ -386,10 +388,12 @@ pub fn pay_order(
         .responder()
 }
 
-pub fn form_2fa(_: HttpRequest<AppState>) -> HttpResponse {
-    HttpResponse::Ok()
-        .content_type("text/html; charset=utf-8")
-        .body(include_str!("../templates/2fa.html"))
+#[derive(Template)]
+#[template(path = "2fa.html")]
+struct TwoFATemplate;
+
+pub fn form_2fa(_: HttpRequest<AppState>) -> Result<HttpResponse, Error> {
+    TwoFATemplate {}.into_response()
 }
 
 pub fn post_2fa(
@@ -425,4 +429,16 @@ pub fn post_2fa(
             }
         })
         .responder()
+}
+
+pub trait TemplateIntoResponse {
+    fn into_response(&self) -> Result<HttpResponse, Error>;
+}
+
+impl<T: Template> TemplateIntoResponse for T {
+    fn into_response(&self) -> Result<HttpResponse, Error> {
+        let rsp = self.render().map_err(|e| Error::Template(s!(e)))?;
+        let ctype = get_mime_type(T::extension().unwrap_or("txt")).to_string();
+        Ok(HttpResponse::Ok().content_type(ctype.as_str()).body(rsp))
+    }
 }

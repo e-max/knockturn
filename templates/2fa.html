@@ -1,13 +1,15 @@
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>Knokturn Alee</title>
-</head>
-<body>
+{% extends "base.html" %}
+
+{% block title %}2FA{% endblock %}
+
+{% block head %}
+  <style>
+  </style>
+{% endblock %}
+
+{% block content %}
 	<form method="POST" >
 		code: <input name="code" type="text">
 		<input type="submit" value="Login">
 	</form>
-</body>
-</html>
-
+{% endblock %}

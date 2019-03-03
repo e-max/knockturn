@@ -1,9 +1,14 @@
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>Knokturn Alee</title>
-</head>
-<body>
+{% extends "base.html" %}
+
+{% block title %} Order {% endblock %}
+
+{% block head %}
+  <style>
+  </style>
+{% endblock %}
+
+{% block content %}
+
 	<h1>Order {{order_id}}</h1>
 	<table>
 		<tr><td>Send {{grin_amount}} to:</td></tr>
@@ -14,6 +19,4 @@
 		<tr><td>{{amount}}</td></tr>
 	</table>
 
-</body>
-</html>
-
+{% endblock %}
