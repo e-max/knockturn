@@ -266,7 +266,11 @@ pub struct RejectOrder<T> {
     pub order: T,
 }
 
-impl<T> Message for RejectOrder<T> {
+impl Message for RejectOrder<UnpaidOrder> {
+    type Result = Result<(), Error>;
+}
+
+impl Message for RejectOrder<PendingOrder> {
     type Result = Result<(), Error>;
 }
 
@@ -303,7 +307,15 @@ pub struct ReportOrder<T> {
     pub order: T,
 }
 
-impl<T> Message for ReportOrder<T> {
+impl Message for ReportOrder<ConfirmedOrder> {
+    type Result = Result<(), Error>;
+}
+
+impl Message for ReportOrder<RejectedOrder> {
+    type Result = Result<(), Error>;
+}
+
+impl Message for ReportOrder<UnreportedOrder> {
     type Result = Result<(), Error>;
 }
 
