@@ -140,6 +140,12 @@ pub struct ConfirmTx {
     pub confirmed_at: Option<NaiveDateTime>,
 }
 
+pub struct ConfirmOrder {
+    pub order: Order,
+    pub slate_id: String,
+    pub confirmed_at: Option<NaiveDateTime>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct ReportAttempt {
     pub order_id: Uuid,
@@ -203,6 +209,10 @@ impl Message for UpdateTx {
 }
 
 impl Message for ConfirmTx {
+    type Result = Result<(), Error>;
+}
+
+impl Message for ConfirmOrder {
     type Result = Result<(), Error>;
 }
 
@@ -510,6 +520,44 @@ impl Handler<ConfirmTx> for DbExecutor {
             .get_result(conn)
             .map_err(|e| e.into())
             .map(|_: Tx| ())
+    }
+}
+
+impl Handler<ConfirmOrder> for DbExecutor {
+    type Result = Result<(), Error>;
+
+    fn handle(&mut self, msg: ConfirmOrder, _: &mut Self::Context) -> Self::Result {
+        use crate::schema::merchants;
+        use crate::schema::orders;
+        use crate::schema::txs;
+        let conn: &PgConnection = &self.0.get().unwrap();
+
+        conn.transaction(|| {
+            diesel::update(txs::table.filter(txs::columns::slate_id.eq(msg.slate_id)))
+                .set((
+                    txs::columns::confirmed.eq(true),
+                    txs::columns::confirmed_at.eq(msg.confirmed_at),
+                ))
+                .get_result(conn)
+                .map(|_: Tx| ())?;
+            diesel::update(orders::table.filter(orders::columns::id.eq(msg.order.id)))
+                .set((
+                    orders::columns::status.eq(OrderStatus::Confirmed),
+                    orders::columns::updated_at.eq(Utc::now().naive_utc()),
+                ))
+                .get_result(conn)
+                .map(|_: Order| ())?;
+            diesel::update(
+                merchants::table.filter(merchants::columns::id.eq(msg.order.merchant_id)),
+            )
+            .set(
+                (merchants::columns::balance
+                    .eq(merchants::columns::balance + msg.order.grin_amount)),
+            )
+            .get_result(conn)
+            .map(|_: Merchant| ())?;
+            Ok(())
+        })
     }
 }
 

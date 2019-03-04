@@ -1,7 +1,6 @@
 use crate::clients::BearerTokenAuth;
-use crate::db;
 use crate::db::{
-    ConfirmTx, CreateTx, DbExecutor, GetMerchant, GetOrder, MarkAsReported, ReportAttempt,
+    self, ConfirmTx, CreateTx, DbExecutor, GetMerchant, GetOrder, MarkAsReported, ReportAttempt,
     UpdateOrderStatus,
 };
 use crate::errors::Error;
@@ -169,34 +168,15 @@ impl Handler<ConfirmOrder> for Fsm {
     type Result = ResponseFuture<(), Error>;
 
     fn handle(&mut self, msg: ConfirmOrder, _: &mut Self::Context) -> Self::Result {
-        let tx_msg = ConfirmTx {
+        let tx_msg = db::ConfirmOrder {
+            order: msg.order.0,
             slate_id: msg.wallet_tx.tx_slate_id.unwrap(),
             confirmed_at: msg.wallet_tx.confirmation_ts.map(|dt| dt.naive_utc()),
         };
-        Box::new(
-            self.db
-                .send(tx_msg)
-                .from_err()
-                .and_then(|res| {
-                    res?;
-                    Ok(())
-                })
-                .and_then({
-                    let db = self.db.clone();
-                    let order_id = msg.order.id.clone();
-                    move |_| {
-                        db.send(UpdateOrderStatus {
-                            id: order_id,
-                            status: OrderStatus::Confirmed,
-                        })
-                        .from_err()
-                        .and_then(|db_response| {
-                            db_response?;
-                            Ok(())
-                        })
-                    }
-                }),
-        )
+        Box::new(self.db.send(tx_msg).from_err().and_then(|res| {
+            res?;
+            Ok(())
+        }))
     }
 }
 
