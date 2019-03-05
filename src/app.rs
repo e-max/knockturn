@@ -87,4 +87,13 @@ pub fn create_app(
             r.method(Method::GET).with(form_2fa);
             r.method(Method::POST).with(post_2fa);
         })
+        .resource("/withdraw", |r| {
+            r.method(Method::GET).with(withdraw);
+        })
+        .resource("/withdraw/confirm", |r| {
+            r.method(Method::POST).with(withdraw_confirmation);
+        })
+        .resource("/withdraw/knockturn-payment.grinslate", |r| {
+            r.method(Method::GET).with(get_slate);
+        })
 }

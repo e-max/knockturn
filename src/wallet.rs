@@ -22,6 +22,7 @@ pub struct Wallet {
 
 const RETRIEVE_TXS_URL: &'static str = "v1/wallet/owner/retrieve_txs";
 const RECEIVE_URL: &'static str = "v1/wallet/foreign/receive_tx";
+const SEND_URL: &'static str = "/v1/wallet/owner/issue_send_tx";
 
 impl Wallet {
     pub fn new(url: &str, username: &str, password: &str) -> Self {
@@ -90,6 +91,50 @@ impl Wallet {
         client::post(&url) // <- Create request builder
             .auth(&self.username, &self.password)
             .json(slate)
+            .unwrap()
+            .send() // <- Send http request
+            .map_err(|e| Error::WalletAPIError(s!(e)))
+            .and_then(|resp| {
+                if !resp.status().is_success() {
+                    Err(Error::WalletAPIError(format!("Error status: {:?}", resp)))
+                } else {
+                    Ok(resp)
+                }
+            })
+            .and_then(|resp| {
+                // <- server http response
+                debug!("Response: {:?}", resp);
+                resp.body()
+                    .map_err(|e| Error::WalletAPIError(s!(e)))
+                    .and_then(move |bytes| {
+                        let slate_resp: Slate = from_slice(&bytes).map_err(|e| {
+                            error!(
+                                "Cannot decode json {:?}:\n with error {} ",
+                                from_utf8(&bytes),
+                                e
+                            );
+                            Error::WalletAPIError(format!("Cannot decode json {}", e))
+                        })?;
+                        Ok(slate_resp)
+                    })
+            })
+    }
+
+    pub fn create_slate(&self, amount: u64) -> impl Future<Item = Slate, Error = Error> {
+        let url = format!("{}/{}", self.url, SEND_URL);
+        debug!("Receive as {} {}: {}", self.username, self.password, url);
+        let payment = SendTx {
+            amount: amount,
+            minimum_confirmations: 10,
+            method: "file",
+            dest: "./gpp_always_pays.grinslate",
+            max_outputs: 10,
+            num_change_outputs: 1,
+            selection_strategy_is_use_all: false,
+        };
+        client::post(&url) // <- Create request builder
+            .auth(&self.username, &self.password)
+            .json(&payment)
             .unwrap()
             .send() // <- Send http request
             .map_err(|e| Error::WalletAPIError(s!(e)))
@@ -362,6 +407,17 @@ pub enum OutputFeatures {
     Plain = 0,
     /// A coinbase output.
     Coinbase = 1,
+}
+
+#[derive(Debug, Serialize)]
+struct SendTx {
+    amount: u64,
+    minimum_confirmations: u64,
+    method: &'static str,
+    dest: &'static str,
+    max_outputs: u8,
+    num_change_outputs: u8,
+    selection_strategy_is_use_all: bool,
 }
 
 #[cfg(test)]

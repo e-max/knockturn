@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+
+{% block title %}Withdraw{% endblock %}
+
+{% block head %}
+  <style>
+  </style>
+{% endblock %}
+
+{% block content %}
+
+Balance: {{balance}}
+Knokturn fee: {{knockturn_fee}}
+Transfer fee: {{transfer_fee}}
+Total: {{total}}
+
+<a href=""Pay with IronBelly</a></br>
+or download slate <a href="">here</a></br>
+You need to sing this slate in your wallet and POST it to url {{url}}
+{% endblock %}

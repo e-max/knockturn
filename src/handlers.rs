@@ -25,6 +25,10 @@ use mime_guess::get_mime_type;
 use serde::{Deserialize, Serialize};
 use std::env;
 
+const MINIMAL_WITHDRAW: u64 = 1_000_000_000;
+const KNOCKTURN_FEE: u64 = 0;
+const TRANSFER_FEE: u64 = 8_000_000;
+
 #[derive(Template)]
 #[template(path = "index.html")]
 struct IndexTemplate<'a> {
@@ -436,6 +440,95 @@ pub fn make_payment(
                 })
                 .and_then(|slate| Ok(HttpResponse::Ok().json(slate)))
         })
+        .responder()
+}
+
+#[derive(Template, Default, Debug)]
+#[template(path = "withdraw.html")]
+struct WithdrawTemplate<'a> {
+    error: Option<String>,
+    balance: u64,
+    knockturn_fee: u64,
+    transfer_fee: u64,
+    total: u64,
+    url: &'a str,
+}
+
+pub fn withdraw(req: HttpRequest<AppState>) -> FutureResponse<HttpResponse, Error> {
+    let merchant_id = match req.identity() {
+        Some(v) => v,
+        None => return ok(HttpResponse::Found().header("location", "/login").finish()).responder(),
+    };
+    Box::new(
+        req.state()
+            .db
+            .send(GetMerchant {
+                id: merchant_id.clone(),
+            })
+            .from_err()
+            .and_then(move |db_response| {
+                let merchant = db_response?;
+                Ok(merchant)
+            })
+            .and_then(|merchant| {
+                let mut t = WithdrawTemplate::default();
+                t.balance = merchant.balance as u64;
+                t.transfer_fee = TRANSFER_FEE;
+                t.knockturn_fee = KNOCKTURN_FEE;
+                t.url = "http://localhost:6000/withdraw/confirm";
+                println!("\x1B[31;1m t\x1B[0m = {:?}", t);
+
+                if t.balance > t.transfer_fee + t.knockturn_fee {
+                    t.total = t.balance - t.transfer_fee - t.knockturn_fee;
+                }
+
+                if t.balance < MINIMAL_WITHDRAW {
+                    t.error = Some(format!(
+                        "You balance is too small. Minimal withdraw amount is {}",
+                        MINIMAL_WITHDRAW
+                    ));
+                }
+
+                t.into_response()
+            }),
+    )
+}
+
+pub fn get_slate(
+    (req, state): (HttpRequest<AppState>, State<AppState>),
+) -> FutureResponse<HttpResponse, Error> {
+    let merchant_id = match req.identity() {
+        Some(v) => v,
+        None => return ok(HttpResponse::Found().header("location", "/login").finish()).responder(),
+    };
+
+    Box::new(
+        state
+            .wallet
+            .create_slate(1)
+            .and_then(|slate| Ok(HttpResponse::Ok().json(slate))),
+    )
+}
+
+pub fn withdraw_confirmation(
+    (req, state): (HttpRequest<AppState>, State<AppState>),
+) -> FutureResponse<HttpResponse, Error> {
+    req.payload()
+        .map_err(|e| Error::Internal(format!("Payload error: {:?}", e)))
+        //.from_err()
+        .fold(BytesMut::new(), move |mut body, chunk| {
+            if (body.len() + chunk.len()) > MAX_SIZE {
+                Err(Error::Internal("overflow".to_owned()))
+            } else {
+                body.extend_from_slice(&chunk);
+                Ok(body)
+            }
+        })
+        .and_then(|body| {
+            let slate = serde_json::from_slice::<Slate>(&body)?;
+            Ok(slate)
+        })
+        .and_then(|_| Ok(HttpResponse::Ok().body("hello")))
         .responder()
 }
 
