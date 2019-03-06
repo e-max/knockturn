@@ -185,6 +185,13 @@ impl Money {
         Money { amount, currency }
     }
 
+    pub fn from_grin(amount: i64) -> Self {
+        Money {
+            amount: amount,
+            currency: Currency::GRIN,
+        }
+    }
+
     pub fn convert_to(&self, currency: Currency, rate: f64) -> Money {
         let amount =
             self.amount * currency.precision() / (self.currency.precision() as f64 * rate) as i64;

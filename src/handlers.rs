@@ -25,9 +25,9 @@ use mime_guess::get_mime_type;
 use serde::{Deserialize, Serialize};
 use std::env;
 
-const MINIMAL_WITHDRAW: u64 = 1_000_000_000;
-const KNOCKTURN_FEE: u64 = 0;
-const TRANSFER_FEE: u64 = 8_000_000;
+const MINIMAL_WITHDRAW: i64 = 1_000_000_000;
+const KNOCKTURN_FEE: i64 = 0;
+const TRANSFER_FEE: i64 = 8_000_000;
 
 #[derive(Template)]
 #[template(path = "index.html")]
@@ -443,14 +443,14 @@ pub fn make_payment(
         .responder()
 }
 
-#[derive(Template, Default, Debug)]
+#[derive(Template, Debug)]
 #[template(path = "withdraw.html")]
 struct WithdrawTemplate<'a> {
     error: Option<String>,
-    balance: u64,
-    knockturn_fee: u64,
-    transfer_fee: u64,
-    total: u64,
+    balance: Money,
+    knockturn_fee: Money,
+    transfer_fee: Money,
+    total: Money,
     url: &'a str,
 }
 
@@ -471,25 +471,32 @@ pub fn withdraw(req: HttpRequest<AppState>) -> FutureResponse<HttpResponse, Erro
                 Ok(merchant)
             })
             .and_then(|merchant| {
-                let mut t = WithdrawTemplate::default();
-                t.balance = merchant.balance as u64;
-                t.transfer_fee = TRANSFER_FEE;
-                t.knockturn_fee = KNOCKTURN_FEE;
-                t.url = "http://localhost:6000/withdraw/confirm";
-                println!("\x1B[31;1m t\x1B[0m = {:?}", t);
+                let balance = merchant.balance;
+                let transfer_fee = TRANSFER_FEE;
+                let knockturn_fee = KNOCKTURN_FEE;
+                let mut total = 0;
 
-                if t.balance > t.transfer_fee + t.knockturn_fee {
-                    t.total = t.balance - t.transfer_fee - t.knockturn_fee;
+                if balance > transfer_fee + knockturn_fee {
+                    total = balance - transfer_fee - knockturn_fee;
                 }
 
-                if t.balance < MINIMAL_WITHDRAW {
-                    t.error = Some(format!(
+                let mut template = WithdrawTemplate {
+                    error: None,
+                    balance: Money::from_grin(balance),
+                    transfer_fee: Money::from_grin(transfer_fee),
+                    knockturn_fee: Money::from_grin(knockturn_fee),
+                    total: Money::from_grin(total),
+                    url: "http://localhost:6000/withdraw/confirm",
+                };
+
+                if balance < MINIMAL_WITHDRAW {
+                    template.error = Some(format!(
                         "You balance is too small. Minimal withdraw amount is {}",
-                        MINIMAL_WITHDRAW
+                        Money::from_grin(MINIMAL_WITHDRAW)
                     ));
                 }
 
-                t.into_response()
+                template.into_response()
             }),
     )
 }
@@ -506,7 +513,7 @@ pub fn get_slate(
         state
             .wallet
             .create_slate(1)
-            .and_then(|slate| Ok(HttpResponse::Ok().json(slate))),
+            .and_then(|slate| Ok(HttpResponse::Ok().content_type("text/html").json(slate))),
     )
 }
 
