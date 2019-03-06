@@ -8,6 +8,7 @@ mod db;
 mod errors;
 mod fsm;
 mod handlers;
+mod middleware;
 mod models;
 mod rates;
 mod schema;

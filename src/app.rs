@@ -1,6 +1,7 @@
 use crate::db::DbExecutor;
 use crate::fsm::Fsm;
 use crate::handlers::*;
+use crate::middleware::*;
 use crate::wallet::Wallet;
 use actix::prelude::*;
 use actix_web::middleware::identity::{CookieIdentityPolicy, IdentityService};
@@ -54,7 +55,10 @@ pub fn create_app(
             r.method(Method::GET).with(login_form);
         })
         .resource("/logout", |r| r.method(Method::GET).with(logout))
-        .resource("/", |r| r.method(Method::GET).f(index))
+        .resource("/", |r| {
+            r.middleware(SiteAuthMiddleware);
+            r.method(Method::GET).f(index);
+        })
         .resource("/set_2fa", |r| {
             r.method(Method::GET).with(get_totp);
             r.method(Method::POST).with(post_totp);
