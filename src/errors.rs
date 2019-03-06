@@ -38,6 +38,12 @@ pub enum Error {
 
     #[fail(display = "Internal error {}", _0)]
     Internal(String),
+
+    #[fail(display = "Auth required")]
+    AuthRequired,
+
+    #[fail(display = "Not authorized")]
+    NotAuthorized,
 }
 
 impl From<MailboxError> for Error {
@@ -91,6 +97,8 @@ impl ResponseError for Error {
             Error::InvalidEntity(ref message)
             | Error::AlreadyExists(ref message)
             | Error::UnsupportedCurrency(ref message) => HttpResponse::BadRequest().json(message),
+            Error::AuthRequired => HttpResponse::Unauthorized().finish(),
+            Error::NotAuthorized => HttpResponse::Forbidden().finish(),
             _ => HttpResponse::InternalServerError().json("general error".to_owned()),
         }
     }
