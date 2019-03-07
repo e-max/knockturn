@@ -1,8 +1,8 @@
 use crate::app::AppState;
-use crate::db::{Confirm2FA, CreateMerchant, CreateOrder, GetMerchant, GetOrder, GetOrders};
+use crate::db::{Confirm2FA, CreateMerchant, GetMerchant, GetTransaction, GetTransactions};
 use crate::errors::*;
-use crate::fsm::{GetUnpaidOrder, PayOrder};
-use crate::models::{Currency, Money, Order};
+use crate::fsm::{CreatePayment, GetUnpaidPayment, MakePayment};
+use crate::models::{Currency, Money, Transaction};
 use crate::totp::Totp;
 use crate::wallet::Slate;
 use actix_web::http::Method;
@@ -19,12 +19,13 @@ use futures::future::{ok, result, Either, Future};
 use futures::stream::Stream;
 use mime_guess::get_mime_type;
 use serde::Deserialize;
+use std::env;
 
 #[derive(Template)]
 #[template(path = "index.html")]
 struct IndexTemplate<'a> {
     merchant_id: &'a str,
-    orders: Vec<Order>,
+    transactions: Vec<Transaction>,
 }
 
 pub fn index(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse> {
@@ -34,17 +35,17 @@ pub fn index(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse> {
     };
     req.state()
         .db
-        .send(GetOrders {
+        .send(GetTransactions {
             merchant_id: merchant_id.clone(),
             offset: 0,
             limit: 100,
         })
         .from_err()
         .and_then(move |db_response| {
-            let orders = db_response?;
+            let transactions = db_response?;
             let html = IndexTemplate {
                 merchant_id: &merchant_id,
-                orders,
+                transactions,
             }
             .render()
             .map_err(|e| Error::from(e))?;
@@ -139,50 +140,58 @@ pub fn get_merchant(
 }
 
 #[derive(Debug, Deserialize)]
-pub struct CreateOrderRequest {
+pub struct CreatePaymentRequest {
     pub order_id: String,
     pub amount: Money,
     pub confirmations: i32,
     pub email: Option<String>,
+    pub message: String,
 }
 
-pub fn create_order(
-    (merchant_id, order_req, state): (Path<String>, Json<CreateOrderRequest>, State<AppState>),
+pub fn create_payment(
+    (merchant_id, payment_req, state): (Path<String>, Json<CreatePaymentRequest>, State<AppState>),
 ) -> FutureResponse<HttpResponse> {
-    let create_order = CreateOrder {
+    let create_transaction = CreatePayment {
         merchant_id: merchant_id.into_inner(),
-        external_id: order_req.order_id.clone(),
-        amount: order_req.amount,
-        confirmations: order_req.confirmations,
-        email: order_req.email.clone(),
+        external_id: payment_req.order_id.clone(),
+        amount: payment_req.amount,
+        confirmations: payment_req.confirmations,
+        email: payment_req.email.clone(),
+        message: payment_req.message.clone(),
     };
     state
-        .db
-        .send(create_order)
+        .fsm
+        .send(create_transaction)
         .from_err()
         .and_then(|db_response| {
-            let order = db_response?;
+            let unpaid_payment = db_response?;
 
-            Ok(HttpResponse::Ok().json(order))
+            Ok(HttpResponse::Ok().json(unpaid_payment))
         })
         .responder()
 }
 
-pub fn get_order(
-    (get_order, state): (Path<GetOrder>, State<AppState>),
+pub fn get_payment(
+    (get_transaction, state): (Path<GetTransaction>, State<AppState>),
 ) -> FutureResponse<HttpResponse> {
     state
         .db
-        .send(get_order.into_inner())
+        .send(get_transaction.into_inner())
         .from_err()
         .and_then(|db_response| {
-            let order = db_response?;
-            let html = OrderTemplate {
-                order_id: order.id.to_string(),
-                merchant_id: order.merchant_id,
-                amount: order.amount,
-                grin_amount: Money::new(order.grin_amount, Currency::GRIN),
-                status: order.status.to_string(),
+            let transaction = db_response?;
+            let html = PaymentTemplate {
+                transaction_id: transaction.id.to_string(),
+                merchant_id: transaction.merchant_id.clone(),
+                amount: transaction.amount,
+                grin_amount: Money::new(transaction.grin_amount, Currency::GRIN),
+                status: transaction.status.to_string(),
+                payment_url: format!(
+                    "{}/merchants/{}/payments/{}",
+                    env::var("DOMAIN").unwrap().trim_end_matches('/'),
+                    transaction.merchant_id,
+                    transaction.id.to_string()
+                ),
             }
             .render()
             .map_err(|e| Error::from(e))?;
@@ -192,13 +201,14 @@ pub fn get_order(
 }
 
 #[derive(Template)]
-#[template(path = "order.html")]
-struct OrderTemplate {
-    order_id: String,
+#[template(path = "payment.html")]
+struct PaymentTemplate {
+    transaction_id: String,
     merchant_id: String,
     status: String,
     amount: Money,
     grin_amount: Money,
+    payment_url: String,
 }
 
 pub fn get_tx(state: State<AppState>) -> Box<Future<Item = HttpResponse, Error = Error>> {
@@ -326,8 +336,12 @@ pub fn post_totp(
         .responder()
 }
 
-pub fn pay_order(
-    (order, req, state): (Path<GetUnpaidOrder>, HttpRequest<AppState>, State<AppState>),
+pub fn make_payment(
+    (payment, req, state): (
+        Path<GetUnpaidPayment>,
+        HttpRequest<AppState>,
+        State<AppState>,
+    ),
 ) -> FutureResponse<HttpResponse, Error> {
     req.payload()
         .map_err(|e| Error::Internal(format!("Payload error: {:?}", e)))
@@ -348,29 +362,29 @@ pub fn pay_order(
             let slate_amount = slate.amount;
             state
                 .fsm
-                .send(order.into_inner())
+                .send(payment.into_inner())
                 .from_err()
                 .and_then(move |db_response| {
-                    let unpaid_order = db_response?;
-                    if unpaid_order.grin_amount != slate_amount as i64 {
+                    let unpaid_payment = db_response?;
+                    if unpaid_payment.grin_amount != slate_amount as i64 {
                         return Err(Error::WrongAmount(
-                            unpaid_order.grin_amount as u64,
+                            unpaid_payment.grin_amount as u64,
                             slate_amount,
                         ));
                     }
-                    Ok(unpaid_order)
+                    Ok(unpaid_payment)
                 })
                 .and_then({
                     let wallet = state.wallet.clone();
                     let fsm = state.fsm.clone();
-                    move |unpaid_order| {
+                    move |unpaid_payment| {
                         let slate = wallet.receive(&slate);
                         slate.and_then(move |slate| {
                             wallet
                                 .get_tx(&slate.id.hyphenated().to_string())
                                 .and_then(move |wallet_tx| {
-                                    fsm.send(PayOrder {
-                                        unpaid_order,
+                                    fsm.send(MakePayment {
+                                        unpaid_payment,
                                         wallet_tx,
                                     })
                                     .from_err()

@@ -14,7 +14,15 @@ table! {
 }
 
 table! {
-    orders (id) {
+    rates (id) {
+        id -> Text,
+        rate -> Float8,
+        updated_at -> Timestamp,
+    }
+}
+
+table! {
+    transactions (id) {
         id -> Uuid,
         external_id -> Text,
         merchant_id -> Text,
@@ -28,14 +36,10 @@ table! {
         reported -> Bool,
         report_attempts -> Int4,
         next_report_attempt -> Nullable<Timestamp>,
-    }
-}
-
-table! {
-    rates (id) {
-        id -> Text,
-        rate -> Float8,
-        updated_at -> Timestamp,
+        wallet_tx_id -> Nullable<Int8>,
+        wallet_tx_slate_id -> Nullable<Text>,
+        message -> Text,
+        slate_messages -> Nullable<Array<Text>>,
     }
 }
 
@@ -55,12 +59,12 @@ table! {
     }
 }
 
-joinable!(orders -> merchants (merchant_id));
-joinable!(txs -> orders (order_id));
+joinable!(transactions -> merchants (merchant_id));
+joinable!(txs -> transactions (order_id));
 
 allow_tables_to_appear_in_same_query!(
     merchants,
-    orders,
     rates,
+    transactions,
     txs,
 );

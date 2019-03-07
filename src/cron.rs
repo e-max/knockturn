@@ -1,7 +1,7 @@
 use crate::db::DbExecutor;
 use crate::errors::Error;
 use crate::fsm::{
-    ConfirmOrder, Fsm, GetPendingOrders, GetUnreportedOrders, RejectOrder, ReportOrder,
+    ConfirmPayment, Fsm, GetPendingPayments, GetUnreportedPayments, RejectPayment, ReportPayment,
 };
 use crate::rates::RatesFetcher;
 use crate::wallet::Wallet;
@@ -27,8 +27,8 @@ impl Actor for Cron {
                 rates.fetch();
             },
         );
-        ctx.run_interval(std::time::Duration::new(5, 0), process_pending_orders);
-        ctx.run_interval(std::time::Duration::new(5, 0), process_unreported_orders);
+        ctx.run_interval(std::time::Duration::new(5, 0), process_pending_payments);
+        ctx.run_interval(std::time::Duration::new(5, 0), process_unreported_payments);
     }
 
     fn stopping(&mut self, _ctx: &mut Self::Context) -> Running {
@@ -42,27 +42,27 @@ impl Cron {
     }
 }
 
-fn process_pending_orders(cron: &mut Cron, _: &mut Context<Cron>) {
-    debug!("run process_pending_orders");
+fn process_pending_payments(cron: &mut Cron, _: &mut Context<Cron>) {
+    debug!("run process_pending_payments");
     let wallet = cron.wallet.clone();
     let fsm = cron.fsm.clone();
     let res = cron
         .fsm
-        .send(GetPendingOrders)
+        .send(GetPendingPayments)
         .map_err(|e| Error::General(s!(e)))
         .and_then(move |db_response| {
-            let orders = db_response?;
-            Ok(orders)
+            let payments = db_response?;
+            Ok(payments)
         })
-        .and_then(move |orders| {
+        .and_then(move |payments| {
             let mut futures = vec![];
-            debug!("Found {} pending orders", orders.len());
-            for (order, txs) in orders {
-                if order.is_expired() {
-                    debug!("Order {} expired: try to reject it", order.id);
+            debug!("Found {} pending payments", payments.len());
+            for payment in payments {
+                if payment.is_expired() {
+                    debug!("payment {} expired: try to reject it", payment.id);
                     futures.push(Either::A(
-                        fsm.send(RejectOrder {
-                            order: order.clone(),
+                        fsm.send(RejectPayment {
+                            payment: payment.clone(),
                         })
                         .map_err(|e| Error::General(s!(e)))
                         .and_then(|db_response| {
@@ -70,71 +70,67 @@ fn process_pending_orders(cron: &mut Cron, _: &mut Context<Cron>) {
                             Ok(())
                         })
                         .or_else(move |e| {
-                            error!("Cannot reject order {}: {}", order.id, e);
+                            error!("Cannot reject payment {}: {}", payment.id, e);
                             Ok(())
                         }),
                     ));
                     continue;
                 }
-                println!("\x1B[31;1m order\x1B[0m = {:?}", order);
-                println!("\x1B[31;1m txs\x1B[0m = {:?}", txs);
-                for tx in txs {
-                    println!("\x1B[31;1m tx\x1B[0m = {:?}", tx);
-                    let res = wallet
-                        .get_tx(&tx.slate_id)
-                        .and_then({
-                            let fsm = fsm.clone();
-                            let order = order.clone();
-                            move |wallet_tx| {
-                                println!("\x1B[31;1m wallet_tx\x1B[0m = {:?}", wallet_tx);
-                                if wallet_tx.confirmed {
-                                    info!("Order {} confirmed", order.id);
-                                    let res = fsm
-                                        .send(ConfirmOrder { order, wallet_tx })
-                                        .from_err()
-                                        .and_then(|msg_response| {
-                                            msg_response?;
-                                            Ok(())
-                                        });
-                                    Either::A(res)
-                                } else {
-                                    Either::B(ok(()))
-                                }
+                println!("\x1B[31;1m payment\x1B[0m = {:?}", payment);
+                let res = wallet
+                    .get_tx(&payment.wallet_tx_slate_id.clone().unwrap()) //we should have this field up to this moment
+                    .and_then({
+                        let fsm = fsm.clone();
+                        let payment = payment.clone();
+                        move |wallet_tx| {
+                            println!("\x1B[31;1m wallet_tx\x1B[0m = {:?}", wallet_tx);
+                            if wallet_tx.confirmed {
+                                info!("payment {} confirmed", payment.id);
+                                let res = fsm
+                                    .send(ConfirmPayment { payment, wallet_tx })
+                                    .from_err()
+                                    .and_then(|msg_response| {
+                                        msg_response?;
+                                        Ok(())
+                                    });
+                                Either::A(res)
+                            } else {
+                                Either::B(ok(()))
                             }
-                        })
-                        .or_else({
-                            let order_id = order.id.clone();
-                            move |e| {
-                                warn!("Couldn't confirm order {}: {}", order_id, e);
-                                Ok(())
-                            }
-                        });
-                    futures.push(Either::B(res));
-                }
+                        }
+                    })
+                    .or_else({
+                        let payment_id = payment.id.clone();
+                        move |e| {
+                            warn!("Couldn't confirm payment {}: {}", payment_id, e);
+                            Ok(())
+                        }
+                    });
+                futures.push(Either::B(res));
             }
             join_all(futures).map(|_| ())
         });
-    actix::spawn(res.map_err(|e| error!("Got an error in processing penging orders {}", e)));
+    actix::spawn(res.map_err(|e| error!("Got an error in processing penging payments {}", e)));
 }
 
-fn process_unreported_orders(cron: &mut Cron, _: &mut Context<Cron>) {
+fn process_unreported_payments(cron: &mut Cron, _: &mut Context<Cron>) {
     let res = cron
         .fsm
-        .send(GetUnreportedOrders)
+        .send(GetUnreportedPayments)
         .map_err(|e| Error::General(s!(e)))
         .and_then(move |db_response| {
-            let orders = db_response?;
-            Ok(orders)
+            let payments = db_response?;
+            Ok(payments)
         })
         .and_then({
             let fsm = cron.fsm.clone();
-            move |orders| {
+            move |payments| {
                 let mut futures = vec![];
-                debug!("Found {} unreported orders", orders.len());
-                for order in orders {
-                    let order_id = order.id.clone();
+                debug!("Found {} unreported payments", payments.len());
+                for payment in payments {
+                    let payment_id = payment.id.clone();
                     futures.push(
-                        fsm.send(ReportOrder { order })
+                        fsm.send(ReportPayment { payment })
                             .map_err(|e| Error::General(s!(e)))
                             .and_then(|db_response| {
                                 db_response?;
@@ -142,7 +138,7 @@ fn process_unreported_orders(cron: &mut Cron, _: &mut Context<Cron>) {
                             })
                             .or_else({
                                 move |e| {
-                                    warn!("Couldn't report order {}: {}", order_id, e);
+                                    warn!("Couldn't report payment {}: {}", payment_id, e);
                                     Ok(())
                                 }
                             }),

@@ -30,8 +30,8 @@ pub enum Error {
     #[fail(display = "Wrong amount. Required {} received {}", _0, _1)]
     WrongAmount(u64, u64),
 
-    #[fail(display = "Wrong order status {}", _0)]
-    WrongOrderStatus(String),
+    #[fail(display = "Wrong transaction status {}", _0)]
+    WrongTransactionStatus(String),
 
     #[fail(display = "Cannot call callback_url {} : {}", callback_url, error)]
     MerchantCallbackError { callback_url: String, error: String },
