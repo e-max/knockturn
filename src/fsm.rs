@@ -83,7 +83,7 @@ impl Handler<GetUnpaidPayment> for Fsm {
         let res = self
             .db
             .send(GetTransaction {
-                id: msg.transaction_id,
+                transaction_id: msg.transaction_id,
             })
             .from_err()
             .and_then(move |db_response| {

@@ -39,7 +39,7 @@ pub struct GetMerchant {
 
 #[derive(Debug, Deserialize)]
 pub struct GetTransaction {
-    pub id: Uuid,
+    pub transaction_id: Uuid,
 }
 
 #[derive(Debug, Deserialize)]
@@ -241,7 +241,7 @@ impl Handler<GetTransaction> for DbExecutor {
         use crate::schema::transactions::dsl::*;
         let conn: &PgConnection = &self.0.get().unwrap();
         transactions
-            .find(msg.id)
+            .find(msg.transaction_id)
             .get_result(conn)
             .map_err(|e| e.into())
     }
