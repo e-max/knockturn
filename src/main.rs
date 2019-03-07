@@ -72,7 +72,6 @@ fn main() {
         move |_| cron::Cron::new(cron_db, wallet, fsm)
     });
 
-    let host = env::var("HOST").unwrap_or(s!("0.0.0.0:3000"));
     let mut srv = server::new(move || {
         app::create_app(
             address.clone(),
