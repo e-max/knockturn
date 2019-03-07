@@ -12,7 +12,7 @@
 	<h1>Transaction {{transaction_id}}</h1>
 	<table>
 		<tr><td>Send {{grin_amount}} to:</td></tr>
-		<tr><td>grin --floonet wallet send -s smallest -d http://castle.yourowncryp.to:3000/merchants/{{merchant_id}}/transactions/{{transaction_id}} {{grin_amount}}</td></tr>
+		<tr><td><pre>grin --floonet wallet send -s smallest -d {{payment_url}} {{grin_amount}}</pre></td></tr>
 		<tr><td>Status</td></tr>
 		<tr><td>{{status}}</td></tr>
 		<tr><td>Amount</td></tr>

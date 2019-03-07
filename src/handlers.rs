@@ -19,6 +19,7 @@ use futures::future::{ok, result, Either, Future};
 use futures::stream::Stream;
 use mime_guess::get_mime_type;
 use serde::Deserialize;
+use std::env;
 
 #[derive(Template)]
 #[template(path = "index.html")]
@@ -181,10 +182,16 @@ pub fn get_payment(
             let transaction = db_response?;
             let html = PaymentTemplate {
                 transaction_id: transaction.id.to_string(),
-                merchant_id: transaction.merchant_id,
+                merchant_id: transaction.merchant_id.clone(),
                 amount: transaction.amount,
                 grin_amount: Money::new(transaction.grin_amount, Currency::GRIN),
                 status: transaction.status.to_string(),
+                payment_url: format!(
+                    "{}/merchants/{}/payments/{}",
+                    env::var("DOMAIN").unwrap().trim_end_matches('/'),
+                    transaction.merchant_id,
+                    transaction.id.to_string()
+                ),
             }
             .render()
             .map_err(|e| Error::from(e))?;
@@ -201,6 +208,7 @@ struct PaymentTemplate {
     status: String,
     amount: Money,
     grin_amount: Money,
+    payment_url: String,
 }
 
 pub fn get_tx(state: State<AppState>) -> Box<Future<Item = HttpResponse, Error = Error>> {
