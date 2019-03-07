@@ -57,7 +57,7 @@ fn process_pending_orders(cron: &mut Cron, _: &mut Context<Cron>) {
         .and_then(move |orders| {
             let mut futures = vec![];
             debug!("Found {} pending orders", orders.len());
-            for (order, txs) in orders {
+            for order in orders {
                 if order.is_expired() {
                     debug!("Order {} expired: try to reject it", order.id);
                     futures.push(Either::A(
@@ -77,40 +77,36 @@ fn process_pending_orders(cron: &mut Cron, _: &mut Context<Cron>) {
                     continue;
                 }
                 println!("\x1B[31;1m order\x1B[0m = {:?}", order);
-                println!("\x1B[31;1m txs\x1B[0m = {:?}", txs);
-                for tx in txs {
-                    println!("\x1B[31;1m tx\x1B[0m = {:?}", tx);
-                    let res = wallet
-                        .get_tx(&tx.slate_id)
-                        .and_then({
-                            let fsm = fsm.clone();
-                            let order = order.clone();
-                            move |wallet_tx| {
-                                println!("\x1B[31;1m wallet_tx\x1B[0m = {:?}", wallet_tx);
-                                if wallet_tx.confirmed {
-                                    info!("Order {} confirmed", order.id);
-                                    let res = fsm
-                                        .send(ConfirmOrder { order, wallet_tx })
-                                        .from_err()
-                                        .and_then(|msg_response| {
-                                            msg_response?;
-                                            Ok(())
-                                        });
-                                    Either::A(res)
-                                } else {
-                                    Either::B(ok(()))
-                                }
+                let res = wallet
+                    .get_tx(&order.wallet_tx_slate_id.clone().unwrap()) //we should have this field up to this moment
+                    .and_then({
+                        let fsm = fsm.clone();
+                        let order = order.clone();
+                        move |wallet_tx| {
+                            println!("\x1B[31;1m wallet_tx\x1B[0m = {:?}", wallet_tx);
+                            if wallet_tx.confirmed {
+                                info!("Order {} confirmed", order.id);
+                                let res = fsm
+                                    .send(ConfirmOrder { order, wallet_tx })
+                                    .from_err()
+                                    .and_then(|msg_response| {
+                                        msg_response?;
+                                        Ok(())
+                                    });
+                                Either::A(res)
+                            } else {
+                                Either::B(ok(()))
                             }
-                        })
-                        .or_else({
-                            let order_id = order.id.clone();
-                            move |e| {
-                                warn!("Couldn't confirm order {}: {}", order_id, e);
-                                Ok(())
-                            }
-                        });
-                    futures.push(Either::B(res));
-                }
+                        }
+                    })
+                    .or_else({
+                        let order_id = order.id.clone();
+                        move |e| {
+                            warn!("Couldn't confirm order {}: {}", order_id, e);
+                            Ok(())
+                        }
+                    });
+                futures.push(Either::B(res));
             }
             join_all(futures).map(|_| ())
         });

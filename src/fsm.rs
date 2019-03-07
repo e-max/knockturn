@@ -1,10 +1,10 @@
 use crate::clients::BearerTokenAuth;
 use crate::db::{
-    self, ConfirmTx, CreateTx, DbExecutor, GetMerchant, GetOrder, MarkAsReported, ReportAttempt,
-    UpdateOrderStatus,
+    self, DbExecutor, GetMerchant, GetOrder, MarkAsReported, ReportAttempt, UpdateOrderStatus,
+    UpdateOrderWithTxLog,
 };
 use crate::errors::Error;
-use crate::models::{Order, OrderStatus, Tx};
+use crate::models::{Order, OrderStatus};
 use crate::wallet::TxLogEntry;
 use crate::wallet::Wallet;
 use actix::{Actor, Addr, Context, Handler, Message, ResponseFuture};
@@ -73,29 +73,20 @@ impl Handler<PayOrder> for Fsm {
 
     fn handle(&mut self, msg: PayOrder, _: &mut Self::Context) -> Self::Result {
         let order_id = msg.unpaid_order.id.clone();
-        let tx = msg.wallet_tx.clone();
-        let messages: Vec<String> = if let Some(pm) = tx.messages {
+        let wallet_tx = msg.wallet_tx.clone();
+        let messages: Option<Vec<String>> = wallet_tx.messages.map(|pm| {
             pm.messages
                 .into_iter()
                 .map(|pmd| pmd.message)
                 .filter_map(|x| x)
                 .collect()
-        } else {
-            vec![]
-        };
+        });
 
-        let msg = CreateTx {
-            slate_id: tx.tx_slate_id.unwrap(),
-            created_at: tx.creation_ts.naive_utc(),
-            confirmed: tx.confirmed,
-            confirmed_at: tx.confirmation_ts.map(|dt| dt.naive_utc()),
-            fee: tx.fee.map(|f| f as i64),
+        let msg = UpdateOrderWithTxLog {
+            order_id: order_id.clone(),
+            wallet_tx_id: wallet_tx.id as i64,
+            wallet_tx_slate_id: wallet_tx.tx_slate_id.unwrap(),
             messages: messages,
-            num_inputs: tx.num_inputs as i64,
-            num_outputs: tx.num_outputs as i64,
-            //FIXME
-            tx_type: format!("{:?}", tx.tx_type),
-            order_id: order_id,
         };
         let res = self
             .db
@@ -128,15 +119,14 @@ impl Handler<PayOrder> for Fsm {
 pub struct GetPendingOrders;
 
 impl Message for GetPendingOrders {
-    type Result = Result<Vec<(PendingOrder, Vec<Tx>)>, Error>;
+    type Result = Result<Vec<PendingOrder>, Error>;
 }
 
 #[derive(Debug, Deserialize, Clone, Deref)]
 pub struct PendingOrder(Order);
 
 impl Handler<GetPendingOrders> for Fsm {
-    //type Result = Result<Vec<(PendingOrder, Vec<Tx>)>, Error>;
-    type Result = ResponseFuture<Vec<(PendingOrder, Vec<Tx>)>, Error>;
+    type Result = ResponseFuture<Vec<PendingOrder>, Error>;
 
     fn handle(&mut self, _: GetPendingOrders, _: &mut Self::Context) -> Self::Result {
         Box::new(
@@ -145,10 +135,7 @@ impl Handler<GetPendingOrders> for Fsm {
                 .from_err()
                 .and_then(|db_response| {
                     let data = db_response?;
-                    Ok(data
-                        .into_iter()
-                        .map(|(order, txs)| (PendingOrder(order), txs))
-                        .collect())
+                    Ok(data.into_iter().map(PendingOrder).collect())
                 }),
         )
     }
@@ -170,7 +157,6 @@ impl Handler<ConfirmOrder> for Fsm {
     fn handle(&mut self, msg: ConfirmOrder, _: &mut Self::Context) -> Self::Result {
         let tx_msg = db::ConfirmOrder {
             order: msg.order.0,
-            slate_id: msg.wallet_tx.tx_slate_id.unwrap(),
             confirmed_at: msg.wallet_tx.confirmation_ts.map(|dt| dt.naive_utc()),
         };
         Box::new(self.db.send(tx_msg).from_err().and_then(|res| {

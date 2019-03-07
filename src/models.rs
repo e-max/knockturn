@@ -1,5 +1,5 @@
 use crate::errors::*;
-use crate::schema::{merchants, orders, rates, txs};
+use crate::schema::{merchants, orders, rates};
 use chrono::{Duration, NaiveDateTime, Utc};
 use diesel::backend::Backend;
 use diesel::deserialize::{self, FromSql};
@@ -112,10 +112,11 @@ pub struct Order {
     #[serde(skip_serializing)]
     pub next_report_attempt: Option<NaiveDateTime>,
     #[serde(skip_serializing)]
-    pub tx_id: Option<String>,
+    pub wallet_tx_id: Option<i64>,
     #[serde(skip_serializing)]
-    pub tx_slate_id: Option<String>,
+    pub wallet_tx_slate_id: Option<String>,
     pub message: String,
+    pub slate_messages: Option<Vec<String>>,
 }
 
 impl Order {
@@ -231,25 +232,5 @@ impl fmt::Display for Money {
 pub struct Rate {
     pub id: String,
     pub rate: f64,
-    pub updated_at: NaiveDateTime,
-}
-
-#[derive(
-    Debug, Serialize, PartialEq, Associations, Deserialize, Queryable, Insertable, Identifiable,
-)]
-#[table_name = "txs"]
-#[belongs_to(Order)]
-#[primary_key(slate_id)]
-pub struct Tx {
-    pub slate_id: String,
-    pub created_at: NaiveDateTime,
-    pub confirmed: bool,
-    pub confirmed_at: Option<NaiveDateTime>,
-    pub fee: Option<i64>,
-    pub messages: Vec<String>,
-    pub num_inputs: i64,
-    pub num_outputs: i64,
-    pub tx_type: String,
-    pub order_id: Uuid,
     pub updated_at: NaiveDateTime,
 }

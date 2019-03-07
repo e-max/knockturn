@@ -28,9 +28,10 @@ table! {
         reported -> Bool,
         report_attempts -> Int4,
         next_report_attempt -> Nullable<Timestamp>,
-        tx_id -> Nullable<Text>,
-        tx_slate_id -> Nullable<Text>,
+        wallet_tx_id -> Nullable<Int8>,
+        wallet_tx_slate_id -> Nullable<Text>,
         message -> Text,
+        slate_messages -> Nullable<Array<Text>>,
     }
 }
 

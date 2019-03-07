@@ -1,5 +1,5 @@
 use crate::errors::*;
-use crate::models::{Currency, Merchant, Money, Order, OrderStatus, Rate, Tx};
+use crate::models::{Currency, Merchant, Money, Order, OrderStatus, Rate};
 use actix::{Actor, SyncContext};
 use actix::{Handler, Message};
 use chrono::NaiveDateTime;
@@ -76,74 +76,14 @@ pub struct ConvertCurrency {
     pub to: String,
 }
 
-pub struct GetTxs {
-    pub order_id: Uuid,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct GetTx {
-    pub slate_id: String,
-    pub order_id: Uuid,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct CreateTx {
-    pub slate_id: String,
-    pub created_at: NaiveDateTime,
-    pub confirmed: bool,
-    pub confirmed_at: Option<NaiveDateTime>,
-    pub fee: Option<i64>,
-    pub messages: Vec<String>,
-    pub num_inputs: i64,
-    pub num_outputs: i64,
-    pub tx_type: String,
-    pub order_id: Uuid,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct UpdateTx {
-    pub slate_id: String,
-    pub created_at: NaiveDateTime,
-    pub confirmed: bool,
-    pub confirmed_at: Option<NaiveDateTime>,
-    pub fee: Option<i64>,
-    pub messages: Vec<String>,
-    pub num_inputs: i64,
-    pub num_outputs: i64,
-    pub order_id: Uuid,
-}
-
-impl From<Tx> for UpdateTx {
-    fn from(tx: Tx) -> Self {
-        UpdateTx {
-            slate_id: tx.slate_id,
-            created_at: tx.created_at,
-            confirmed: tx.confirmed,
-            confirmed_at: tx.confirmed_at,
-            fee: tx.fee,
-            messages: tx.messages,
-            num_inputs: tx.num_inputs,
-            num_outputs: tx.num_outputs,
-            order_id: tx.order_id,
-        }
-    }
-}
-
 #[derive(Debug, Deserialize)]
 pub struct GetPendingOrders;
 
 #[derive(Debug, Deserialize)]
 pub struct GetConfirmedOrders;
 
-#[derive(Debug, Deserialize)]
-pub struct ConfirmTx {
-    pub slate_id: String,
-    pub confirmed_at: Option<NaiveDateTime>,
-}
-
 pub struct ConfirmOrder {
     pub order: Order,
-    pub slate_id: String,
     pub confirmed_at: Option<NaiveDateTime>,
 }
 
@@ -169,6 +109,14 @@ pub struct Confirm2FA {
 #[derive(Debug, Deserialize)]
 pub struct Reset2FA {
     pub merchant_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateOrderWithTxLog {
+    pub order_id: Uuid,
+    pub wallet_tx_id: i64,
+    pub wallet_tx_slate_id: String,
+    pub messages: Option<Vec<String>>,
 }
 
 impl Message for CreateMerchant {
@@ -202,31 +150,12 @@ impl Message for RegisterRate {
 impl Message for ConvertCurrency {
     type Result = Result<Money, Error>;
 }
-impl Message for CreateTx {
-    type Result = Result<Tx, Error>;
-}
-impl Message for UpdateTx {
-    type Result = Result<(), Error>;
-}
-
-impl Message for ConfirmTx {
-    type Result = Result<(), Error>;
-}
-
 impl Message for ConfirmOrder {
     type Result = Result<(), Error>;
 }
 
-impl Message for GetTxs {
-    type Result = Result<Vec<Tx>, Error>;
-}
-
-impl Message for GetTx {
-    type Result = Result<Option<Tx>, Error>;
-}
-
 impl Message for GetPendingOrders {
-    type Result = Result<Vec<(Order, Vec<Tx>)>, Error>;
+    type Result = Result<Vec<Order>, Error>;
 }
 
 impl Message for GetConfirmedOrders {
@@ -250,6 +179,10 @@ impl Message for Confirm2FA {
 }
 
 impl Message for Reset2FA {
+    type Result = Result<(), Error>;
+}
+
+impl Message for UpdateOrderWithTxLog {
     type Result = Result<(), Error>;
 }
 
@@ -330,7 +263,7 @@ impl Handler<GetOrders> for DbExecutor {
 }
 
 impl Handler<GetPendingOrders> for DbExecutor {
-    type Result = Result<Vec<(Order, Vec<Tx>)>, Error>;
+    type Result = Result<Vec<Order>, Error>;
 
     fn handle(&mut self, _: GetPendingOrders, _: &mut Self::Context) -> Self::Result {
         use crate::schema::orders::dsl::*;
@@ -341,11 +274,7 @@ impl Handler<GetPendingOrders> for DbExecutor {
             .load::<Order>(conn)
             .map_err(|e| Error::Db(s!(e)))?;
 
-        let txs = Tx::belonging_to(&unpaid_orders)
-            .load::<Tx>(conn)?
-            .grouped_by(&unpaid_orders);
-        let data = unpaid_orders.into_iter().zip(txs).collect::<Vec<_>>();
-        Ok(data)
+        Ok(unpaid_orders)
     }
 }
 
@@ -408,9 +337,10 @@ impl Handler<CreateOrder> for DbExecutor {
             report_attempts: 0,
             next_report_attempt: None,
             reported: false,
-            tx_id: None,
-            tx_slate_id: None,
+            wallet_tx_id: None,
+            wallet_tx_slate_id: None,
             message: msg.message,
+            slate_messages: None,
         };
 
         diesel::insert_into(orders)
@@ -431,6 +361,25 @@ impl Handler<UpdateOrderStatus> for DbExecutor {
             .set((status.eq(msg.status), updated_at.eq(Utc::now().naive_utc())))
             .get_result(conn)
             .map_err(|e| e.into())
+    }
+}
+
+impl Handler<UpdateOrderWithTxLog> for DbExecutor {
+    type Result = Result<(), Error>;
+
+    fn handle(&mut self, msg: UpdateOrderWithTxLog, _: &mut Self::Context) -> Self::Result {
+        use crate::schema::orders::dsl::*;
+        let conn: &PgConnection = &self.0.get().unwrap();
+
+        diesel::update(orders.filter(id.eq(msg.order_id)))
+            .set((
+                wallet_tx_id.eq(msg.wallet_tx_id),
+                wallet_tx_slate_id.eq(msg.wallet_tx_slate_id),
+                slate_messages.eq(msg.messages),
+            ))
+            .get_result(conn)
+            .map_err(|e| e.into())
+            .map(|_: Order| ())
     }
 }
 
@@ -460,90 +409,15 @@ impl Handler<RegisterRate> for DbExecutor {
     }
 }
 
-impl Handler<CreateTx> for DbExecutor {
-    type Result = Result<Tx, Error>;
-
-    fn handle(&mut self, msg: CreateTx, _: &mut Self::Context) -> Self::Result {
-        use crate::schema::txs::dsl::*;
-        let conn: &PgConnection = &self.0.get().unwrap();
-
-        let new_tx = Tx {
-            slate_id: msg.slate_id,
-            created_at: msg.created_at,
-            confirmed: msg.confirmed,
-            confirmed_at: msg.confirmed_at,
-            fee: msg.fee,
-            messages: msg.messages,
-            num_inputs: msg.num_outputs,
-            num_outputs: msg.num_outputs,
-            tx_type: msg.tx_type,
-            order_id: msg.order_id,
-            updated_at: Local::now().naive_local(),
-        };
-
-        diesel::insert_into(txs)
-            .values(&new_tx)
-            .get_result(conn)
-            .map_err(|e| e.into())
-    }
-}
-
-impl Handler<UpdateTx> for DbExecutor {
-    type Result = Result<(), Error>;
-
-    fn handle(&mut self, msg: UpdateTx, _: &mut Self::Context) -> Self::Result {
-        use crate::schema::txs::dsl::*;
-        let conn: &PgConnection = &self.0.get().unwrap();
-
-        diesel::update(txs.filter(slate_id.eq(msg.slate_id)))
-            .set((
-                created_at.eq(msg.created_at),
-                confirmed.eq(msg.confirmed),
-                confirmed_at.eq(msg.confirmed_at),
-                fee.eq(msg.fee),
-                messages.eq(msg.messages),
-                num_inputs.eq(msg.num_outputs),
-                num_outputs.eq(msg.num_outputs),
-                updated_at.eq(Local::now().naive_local()),
-            ))
-            .get_result(conn)
-            .map_err(|e| e.into())
-            .map(|_: Tx| ())
-    }
-}
-
-impl Handler<ConfirmTx> for DbExecutor {
-    type Result = Result<(), Error>;
-
-    fn handle(&mut self, msg: ConfirmTx, _: &mut Self::Context) -> Self::Result {
-        use crate::schema::txs::dsl::*;
-        let conn: &PgConnection = &self.0.get().unwrap();
-
-        diesel::update(txs.filter(slate_id.eq(msg.slate_id)))
-            .set((confirmed.eq(true), confirmed_at.eq(msg.confirmed_at)))
-            .get_result(conn)
-            .map_err(|e| e.into())
-            .map(|_: Tx| ())
-    }
-}
-
 impl Handler<ConfirmOrder> for DbExecutor {
     type Result = Result<(), Error>;
 
     fn handle(&mut self, msg: ConfirmOrder, _: &mut Self::Context) -> Self::Result {
         use crate::schema::merchants;
         use crate::schema::orders;
-        use crate::schema::txs;
         let conn: &PgConnection = &self.0.get().unwrap();
 
         conn.transaction(|| {
-            diesel::update(txs::table.filter(txs::columns::slate_id.eq(msg.slate_id)))
-                .set((
-                    txs::columns::confirmed.eq(true),
-                    txs::columns::confirmed_at.eq(msg.confirmed_at),
-                ))
-                .get_result(conn)
-                .map(|_: Tx| ())?;
             diesel::update(orders::table.filter(orders::columns::id.eq(msg.order.id)))
                 .set((
                     orders::columns::status.eq(OrderStatus::Confirmed),
@@ -562,40 +436,6 @@ impl Handler<ConfirmOrder> for DbExecutor {
             .map(|_: Merchant| ())?;
             Ok(())
         })
-    }
-}
-
-impl Handler<GetTxs> for DbExecutor {
-    type Result = Result<Vec<Tx>, Error>;
-
-    fn handle(&mut self, msg: GetTxs, _: &mut Self::Context) -> Self::Result {
-        use crate::schema::txs::dsl::*;
-        let conn: &PgConnection = &self.0.get().unwrap();
-        txs.filter(order_id.eq(msg.order_id))
-            .load::<Tx>(conn)
-            .map_err(|e| e.into())
-    }
-}
-
-impl Handler<GetTx> for DbExecutor {
-    type Result = Result<Option<Tx>, Error>;
-
-    fn handle(&mut self, msg: GetTx, _: &mut Self::Context) -> Self::Result {
-        use crate::schema::txs::dsl::*;
-        let conn: &PgConnection = &self.0.get().unwrap();
-        let sid = msg.slate_id.clone();
-        txs.filter(order_id.eq(msg.order_id))
-            .filter(slate_id.eq(msg.slate_id))
-            .load::<Tx>(conn)
-            .map_err(|e| e.into())
-            .and_then(|transactions| match transactions.len() {
-                0 => Ok(None),
-                1 => Ok(transactions.into_iter().next()),
-                _ => Err(Error::Db(format!(
-                    "Found more than one transaction with slate id {}",
-                    sid
-                ))),
-            })
     }
 }
 
