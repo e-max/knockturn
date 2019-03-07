@@ -56,6 +56,7 @@ pub struct CreateOrder {
     pub amount: Money,
     pub confirmations: i32,
     pub email: Option<String>,
+    pub message: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -407,6 +408,9 @@ impl Handler<CreateOrder> for DbExecutor {
             report_attempts: 0,
             next_report_attempt: None,
             reported: false,
+            tx_id: None,
+            tx_slate_id: None,
+            message: msg.message,
         };
 
         diesel::insert_into(orders)

@@ -111,6 +111,11 @@ pub struct Order {
     pub report_attempts: i32,
     #[serde(skip_serializing)]
     pub next_report_attempt: Option<NaiveDateTime>,
+    #[serde(skip_serializing)]
+    pub tx_id: Option<String>,
+    #[serde(skip_serializing)]
+    pub tx_slate_id: Option<String>,
+    pub message: String,
 }
 
 impl Order {

@@ -144,6 +144,7 @@ pub struct CreateOrderRequest {
     pub amount: Money,
     pub confirmations: i32,
     pub email: Option<String>,
+    pub message: String,
 }
 
 pub fn create_order(
@@ -155,6 +156,7 @@ pub fn create_order(
         amount: order_req.amount,
         confirmations: order_req.confirmations,
         email: order_req.email.clone(),
+        message: order_req.message.clone(),
     };
     state
         .db

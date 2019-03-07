@@ -28,6 +28,9 @@ table! {
         reported -> Bool,
         report_attempts -> Int4,
         next_report_attempt -> Nullable<Timestamp>,
+        tx_id -> Nullable<Text>,
+        tx_slate_id -> Nullable<Text>,
+        message -> Text,
     }
 }
 
