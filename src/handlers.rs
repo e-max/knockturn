@@ -170,7 +170,7 @@ pub fn create_payment(
         .responder()
 }
 
-pub fn get_transaction(
+pub fn get_payment(
     (get_transaction, state): (Path<GetTransaction>, State<AppState>),
 ) -> FutureResponse<HttpResponse> {
     state
@@ -179,7 +179,7 @@ pub fn get_transaction(
         .from_err()
         .and_then(|db_response| {
             let transaction = db_response?;
-            let html = TransactionTemplate {
+            let html = PaymentTemplate {
                 transaction_id: transaction.id.to_string(),
                 merchant_id: transaction.merchant_id,
                 amount: transaction.amount,
@@ -194,8 +194,8 @@ pub fn get_transaction(
 }
 
 #[derive(Template)]
-#[template(path = "transaction.html")]
-struct TransactionTemplate {
+#[template(path = "payment.html")]
+struct PaymentTemplate {
     transaction_id: String,
     merchant_id: String,
     status: String,
