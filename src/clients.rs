@@ -30,10 +30,10 @@ impl BearerTokenAuth for ClientRequestBuilder {
     }
 }
 
-pub trait BasicAuthUser {
-    fn auth_user(&mut self) -> Box<Future<Item = Merchant, Error = Error>>;
-}
-
+//pub trait BasicAuthUser {
+//    fn auth_user(&mut self) -> Box<Future<Item = Merchant, Error = Error>>;
+//}
+//
 //impl BasicAuthUser for HttpRequest<AppState> {
 //    fn auth_user(&mut self) -> Box<Future<Item = Merchant, Error = Error>> {
 //        let base = match self.headers().get("Authentication") {

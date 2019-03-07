@@ -11,6 +11,7 @@ use actix_web::middleware::session::RequestSession;
 use actix_web::{
     AsyncResponder, Form, FutureResponse, HttpMessage, HttpRequest, HttpResponse, Json, Path, State,
 };
+use actix_web_httpauth::extractors::basic::BasicAuth;
 use askama::Template;
 use bcrypt;
 use bytes::BytesMut;
@@ -147,23 +148,50 @@ pub struct CreateOrderRequest {
 }
 
 pub fn create_order(
-    (merchant_id, order_req, state): (Path<String>, Json<CreateOrderRequest>, State<AppState>),
+    (auth, merchant_id, order_req, state): (
+        BasicAuth,
+        Path<String>,
+        Json<CreateOrderRequest>,
+        State<AppState>,
+    ),
 ) -> FutureResponse<HttpResponse> {
-    let create_order = CreateOrder {
-        merchant_id: merchant_id.into_inner(),
-        external_id: order_req.order_id.clone(),
-        amount: order_req.amount,
-        confirmations: order_req.confirmations,
-        email: order_req.email.clone(),
-    };
+    let merchant_id = merchant_id.into_inner();
+    if auth.username() != merchant_id {
+        return Box::new(ok(HttpResponse::BadRequest().finish()));
+    }
+
     state
         .db
-        .send(create_order)
+        .send(GetMerchant {
+            id: merchant_id.clone(),
+        })
         .from_err()
-        .and_then(|db_response| {
-            let order = db_response?;
+        .and_then(move |db_response| {
+            let merchant = db_response?;
+            if merchant.token != auth.password().unwrap_or("") {
+                Err(Error::AuthRequired)
+            } else {
+                Ok(())
+            }
+        })
+        .from_err()
+        .and_then(move |_| {
+            let create_order = CreateOrder {
+                merchant_id: merchant_id,
+                external_id: order_req.order_id.clone(),
+                amount: order_req.amount,
+                confirmations: order_req.confirmations,
+                email: order_req.email.clone(),
+            };
+            state
+                .db
+                .send(create_order)
+                .from_err()
+                .and_then(|db_response| {
+                    let order = db_response?;
 
-            Ok(HttpResponse::Ok().json(order))
+                    Ok(HttpResponse::Ok().json(order))
+                })
         })
         .responder()
 }
