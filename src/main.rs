@@ -39,6 +39,8 @@ fn main() {
 
     let cookie_secret = env::var("COOKIE_SECRET").expect("COOKIE_SECRET must be set");
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    let host = env::var("HOST").unwrap_or("0.0.0.0:3000".to_owned());
+    let _ = env::var("DOMAIN").expect("DOMAIN must be set");
     let sys = actix::System::new("Knockout");
 
     let manager = ConnectionManager::<PgConnection>::new(database_url);
@@ -79,8 +81,8 @@ fn main() {
             cookie_secret.as_bytes(),
         )
     })
-    .bind("0.0.0.0:3000")
-    .expect("Can not bind to '0.0.0.0:3000'")
+    .bind(&host)
+    .expect(&format!("Can not bind to '{}'", &host))
     .start();
 
     sys.run();

@@ -36,17 +36,17 @@ pub fn create_app(
         .resource("/merchants/{merchant_id}", |r| {
             r.method(Method::GET).with(get_merchant)
         })
-        .resource("/merchants/{merchant_id}/orders", |r| {
-            r.method(Method::POST).with(create_order)
+        .resource("/merchants/{merchant_id}/payments", |r| {
+            r.method(Method::POST).with(create_payment)
         })
-        .resource("/merchants/{merchant_id}/orders/{order_id}", |r| {
-            r.method(Method::GET).with(get_order);
-            r.method(Method::POST).with(pay_order);
+        .resource("/merchants/{merchant_id}/payments/{transaction_id}", |r| {
+            r.method(Method::GET).with(get_payment);
+            r.method(Method::POST).with(make_payment);
         })
         .resource(
-            "/merchants/{merchant_id}/orders/{order_id}/{grin_path:.*}",
+            "/merchants/{merchant_id}/payments/{transaction_id}/{grin_path:.*}",
             |r| {
-                r.method(Method::POST).with(pay_order);
+                r.method(Method::POST).with(make_payment);
             },
         )
         .resource("/tx", |r| r.method(Method::GET).with(get_tx))

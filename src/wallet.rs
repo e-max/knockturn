@@ -46,9 +46,15 @@ impl Wallet {
             .send() // <- Send http request
             .map_err(|e| Error::WalletAPIError(s!(e)))
             .and_then(|resp| {
+                if !resp.status().is_success() {
+                    Err(Error::WalletAPIError(format!("Error status: {:?}", resp)))
+                } else {
+                    Ok(resp)
+                }
+            })
+            .and_then(|resp| {
                 // <- server http response
-                println!("Response: {:?}", resp);
-                error!("AAA");
+                debug!("Response: {:?}", resp);
                 resp.body()
                     .map_err(|e| Error::WalletAPIError(s!(e)))
                     .and_then(move |bytes| {
@@ -88,8 +94,15 @@ impl Wallet {
             .send() // <- Send http request
             .map_err(|e| Error::WalletAPIError(s!(e)))
             .and_then(|resp| {
+                if !resp.status().is_success() {
+                    Err(Error::WalletAPIError(format!("Error status: {:?}", resp)))
+                } else {
+                    Ok(resp)
+                }
+            })
+            .and_then(|resp| {
                 // <- server http response
-                println!("Response: {:?}", resp);
+                debug!("Response: {:?}", resp);
                 resp.body()
                     .map_err(|e| Error::WalletAPIError(s!(e)))
                     .and_then(move |bytes| {

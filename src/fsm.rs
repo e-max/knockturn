@@ -1,10 +1,10 @@
 use crate::clients::BearerTokenAuth;
 use crate::db::{
-    self, ConfirmTx, CreateTx, DbExecutor, GetMerchant, GetOrder, MarkAsReported, ReportAttempt,
-    UpdateOrderStatus,
+    self, CreateTransaction, DbExecutor, GetMerchant, GetTransaction, MarkAsReported,
+    ReportAttempt, UpdateTransactionStatus, UpdateTransactionWithTxLog,
 };
 use crate::errors::Error;
-use crate::models::{Order, OrderStatus, Tx};
+use crate::models::{Money, Transaction, TransactionStatus};
 use crate::wallet::TxLogEntry;
 use crate::wallet::Wallet;
 use actix::{Actor, Addr, Context, Handler, Message, ResponseFuture};
@@ -26,76 +26,106 @@ impl Actor for Fsm {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct GetUnpaidOrder {
-    pub order_id: Uuid,
+pub struct CreatePayment {
+    pub merchant_id: String,
+    pub external_id: String,
+    pub amount: Money,
+    pub confirmations: i32,
+    pub email: Option<String>,
+    pub message: String,
 }
 
-impl Message for GetUnpaidOrder {
-    type Result = Result<UnpaidOrder, Error>;
+impl Message for CreatePayment {
+    type Result = Result<UnpaidPayment, Error>;
 }
 
-#[derive(Debug, Deserialize, Clone, Deref)]
-pub struct UnpaidOrder(Order);
+impl Handler<CreatePayment> for Fsm {
+    type Result = ResponseFuture<UnpaidPayment, Error>;
 
-impl Handler<GetUnpaidOrder> for Fsm {
-    type Result = ResponseFuture<UnpaidOrder, Error>;
+    fn handle(&mut self, msg: CreatePayment, _: &mut Self::Context) -> Self::Result {
+        let create_transaction = CreateTransaction {
+            merchant_id: msg.merchant_id,
+            external_id: msg.external_id,
+            amount: msg.amount,
+            confirmations: msg.confirmations,
+            email: msg.email.clone(),
+            message: msg.message.clone(),
+        };
 
-    fn handle(&mut self, msg: GetUnpaidOrder, _: &mut Self::Context) -> Self::Result {
         let res = self
             .db
-            .send(GetOrder {
-                order_id: msg.order_id,
-            })
+            .send(create_transaction)
             .from_err()
             .and_then(move |db_response| {
-                let order = db_response?;
-                if order.status != OrderStatus::Unpaid {
-                    return Err(Error::WrongOrderStatus(s!(order.status)));
-                }
-                Ok(UnpaidOrder(order))
+                let transaction = db_response?;
+                Ok(UnpaidPayment(transaction))
             });
         Box::new(res)
     }
 }
 
 #[derive(Debug, Deserialize)]
-pub struct PayOrder {
-    pub unpaid_order: UnpaidOrder,
+pub struct GetUnpaidPayment {
+    pub transaction_id: Uuid,
+}
+
+impl Message for GetUnpaidPayment {
+    type Result = Result<UnpaidPayment, Error>;
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Deref)]
+pub struct UnpaidPayment(Transaction);
+
+impl Handler<GetUnpaidPayment> for Fsm {
+    type Result = ResponseFuture<UnpaidPayment, Error>;
+
+    fn handle(&mut self, msg: GetUnpaidPayment, _: &mut Self::Context) -> Self::Result {
+        let res = self
+            .db
+            .send(GetTransaction {
+                transaction_id: msg.transaction_id,
+            })
+            .from_err()
+            .and_then(move |db_response| {
+                let transaction = db_response?;
+                if transaction.status != TransactionStatus::Unpaid {
+                    return Err(Error::WrongTransactionStatus(s!(transaction.status)));
+                }
+                Ok(UnpaidPayment(transaction))
+            });
+        Box::new(res)
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MakePayment {
+    pub unpaid_payment: UnpaidPayment,
     pub wallet_tx: TxLogEntry,
 }
 
-impl Message for PayOrder {
-    type Result = Result<(), Error>;
+impl Message for MakePayment {
+    type Result = Result<PendingPayment, Error>;
 }
 
-impl Handler<PayOrder> for Fsm {
-    type Result = ResponseFuture<(), Error>;
+impl Handler<MakePayment> for Fsm {
+    type Result = ResponseFuture<PendingPayment, Error>;
 
-    fn handle(&mut self, msg: PayOrder, _: &mut Self::Context) -> Self::Result {
-        let order_id = msg.unpaid_order.id.clone();
-        let tx = msg.wallet_tx.clone();
-        let messages: Vec<String> = if let Some(pm) = tx.messages {
+    fn handle(&mut self, msg: MakePayment, _: &mut Self::Context) -> Self::Result {
+        let transaction_id = msg.unpaid_payment.id.clone();
+        let wallet_tx = msg.wallet_tx.clone();
+        let messages: Option<Vec<String>> = wallet_tx.messages.map(|pm| {
             pm.messages
                 .into_iter()
                 .map(|pmd| pmd.message)
                 .filter_map(|x| x)
                 .collect()
-        } else {
-            vec![]
-        };
+        });
 
-        let msg = CreateTx {
-            slate_id: tx.tx_slate_id.unwrap(),
-            created_at: tx.creation_ts.naive_utc(),
-            confirmed: tx.confirmed,
-            confirmed_at: tx.confirmation_ts.map(|dt| dt.naive_utc()),
-            fee: tx.fee.map(|f| f as i64),
+        let msg = UpdateTransactionWithTxLog {
+            transaction_id: transaction_id.clone(),
+            wallet_tx_id: wallet_tx.id as i64,
+            wallet_tx_slate_id: wallet_tx.tx_slate_id.unwrap(),
             messages: messages,
-            num_inputs: tx.num_inputs as i64,
-            num_outputs: tx.num_outputs as i64,
-            //FIXME
-            tx_type: format!("{:?}", tx.tx_type),
-            order_id: order_id,
         };
         let res = self
             .db
@@ -107,100 +137,95 @@ impl Handler<PayOrder> for Fsm {
             })
             .and_then({
                 let db = self.db.clone();
-                let order_id = order_id.clone();
+                let transaction_id = transaction_id.clone();
                 move |_| {
-                    db.send(UpdateOrderStatus {
-                        id: order_id,
-                        status: OrderStatus::Pending,
+                    db.send(UpdateTransactionStatus {
+                        id: transaction_id,
+                        status: TransactionStatus::Pending,
                     })
                     .from_err()
                 }
             })
             .and_then(|db_response| {
-                db_response?;
-                Ok(())
+                let transaction = db_response?;
+                Ok(PendingPayment(transaction))
             });
         Box::new(res)
     }
 }
 
 #[derive(Debug, Deserialize)]
-pub struct GetPendingOrders;
+pub struct GetPendingPayments;
 
-impl Message for GetPendingOrders {
-    type Result = Result<Vec<(PendingOrder, Vec<Tx>)>, Error>;
+impl Message for GetPendingPayments {
+    type Result = Result<Vec<PendingPayment>, Error>;
 }
 
 #[derive(Debug, Deserialize, Clone, Deref)]
-pub struct PendingOrder(Order);
+pub struct PendingPayment(Transaction);
 
-impl Handler<GetPendingOrders> for Fsm {
-    //type Result = Result<Vec<(PendingOrder, Vec<Tx>)>, Error>;
-    type Result = ResponseFuture<Vec<(PendingOrder, Vec<Tx>)>, Error>;
+impl Handler<GetPendingPayments> for Fsm {
+    type Result = ResponseFuture<Vec<PendingPayment>, Error>;
 
-    fn handle(&mut self, _: GetPendingOrders, _: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, _: GetPendingPayments, _: &mut Self::Context) -> Self::Result {
         Box::new(
             self.db
-                .send(db::GetPendingOrders)
+                .send(db::GetPendingTransactions)
                 .from_err()
                 .and_then(|db_response| {
                     let data = db_response?;
-                    Ok(data
-                        .into_iter()
-                        .map(|(order, txs)| (PendingOrder(order), txs))
-                        .collect())
+                    Ok(data.into_iter().map(PendingPayment).collect())
                 }),
         )
     }
 }
 
 #[derive(Debug, Deserialize)]
-pub struct ConfirmOrder {
-    pub order: PendingOrder,
+pub struct ConfirmPayment {
+    pub payment: PendingPayment,
     pub wallet_tx: TxLogEntry,
 }
 
-impl Message for ConfirmOrder {
-    type Result = Result<(), Error>;
+impl Message for ConfirmPayment {
+    type Result = Result<ConfirmedPayment, Error>;
 }
 
-impl Handler<ConfirmOrder> for Fsm {
-    type Result = ResponseFuture<(), Error>;
+impl Handler<ConfirmPayment> for Fsm {
+    type Result = ResponseFuture<ConfirmedPayment, Error>;
 
-    fn handle(&mut self, msg: ConfirmOrder, _: &mut Self::Context) -> Self::Result {
-        let tx_msg = db::ConfirmOrder {
-            order: msg.order.0,
-            slate_id: msg.wallet_tx.tx_slate_id.unwrap(),
+    fn handle(&mut self, msg: ConfirmPayment, _: &mut Self::Context) -> Self::Result {
+        let tx_msg = db::ConfirmTransaction {
+            transaction: msg.payment.0,
             confirmed_at: msg.wallet_tx.confirmation_ts.map(|dt| dt.naive_utc()),
         };
         Box::new(self.db.send(tx_msg).from_err().and_then(|res| {
-            res?;
-            Ok(())
+            let tx = res?;
+            Ok(ConfirmedPayment(tx))
         }))
     }
 }
 
 #[derive(Debug, Deserialize)]
-pub struct GetConfirmedOrders;
+pub struct GetConfirmedPayments;
 
-impl Message for GetConfirmedOrders {
-    type Result = Result<Vec<ConfirmedOrder>, Error>;
+impl Message for GetConfirmedPayments {
+    type Result = Result<Vec<ConfirmedPayment>, Error>;
 }
 
 #[derive(Debug, Deserialize, Clone, Deref, Serialize)]
-pub struct ConfirmedOrder(Order);
+pub struct ConfirmedPayment(Transaction);
 
-impl Handler<GetConfirmedOrders> for Fsm {
-    type Result = ResponseFuture<Vec<ConfirmedOrder>, Error>;
+impl Handler<GetConfirmedPayments> for Fsm {
+    type Result = ResponseFuture<Vec<ConfirmedPayment>, Error>;
 
-    fn handle(&mut self, _: GetConfirmedOrders, _: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, _: GetConfirmedPayments, _: &mut Self::Context) -> Self::Result {
         Box::new(
             self.db
-                .send(db::GetConfirmedOrders)
+                .send(db::GetConfirmedTransactions)
                 .from_err()
                 .and_then(|db_response| {
                     let data = db_response?;
-                    Ok(data.into_iter().map(ConfirmedOrder).collect())
+                    Ok(data.into_iter().map(ConfirmedPayment).collect())
                 }),
         )
     }
@@ -209,11 +234,11 @@ impl Handler<GetConfirmedOrders> for Fsm {
 fn run_callback(
     callback_url: &str,
     token: &String,
-    order: Order,
+    transaction: Transaction,
 ) -> impl Future<Item = (), Error = Error> {
     client::post(callback_url) // <- Create request builder
         .bearer_token(token)
-        .json(order)
+        .json(transaction)
         .unwrap()
         .send() // <- Send http request
         .map_err({
@@ -242,91 +267,113 @@ fn run_callback(
 }
 
 #[derive(Debug, Deserialize, Deref)]
-pub struct RejectOrder<T> {
-    pub order: T,
+pub struct RejectPayment<T> {
+    pub payment: T,
 }
 
-impl Message for RejectOrder<UnpaidOrder> {
-    type Result = Result<(), Error>;
+impl Message for RejectPayment<UnpaidPayment> {
+    type Result = Result<RejectedPayment, Error>;
 }
 
-impl Message for RejectOrder<PendingOrder> {
-    type Result = Result<(), Error>;
+impl Message for RejectPayment<PendingPayment> {
+    type Result = Result<RejectedPayment, Error>;
 }
 
-impl Handler<RejectOrder<UnpaidOrder>> for Fsm {
-    type Result = ResponseFuture<(), Error>;
+impl Handler<RejectPayment<UnpaidPayment>> for Fsm {
+    type Result = ResponseFuture<RejectedPayment, Error>;
 
-    fn handle(&mut self, msg: RejectOrder<UnpaidOrder>, _: &mut Self::Context) -> Self::Result {
-        Box::new(reject_order(&self.db, &msg.order.id))
+    fn handle(&mut self, msg: RejectPayment<UnpaidPayment>, _: &mut Self::Context) -> Self::Result {
+        Box::new(reject_transaction(&self.db, &msg.payment.id).map(RejectedPayment))
     }
 }
 
-impl Handler<RejectOrder<PendingOrder>> for Fsm {
-    type Result = ResponseFuture<(), Error>;
+impl Handler<RejectPayment<PendingPayment>> for Fsm {
+    type Result = ResponseFuture<RejectedPayment, Error>;
 
-    fn handle(&mut self, msg: RejectOrder<PendingOrder>, _: &mut Self::Context) -> Self::Result {
-        Box::new(reject_order(&self.db, &msg.order.id))
+    fn handle(
+        &mut self,
+        msg: RejectPayment<PendingPayment>,
+        _: &mut Self::Context,
+    ) -> Self::Result {
+        Box::new(reject_transaction(&self.db, &msg.payment.id).map(RejectedPayment))
     }
 }
 
-fn reject_order(db: &Addr<DbExecutor>, id: &Uuid) -> impl Future<Item = (), Error = Error> {
-    db.send(UpdateOrderStatus {
+fn reject_transaction(
+    db: &Addr<DbExecutor>,
+    id: &Uuid,
+) -> impl Future<Item = Transaction, Error = Error> {
+    db.send(UpdateTransactionStatus {
         id: id.clone(),
-        status: OrderStatus::Rejected,
+        status: TransactionStatus::Rejected,
     })
     .from_err()
     .and_then(|db_response| {
-        db_response?;
-        Ok(())
+        let tx = db_response?;
+        Ok(tx)
     })
 }
 
 #[derive(Debug, Deserialize, Deref)]
-pub struct ReportOrder<T> {
-    pub order: T,
+pub struct ReportPayment<T> {
+    pub payment: T,
 }
 
-impl Message for ReportOrder<ConfirmedOrder> {
+impl Message for ReportPayment<ConfirmedPayment> {
     type Result = Result<(), Error>;
 }
 
-impl Message for ReportOrder<RejectedOrder> {
+impl Message for ReportPayment<RejectedPayment> {
     type Result = Result<(), Error>;
 }
 
-impl Message for ReportOrder<UnreportedOrder> {
+impl Message for ReportPayment<UnreportedPayment> {
     type Result = Result<(), Error>;
 }
 
-impl Handler<ReportOrder<ConfirmedOrder>> for Fsm {
+impl Handler<ReportPayment<ConfirmedPayment>> for Fsm {
     type Result = ResponseFuture<(), Error>;
 
-    fn handle(&mut self, msg: ReportOrder<ConfirmedOrder>, _: &mut Self::Context) -> Self::Result {
-        Box::new(report_order(self.db.clone(), msg.order.0))
+    fn handle(
+        &mut self,
+        msg: ReportPayment<ConfirmedPayment>,
+        _: &mut Self::Context,
+    ) -> Self::Result {
+        Box::new(report_transaction(self.db.clone(), msg.payment.0))
     }
 }
 
-impl Handler<ReportOrder<RejectedOrder>> for Fsm {
+impl Handler<ReportPayment<RejectedPayment>> for Fsm {
     type Result = ResponseFuture<(), Error>;
 
-    fn handle(&mut self, msg: ReportOrder<RejectedOrder>, _: &mut Self::Context) -> Self::Result {
-        Box::new(report_order(self.db.clone(), msg.order.0))
+    fn handle(
+        &mut self,
+        msg: ReportPayment<RejectedPayment>,
+        _: &mut Self::Context,
+    ) -> Self::Result {
+        Box::new(report_transaction(self.db.clone(), msg.payment.0))
     }
 }
 
-impl Handler<ReportOrder<UnreportedOrder>> for Fsm {
+impl Handler<ReportPayment<UnreportedPayment>> for Fsm {
     type Result = ResponseFuture<(), Error>;
 
-    fn handle(&mut self, msg: ReportOrder<UnreportedOrder>, _: &mut Self::Context) -> Self::Result {
-        Box::new(report_order(self.db.clone(), msg.order.0))
+    fn handle(
+        &mut self,
+        msg: ReportPayment<UnreportedPayment>,
+        _: &mut Self::Context,
+    ) -> Self::Result {
+        Box::new(report_transaction(self.db.clone(), msg.payment.0))
     }
 }
 
-fn report_order(db: Addr<DbExecutor>, order: Order) -> impl Future<Item = (), Error = Error> {
-    debug!("Try to report order {}", order.id);
+fn report_transaction(
+    db: Addr<DbExecutor>,
+    transaction: Transaction,
+) -> impl Future<Item = (), Error = Error> {
+    debug!("Try to report transaction {}", transaction.id);
     db.send(GetMerchant {
-        id: order.merchant_id.clone(),
+        id: transaction.merchant_id.clone(),
     })
     .from_err()
     .and_then(|res| {
@@ -336,17 +383,19 @@ fn report_order(db: Addr<DbExecutor>, order: Order) -> impl Future<Item = (), Er
     .and_then(move |merchant| {
         if let Some(callback_url) = merchant.callback_url.clone() {
             debug!("Run callback for merchant {}", merchant.email);
-            let res = run_callback(&callback_url, &merchant.token, order.clone())
+            let res = run_callback(&callback_url, &merchant.token, transaction.clone())
                 .or_else({
                     let db = db.clone();
-                    let order = order.clone();
+                    let transaction = transaction.clone();
                     move |callback_err| {
                         // try call ReportAttempt but ignore errors and return
                         // error from callback
                         let next_attempt = Utc::now().naive_utc()
-                            + Duration::seconds(10 * (order.report_attempts + 1).pow(2) as i64);
+                            + Duration::seconds(
+                                10 * (transaction.report_attempts + 1).pow(2) as i64,
+                            );
                         db.send(ReportAttempt {
-                            order_id: order.id,
+                            transaction_id: transaction.id,
                             next_attempt: Some(next_attempt),
                         })
                         .map_err(|e| Error::General(s!(e)))
@@ -363,9 +412,9 @@ fn report_order(db: Addr<DbExecutor>, order: Order) -> impl Future<Item = (), Er
                 })
                 .and_then({
                     let db = db.clone();
-                    let order_id = order.id.clone();
+                    let transaction_id = transaction.id.clone();
                     move |_| {
-                        db.send(MarkAsReported { order_id })
+                        db.send(MarkAsReported { transaction_id })
                             .from_err()
                             .and_then(|db_response| {
                                 db_response?;
@@ -376,40 +425,42 @@ fn report_order(db: Addr<DbExecutor>, order: Order) -> impl Future<Item = (), Er
             Either::A(res)
         } else {
             Either::B(
-                db.send(MarkAsReported { order_id: order.id })
-                    .from_err()
-                    .and_then(|db_response| {
-                        db_response?;
-                        Ok(())
-                    }),
+                db.send(MarkAsReported {
+                    transaction_id: transaction.id,
+                })
+                .from_err()
+                .and_then(|db_response| {
+                    db_response?;
+                    Ok(())
+                }),
             )
         }
     })
 }
 
-pub struct RejectedOrder(Order);
+pub struct RejectedPayment(Transaction);
 
 #[derive(Debug, Deserialize)]
-pub struct GetUnreportedOrders;
+pub struct GetUnreportedPayments;
 
-impl Message for GetUnreportedOrders {
-    type Result = Result<Vec<UnreportedOrder>, Error>;
+impl Message for GetUnreportedPayments {
+    type Result = Result<Vec<UnreportedPayment>, Error>;
 }
 
 #[derive(Debug, Deserialize, Clone, Deref)]
-pub struct UnreportedOrder(Order);
+pub struct UnreportedPayment(Transaction);
 
-impl Handler<GetUnreportedOrders> for Fsm {
-    type Result = ResponseFuture<Vec<UnreportedOrder>, Error>;
+impl Handler<GetUnreportedPayments> for Fsm {
+    type Result = ResponseFuture<Vec<UnreportedPayment>, Error>;
 
-    fn handle(&mut self, _: GetUnreportedOrders, _: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, _: GetUnreportedPayments, _: &mut Self::Context) -> Self::Result {
         Box::new(
             self.db
-                .send(db::GetUnreportedOrders)
+                .send(db::GetUnreportedTransactions)
                 .from_err()
                 .and_then(|db_response| {
                     let data = db_response?;
-                    Ok(data.into_iter().map(UnreportedOrder).collect())
+                    Ok(data.into_iter().map(UnreportedPayment).collect())
                 }),
         )
     }

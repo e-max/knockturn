@@ -1,5 +1,5 @@
 use crate::errors::*;
-use crate::schema::{merchants, orders, rates, txs};
+use crate::schema::{merchants, rates, transactions};
 use chrono::{Duration, NaiveDateTime, Utc};
 use diesel::backend::Backend;
 use diesel::deserialize::{self, FromSql};
@@ -33,20 +33,20 @@ pub struct Merchant {
 
 /*
  * The status changes flow is as follows:
- * Unpaid - order was created but no attempts were maid to pay
+ * Unpaid - transaction was created but no attempts were maid to pay
  * Pending - user sent a slate and we succesfully sent it to wallet
  * Finalized - transaction was accepted to chain (Not used yet)
  * Confirmed - we got required number of confirmation for this transaction
  * Reported - we've reported result to merchant
- * Rejected - order spent too much time in Unpaid or Pending state
- * Dead - We mark Rejected order as Dead as soon as we report it to merchant
+ * Rejected - transaction spent too much time in Unpaid or Pending state
+ * Dead - We mark Rejected transaction as Dead as soon as we report it to merchant
  */
 
 #[derive(
     Clone, EnumString, Display, Debug, PartialEq, AsExpression, Serialize, Deserialize, FromSqlRow,
 )]
 #[sql_type = "SmallInt"]
-pub enum OrderStatus {
+pub enum TransactionStatus {
     Unpaid,
     Pending,
     Rejected,
@@ -54,7 +54,7 @@ pub enum OrderStatus {
     Confirmed,
 }
 
-impl<DB: Backend> ToSql<SmallInt, DB> for OrderStatus
+impl<DB: Backend> ToSql<SmallInt, DB> for TransactionStatus
 where
     i16: ToSql<SmallInt, DB>,
 {
@@ -63,28 +63,28 @@ where
         W: io::Write,
     {
         let v = match *self {
-            OrderStatus::Unpaid => 1,
-            OrderStatus::Pending => 2,
-            OrderStatus::Rejected => 3,
-            OrderStatus::Finalized => 4,
-            OrderStatus::Confirmed => 5,
+            TransactionStatus::Unpaid => 1,
+            TransactionStatus::Pending => 2,
+            TransactionStatus::Rejected => 3,
+            TransactionStatus::Finalized => 4,
+            TransactionStatus::Confirmed => 5,
         };
         v.to_sql(out)
     }
 }
 
-impl<DB: Backend> FromSql<SmallInt, DB> for OrderStatus
+impl<DB: Backend> FromSql<SmallInt, DB> for TransactionStatus
 where
     i16: FromSql<SmallInt, DB>,
 {
     fn from_sql(bytes: Option<&DB::RawValue>) -> deserialize::Result<Self> {
         let v = i16::from_sql(bytes)?;
         Ok(match v {
-            1 => OrderStatus::Unpaid,
-            2 => OrderStatus::Pending,
-            3 => OrderStatus::Rejected,
-            4 => OrderStatus::Finalized,
-            5 => OrderStatus::Confirmed,
+            1 => TransactionStatus::Unpaid,
+            2 => TransactionStatus::Pending,
+            3 => TransactionStatus::Rejected,
+            4 => TransactionStatus::Finalized,
+            5 => TransactionStatus::Confirmed,
             _ => return Err("replace me with a real error".into()),
         })
     }
@@ -93,14 +93,14 @@ where
 #[derive(
     Debug, Serialize, Deserialize, Queryable, Insertable, Identifiable, Clone, AsExpression,
 )]
-#[table_name = "orders"]
-pub struct Order {
+#[table_name = "transactions"]
+pub struct Transaction {
     pub id: Uuid,
     pub external_id: String,
     pub merchant_id: String,
     pub grin_amount: i64,
     pub amount: Money,
-    pub status: OrderStatus,
+    pub status: TransactionStatus,
     pub confirmations: i32,
     pub email: Option<String>,
     pub created_at: NaiveDateTime,
@@ -111,9 +111,15 @@ pub struct Order {
     pub report_attempts: i32,
     #[serde(skip_serializing)]
     pub next_report_attempt: Option<NaiveDateTime>,
+    #[serde(skip_serializing)]
+    pub wallet_tx_id: Option<i64>,
+    #[serde(skip_serializing)]
+    pub wallet_tx_slate_id: Option<String>,
+    pub message: String,
+    pub slate_messages: Option<Vec<String>>,
 }
 
-impl Order {
+impl Transaction {
     pub fn is_expired(&self) -> bool {
         self.created_at + Duration::seconds(TTL_SECONDS) < Utc::now().naive_utc()
     }
@@ -226,25 +232,5 @@ impl fmt::Display for Money {
 pub struct Rate {
     pub id: String,
     pub rate: f64,
-    pub updated_at: NaiveDateTime,
-}
-
-#[derive(
-    Debug, Serialize, PartialEq, Associations, Deserialize, Queryable, Insertable, Identifiable,
-)]
-#[table_name = "txs"]
-#[belongs_to(Order)]
-#[primary_key(slate_id)]
-pub struct Tx {
-    pub slate_id: String,
-    pub created_at: NaiveDateTime,
-    pub confirmed: bool,
-    pub confirmed_at: Option<NaiveDateTime>,
-    pub fee: Option<i64>,
-    pub messages: Vec<String>,
-    pub num_inputs: i64,
-    pub num_outputs: i64,
-    pub tx_type: String,
-    pub order_id: Uuid,
     pub updated_at: NaiveDateTime,
 }
