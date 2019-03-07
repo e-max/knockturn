@@ -65,11 +65,11 @@ pub struct MakePayment {
 }
 
 impl Message for MakePayment {
-    type Result = Result<(), Error>;
+    type Result = Result<PendingPayment, Error>;
 }
 
 impl Handler<MakePayment> for Fsm {
-    type Result = ResponseFuture<(), Error>;
+    type Result = ResponseFuture<PendingPayment, Error>;
 
     fn handle(&mut self, msg: MakePayment, _: &mut Self::Context) -> Self::Result {
         let transaction_id = msg.unpaid_payment.id.clone();
@@ -108,8 +108,8 @@ impl Handler<MakePayment> for Fsm {
                 }
             })
             .and_then(|db_response| {
-                db_response?;
-                Ok(())
+                let transaction = db_response?;
+                Ok(PendingPayment(transaction))
             });
         Box::new(res)
     }
@@ -148,11 +148,11 @@ pub struct ConfirmPayment {
 }
 
 impl Message for ConfirmPayment {
-    type Result = Result<(), Error>;
+    type Result = Result<ConfirmedPayment, Error>;
 }
 
 impl Handler<ConfirmPayment> for Fsm {
-    type Result = ResponseFuture<(), Error>;
+    type Result = ResponseFuture<ConfirmedPayment, Error>;
 
     fn handle(&mut self, msg: ConfirmPayment, _: &mut Self::Context) -> Self::Result {
         let tx_msg = db::ConfirmTransaction {
@@ -160,8 +160,8 @@ impl Handler<ConfirmPayment> for Fsm {
             confirmed_at: msg.wallet_tx.confirmation_ts.map(|dt| dt.naive_utc()),
         };
         Box::new(self.db.send(tx_msg).from_err().and_then(|res| {
-            res?;
-            Ok(())
+            let tx = res?;
+            Ok(ConfirmedPayment(tx))
         }))
     }
 }
@@ -233,42 +233,45 @@ pub struct RejectPayment<T> {
 }
 
 impl Message for RejectPayment<UnpaidPayment> {
-    type Result = Result<(), Error>;
+    type Result = Result<RejectedPayment, Error>;
 }
 
 impl Message for RejectPayment<PendingPayment> {
-    type Result = Result<(), Error>;
+    type Result = Result<RejectedPayment, Error>;
 }
 
 impl Handler<RejectPayment<UnpaidPayment>> for Fsm {
-    type Result = ResponseFuture<(), Error>;
+    type Result = ResponseFuture<RejectedPayment, Error>;
 
     fn handle(&mut self, msg: RejectPayment<UnpaidPayment>, _: &mut Self::Context) -> Self::Result {
-        Box::new(reject_transaction(&self.db, &msg.payment.id))
+        Box::new(reject_transaction(&self.db, &msg.payment.id).map(RejectedPayment))
     }
 }
 
 impl Handler<RejectPayment<PendingPayment>> for Fsm {
-    type Result = ResponseFuture<(), Error>;
+    type Result = ResponseFuture<RejectedPayment, Error>;
 
     fn handle(
         &mut self,
         msg: RejectPayment<PendingPayment>,
         _: &mut Self::Context,
     ) -> Self::Result {
-        Box::new(reject_transaction(&self.db, &msg.payment.id))
+        Box::new(reject_transaction(&self.db, &msg.payment.id).map(RejectedPayment))
     }
 }
 
-fn reject_transaction(db: &Addr<DbExecutor>, id: &Uuid) -> impl Future<Item = (), Error = Error> {
+fn reject_transaction(
+    db: &Addr<DbExecutor>,
+    id: &Uuid,
+) -> impl Future<Item = Transaction, Error = Error> {
     db.send(UpdateTransactionStatus {
         id: id.clone(),
         status: TransactionStatus::Rejected,
     })
     .from_err()
     .and_then(|db_response| {
-        db_response?;
-        Ok(())
+        let tx = db_response?;
+        Ok(tx)
     })
 }
 

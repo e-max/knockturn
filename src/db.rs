@@ -151,7 +151,7 @@ impl Message for ConvertCurrency {
     type Result = Result<Money, Error>;
 }
 impl Message for ConfirmTransaction {
-    type Result = Result<(), Error>;
+    type Result = Result<Transaction, Error>;
 }
 
 impl Message for GetPendingTransactions {
@@ -410,7 +410,7 @@ impl Handler<RegisterRate> for DbExecutor {
 }
 
 impl Handler<ConfirmTransaction> for DbExecutor {
-    type Result = Result<(), Error>;
+    type Result = Result<Transaction, Error>;
 
     fn handle(&mut self, msg: ConfirmTransaction, _: &mut Self::Context) -> Self::Result {
         use crate::schema::merchants;
@@ -418,15 +418,14 @@ impl Handler<ConfirmTransaction> for DbExecutor {
         let conn: &PgConnection = &self.0.get().unwrap();
 
         conn.transaction(|| {
-            diesel::update(
+            let tx = diesel::update(
                 transactions::table.filter(transactions::columns::id.eq(msg.transaction.id)),
             )
             .set((
                 transactions::columns::status.eq(TransactionStatus::Confirmed),
                 transactions::columns::updated_at.eq(Utc::now().naive_utc()),
             ))
-            .get_result(conn)
-            .map(|_: Transaction| ())?;
+            .get_result(conn)?;
             diesel::update(
                 merchants::table.filter(merchants::columns::id.eq(msg.transaction.merchant_id)),
             )
@@ -436,7 +435,7 @@ impl Handler<ConfirmTransaction> for DbExecutor {
             )
             .get_result(conn)
             .map(|_: Merchant| ())?;
-            Ok(())
+            Ok(tx)
         })
     }
 }
