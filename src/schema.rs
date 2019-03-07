@@ -14,7 +14,15 @@ table! {
 }
 
 table! {
-    orders (id) {
+    rates (id) {
+        id -> Text,
+        rate -> Float8,
+        updated_at -> Timestamp,
+    }
+}
+
+table! {
+    transactions (id) {
         id -> Uuid,
         external_id -> Text,
         merchant_id -> Text,
@@ -36,14 +44,6 @@ table! {
 }
 
 table! {
-    rates (id) {
-        id -> Text,
-        rate -> Float8,
-        updated_at -> Timestamp,
-    }
-}
-
-table! {
     txs (slate_id) {
         slate_id -> Text,
         created_at -> Timestamp,
@@ -59,12 +59,12 @@ table! {
     }
 }
 
-joinable!(orders -> merchants (merchant_id));
-joinable!(txs -> orders (order_id));
+joinable!(transactions -> merchants (merchant_id));
+joinable!(txs -> transactions (order_id));
 
 allow_tables_to_appear_in_same_query!(
     merchants,
-    orders,
     rates,
+    transactions,
     txs,
 );
