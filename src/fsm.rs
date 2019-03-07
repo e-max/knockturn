@@ -1,10 +1,10 @@
 use crate::clients::BearerTokenAuth;
 use crate::db::{
-    self, DbExecutor, GetMerchant, GetTransaction, MarkAsReported, ReportAttempt,
-    UpdateTransactionStatus, UpdateTransactionWithTxLog,
+    self, CreateTransaction, DbExecutor, GetMerchant, GetTransaction, MarkAsReported,
+    ReportAttempt, UpdateTransactionStatus, UpdateTransactionWithTxLog,
 };
 use crate::errors::Error;
-use crate::models::{Transaction, TransactionStatus};
+use crate::models::{Money, Transaction, TransactionStatus};
 use crate::wallet::TxLogEntry;
 use crate::wallet::Wallet;
 use actix::{Actor, Addr, Context, Handler, Message, ResponseFuture};
@@ -26,6 +26,45 @@ impl Actor for Fsm {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct CreatePayment {
+    pub merchant_id: String,
+    pub external_id: String,
+    pub amount: Money,
+    pub confirmations: i32,
+    pub email: Option<String>,
+    pub message: String,
+}
+
+impl Message for CreatePayment {
+    type Result = Result<UnpaidPayment, Error>;
+}
+
+impl Handler<CreatePayment> for Fsm {
+    type Result = ResponseFuture<UnpaidPayment, Error>;
+
+    fn handle(&mut self, msg: CreatePayment, _: &mut Self::Context) -> Self::Result {
+        let create_transaction = CreateTransaction {
+            merchant_id: msg.merchant_id,
+            external_id: msg.external_id,
+            amount: msg.amount,
+            confirmations: msg.confirmations,
+            email: msg.email.clone(),
+            message: msg.message.clone(),
+        };
+
+        let res = self
+            .db
+            .send(create_transaction)
+            .from_err()
+            .and_then(move |db_response| {
+                let transaction = db_response?;
+                Ok(UnpaidPayment(transaction))
+            });
+        Box::new(res)
+    }
+}
+
+#[derive(Debug, Deserialize)]
 pub struct GetUnpaidPayment {
     pub transaction_id: Uuid,
 }
@@ -34,7 +73,7 @@ impl Message for GetUnpaidPayment {
     type Result = Result<UnpaidPayment, Error>;
 }
 
-#[derive(Debug, Deserialize, Clone, Deref)]
+#[derive(Debug, Serialize, Deserialize, Clone, Deref)]
 pub struct UnpaidPayment(Transaction);
 
 impl Handler<GetUnpaidPayment> for Fsm {

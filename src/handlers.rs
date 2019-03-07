@@ -1,9 +1,7 @@
 use crate::app::AppState;
-use crate::db::{
-    Confirm2FA, CreateMerchant, CreateTransaction, GetMerchant, GetTransaction, GetTransactions,
-};
+use crate::db::{Confirm2FA, CreateMerchant, GetMerchant, GetTransaction, GetTransactions};
 use crate::errors::*;
-use crate::fsm::{GetUnpaidPayment, MakePayment};
+use crate::fsm::{CreatePayment, GetUnpaidPayment, MakePayment};
 use crate::models::{Currency, Money, Transaction};
 use crate::totp::Totp;
 use crate::wallet::Slate;
@@ -152,7 +150,7 @@ pub struct CreatePaymentRequest {
 pub fn create_payment(
     (merchant_id, payment_req, state): (Path<String>, Json<CreatePaymentRequest>, State<AppState>),
 ) -> FutureResponse<HttpResponse> {
-    let create_transaction = CreateTransaction {
+    let create_transaction = CreatePayment {
         merchant_id: merchant_id.into_inner(),
         external_id: payment_req.order_id.clone(),
         amount: payment_req.amount,
@@ -161,13 +159,13 @@ pub fn create_payment(
         message: payment_req.message.clone(),
     };
     state
-        .db
+        .fsm
         .send(create_transaction)
         .from_err()
         .and_then(|db_response| {
-            let transaction = db_response?;
+            let unpaid_payment = db_response?;
 
-            Ok(HttpResponse::Ok().json(transaction))
+            Ok(HttpResponse::Ok().json(unpaid_payment))
         })
         .responder()
 }
