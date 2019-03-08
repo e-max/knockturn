@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+
+{% block title %} Transactions {% endblock %}
+
+{% block content %}
+
+	<p>Transactions: {{transactions.len()}}</p>
+	<table>
+	<tr>
+  		<th>ID</th>
+  		<th>Amount</th>
+		<th>Grins</th>
+  		<th>Status</th>
+		<th>Confirmations</th>
+		<th>Created</th>
+		<th>Updated</th>
+    </tr>
+{% for transaction in transactions %}
+	<tr>
+  		<td>{{ transaction.external_id }}</td>
+  		<td>{{ transaction.amount }}</td>
+  		<td>{{ transaction.grins() }}</td>
+		<td>{{ transaction.status.to_string() }}</td>
+		<td>{{ transaction.confirmations }}</td>
+		<td>{{ transaction.created_at }}</td>
+		<td>{{ transaction.updated_at }}</td>
+    </tr>
+  {% endfor %}
+  </table>
+	<form method="POST" action="/logout">
+		<input type="submit" value="Logout">
+	</form>
+
+</body>
+</html>
+
+{% endblock %}

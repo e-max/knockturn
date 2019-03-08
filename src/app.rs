@@ -7,10 +7,13 @@ use actix::prelude::*;
 use actix_web::middleware::identity::{CookieIdentityPolicy, IdentityService};
 use actix_web::middleware::session::{CookieSessionBackend, SessionStorage};
 use actix_web::{http::Method, middleware, App};
+use diesel::pg::PgConnection;
+use diesel::r2d2::{ConnectionManager, Pool};
 
 pub struct AppState {
     pub db: Addr<DbExecutor>,
     pub wallet: Wallet,
+    pub pool: Pool<ConnectionManager<PgConnection>>,
     pub fsm: Addr<Fsm>,
 }
 
@@ -18,9 +21,15 @@ pub fn create_app(
     db: Addr<DbExecutor>,
     wallet: Wallet,
     fsm: Addr<Fsm>,
+    pool: Pool<ConnectionManager<PgConnection>>,
     cookie_secret: &[u8],
 ) -> App<AppState> {
-    let state = AppState { db, wallet, fsm };
+    let state = AppState {
+        db,
+        wallet,
+        fsm,
+        pool,
+    };
     App::with_state(state)
         .middleware(middleware::Logger::new("\"%r\" %s %b %Dms"))
         .middleware(IdentityService::new(
@@ -36,6 +45,9 @@ pub fn create_app(
         })
         .resource("/merchants/{merchant_id}", |r| {
             r.method(Method::GET).with(get_merchant)
+        })
+        .resource("/transactions", |r| {
+            r.method(Method::POST).f(get_transactions)
         })
         .resource("/merchants/{merchant_id}/payments", |r| {
             r.method(Method::POST).with(create_payment)

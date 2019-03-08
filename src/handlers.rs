@@ -1,4 +1,5 @@
 use crate::app::AppState;
+use crate::blocking;
 use crate::db::{Confirm2FA, CreateMerchant, GetMerchant, GetTransaction, GetTransactions};
 use crate::errors::*;
 use crate::fsm::{CreatePayment, GetUnpaidPayment, MakePayment};
@@ -16,6 +17,9 @@ use askama::Template;
 use bcrypt;
 use bytes::BytesMut;
 use data_encoding::BASE64;
+use diesel::pg::PgConnection;
+use diesel::r2d2::{ConnectionManager, Pool};
+use diesel::{self, prelude::*};
 use futures::future::{ok, result, Either, Future};
 use futures::stream::Stream;
 use mime_guess::get_mime_type;
@@ -53,6 +57,47 @@ pub fn index(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse> {
             Ok(HttpResponse::Ok().content_type("text/html").body(html))
         })
         .responder()
+}
+
+#[derive(Template)]
+#[template(path = "transactions.html")]
+struct TransactionsTemplate {
+    transactions: Vec<Transaction>,
+}
+
+pub fn get_transactions(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse> {
+    let merchant_id = match req.identity() {
+        Some(v) => v,
+        None => return ok(HttpResponse::Found().header("location", "/login").finish()).responder(),
+    };
+
+    let pool = req.state().pool.clone();
+    blocking::run(move || run(pool, &merchant_id, 0, 10))
+        .from_err()
+        .and_then(|transactions| {
+            let txs: Vec<Transaction> = transactions;
+            let html = TransactionsTemplate { transactions: txs }
+                .render()
+                .map_err(|e| Error::from(e))?;
+            Ok(HttpResponse::Ok().content_type("text/html").body(html))
+        })
+        .responder()
+}
+
+fn run(
+    pool: Pool<ConnectionManager<PgConnection>>,
+    merch_id: &str,
+    offset: i64,
+    limit: i64,
+) -> Result<Vec<Transaction>, Error> {
+    use crate::schema::transactions::dsl::*;
+    let conn: &PgConnection = &pool.get().unwrap();
+    transactions
+        .filter(merchant_id.eq(merch_id))
+        .offset(offset)
+        .limit(limit)
+        .load::<Transaction>(conn)
+        .map_err(|e| e.into())
 }
 
 #[derive(Debug, Deserialize)]
