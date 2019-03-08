@@ -87,8 +87,7 @@ pub fn get_transactions(req: &HttpRequest<AppState>) -> FutureResponse<HttpRespo
     })
     .from_err()
     .and_then(|transactions| {
-        let txs: Vec<Transaction> = transactions;
-        let html = TransactionsTemplate { transactions: txs }
+        let html = TransactionsTemplate { transactions }
             .render()
             .map_err(|e| Error::from(e))?;
         Ok(HttpResponse::Ok().content_type("text/html").body(html))
