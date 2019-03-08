@@ -76,14 +76,12 @@ fn process_pending_payments(cron: &mut Cron, _: &mut Context<Cron>) {
                     ));
                     continue;
                 }
-                println!("\x1B[31;1m payment\x1B[0m = {:?}", payment);
                 let res = wallet
                     .get_tx(&payment.wallet_tx_slate_id.clone().unwrap()) //we should have this field up to this moment
                     .and_then({
                         let fsm = fsm.clone();
                         let payment = payment.clone();
                         move |wallet_tx| {
-                            println!("\x1B[31;1m wallet_tx\x1B[0m = {:?}", wallet_tx);
                             if wallet_tx.confirmed {
                                 info!("payment {} confirmed", payment.id);
                                 let res = fsm
