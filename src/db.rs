@@ -430,8 +430,8 @@ impl Handler<ConfirmTransaction> for DbExecutor {
                 merchants::table.filter(merchants::columns::id.eq(msg.transaction.merchant_id)),
             )
             .set(
-                (merchants::columns::balance
-                    .eq(merchants::columns::balance + msg.transaction.grin_amount)),
+                merchants::columns::balance
+                    .eq(merchants::columns::balance + msg.transaction.grin_amount),
             )
             .get_result(conn)
             .map(|_: Merchant| ())?;
