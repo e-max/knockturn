@@ -64,10 +64,8 @@ fn main() {
     let fsm: Addr<Fsm> = Arbiter::start({
         let wallet = wallet.clone();
         let db = address.clone();
-        move |_| Fsm {
-            db: db,
-            wallet: wallet,
-        }
+        let pool = pool.clone();
+        move |_| Fsm { db, wallet, pool }
     });
     let _cron = Arbiter::start({
         let wallet = wallet.clone();
