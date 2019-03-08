@@ -72,32 +72,28 @@ pub fn get_transactions(req: &HttpRequest<AppState>) -> FutureResponse<HttpRespo
     };
 
     let pool = req.state().pool.clone();
-    blocking::run(move || run(pool, &merchant_id, 0, 10))
-        .from_err()
-        .and_then(|transactions| {
-            let txs: Vec<Transaction> = transactions;
-            let html = TransactionsTemplate { transactions: txs }
-                .render()
-                .map_err(|e| Error::from(e))?;
-            Ok(HttpResponse::Ok().content_type("text/html").body(html))
-        })
-        .responder()
-}
-
-fn run(
-    pool: Pool<ConnectionManager<PgConnection>>,
-    merch_id: &str,
-    offset: i64,
-    limit: i64,
-) -> Result<Vec<Transaction>, Error> {
-    use crate::schema::transactions::dsl::*;
-    let conn: &PgConnection = &pool.get().unwrap();
-    transactions
-        .filter(merchant_id.eq(merch_id))
-        .offset(offset)
-        .limit(limit)
-        .load::<Transaction>(conn)
-        .map_err(|e| e.into())
+    blocking::run({
+        let merch_id = merchant_id.clone();
+        move || -> Result<Vec<Transaction>, Error> {
+            use crate::schema::transactions::dsl::*;
+            let conn: &PgConnection = &pool.get().unwrap();
+            transactions
+                .filter(merchant_id.eq(merch_id))
+                .offset(0)
+                .limit(10)
+                .load::<Transaction>(conn)
+                .map_err(|e| e.into())
+        }
+    })
+    .from_err()
+    .and_then(|transactions| {
+        let txs: Vec<Transaction> = transactions;
+        let html = TransactionsTemplate { transactions: txs }
+            .render()
+            .map_err(|e| Error::from(e))?;
+        Ok(HttpResponse::Ok().content_type("text/html").body(html))
+    })
+    .responder()
 }
 
 #[derive(Debug, Deserialize)]
