@@ -2,7 +2,8 @@ use crate::app::AppState;
 use crate::blocking;
 use crate::db::{Confirm2FA, CreateMerchant, GetMerchant, GetTransaction, GetTransactions};
 use crate::errors::*;
-use crate::fsm::{CreatePayment, GetUnpaidPayment, MakePayment};
+use crate::fsm::{CreatePayment, CreatePayout, GetUnpaidPayment, MakePayment};
+use crate::fsm::{KNOCKTURN_FEE, MINIMAL_WITHDRAW, TRANSFER_FEE};
 use crate::middleware::WithMerchant;
 use crate::models::{Currency, Money, Transaction};
 use crate::totp::Totp;
@@ -24,10 +25,6 @@ use futures::stream::Stream;
 use mime_guess::get_mime_type;
 use serde::{Deserialize, Serialize};
 use std::env;
-
-const MINIMAL_WITHDRAW: i64 = 1_000_000_000;
-const KNOCKTURN_FEE: i64 = 0;
-const TRANSFER_FEE: i64 = 8_000_000;
 
 #[derive(Template)]
 #[template(path = "index.html")]
@@ -473,7 +470,7 @@ pub fn withdraw(req: HttpRequest<AppState>) -> FutureResponse<HttpResponse, Erro
             .and_then(|merchant| {
                 let balance = merchant.balance;
                 let transfer_fee = TRANSFER_FEE;
-                let knockturn_fee = KNOCKTURN_FEE;
+                let knockturn_fee = balance * KNOCKTURN_FEE;
                 let mut total = 0;
 
                 if balance > transfer_fee + knockturn_fee {
@@ -499,6 +496,35 @@ pub fn withdraw(req: HttpRequest<AppState>) -> FutureResponse<HttpResponse, Erro
                 template.into_response()
             }),
     )
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreatePayoutForm {
+    pub amount: i64,
+}
+
+pub fn create_payout(
+    (req, form): (HttpRequest<AppState>, Form<CreatePayoutForm>),
+) -> FutureResponse<HttpResponse, Error> {
+    let merchant_id = match req.identity() {
+        Some(v) => v,
+        None => return ok(HttpResponse::Found().header("location", "/login").finish()).responder(),
+    };
+    req.state()
+        .fsm
+        .send(CreatePayout {
+            amount: form.amount,
+            merchant_id: merchant_id,
+            confirmations: 10,
+        })
+        .from_err()
+        .and_then(|resp| {
+            let payout = resp?;
+            Ok(HttpResponse::Found()
+                .header("location", format!("/payments/{}", payout.id))
+                .finish())
+        })
+        .responder()
 }
 
 pub fn get_slate(

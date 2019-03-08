@@ -49,6 +49,9 @@ pub enum Error {
 
     #[fail(display = "Merchant not found")]
     MerchantNotFound,
+
+    #[fail(display = "Not enough funds")]
+    NotEnoughFunds,
 }
 
 impl From<MailboxError> for Error {

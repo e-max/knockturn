@@ -21,9 +21,10 @@ Transfer fee: {{transfer_fee}} </br>
 Total: {{total}} </br>
 
 {% if error.is_none() -%}
-<a href="">Pay with IronBelly</a></br>
-or download slate <a href="/withdraw/knockturn-payment.grinslate">here</a></br>
-You need to sing this slate in your wallet and POST it to url {{url}}
+<form >
+	<input type="hidden" name="amount" value="{{total}}>
+	<button type="submit">Withdraw</button></br>
+</form>
 {%- endif %}
 
 {% endblock %}

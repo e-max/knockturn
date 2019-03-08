@@ -89,11 +89,12 @@ pub fn create_app(
         })
         .resource("/withdraw", |r| {
             r.method(Method::GET).with(withdraw);
+            r.method(Method::POST).with(create_payout);
         })
         .resource("/withdraw/confirm", |r| {
             r.method(Method::POST).with(withdraw_confirmation);
         })
-        .resource("/withdraw/knockturn-payment.grinslate", |r| {
+        .resource("/payout/{id}.grinslate", |r| {
             r.method(Method::GET).with(get_slate);
         })
 }

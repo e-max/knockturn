@@ -117,6 +117,10 @@ pub struct Transaction {
     pub wallet_tx_slate_id: Option<String>,
     pub message: String,
     pub slate_messages: Option<Vec<String>>,
+    pub transfer_fee: Option<i64>,
+    pub knockturn_fee: Option<i64>,
+    #[serde(skip_serializing)]
+    pub real_transfer_fee: Option<i64>,
 }
 
 impl Transaction {

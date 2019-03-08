@@ -341,6 +341,9 @@ impl Handler<CreateTransaction> for DbExecutor {
             wallet_tx_slate_id: None,
             message: msg.message,
             slate_messages: None,
+            transfer_fee: None,
+            knockturn_fee: None,
+            real_transfer_fee: None,
         };
 
         diesel::insert_into(transactions)

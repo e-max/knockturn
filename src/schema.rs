@@ -40,6 +40,9 @@ table! {
         wallet_tx_slate_id -> Nullable<Text>,
         message -> Text,
         slate_messages -> Nullable<Array<Text>>,
+        knockturn_fee -> Nullable<Int8>,
+        transfer_fee -> Nullable<Int8>,
+        real_transfer_fee -> Nullable<Int8>,
     }
 }
 

@@ -1,9 +1,11 @@
+use crate::blocking;
 use crate::clients::BearerTokenAuth;
 use crate::db::{
     self, CreateTransaction, DbExecutor, GetMerchant, GetTransaction, MarkAsReported,
     ReportAttempt, UpdateTransactionStatus, UpdateTransactionWithTxLog,
 };
 use crate::errors::Error;
+use crate::models::Merchant;
 use crate::models::{Money, Transaction, TransactionStatus};
 use crate::wallet::TxLogEntry;
 use crate::wallet::Wallet;
@@ -13,10 +15,15 @@ use chrono::{Duration, Utc};
 use derive_deref::Deref;
 use diesel::pg::PgConnection;
 use diesel::r2d2::{ConnectionManager, Pool};
+use diesel::{self, prelude::*};
 use futures::future::{Either, Future};
 use log::{debug, error};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+pub const MINIMAL_WITHDRAW: i64 = 1_000_000_000;
+pub const KNOCKTURN_FEE: i64 = 0;
+pub const TRANSFER_FEE: i64 = 8_000_000;
 
 pub struct Fsm {
     pub db: Addr<DbExecutor>,
@@ -466,5 +473,129 @@ impl Handler<GetUnreportedPayments> for Fsm {
                     Ok(data.into_iter().map(UnreportedPayment).collect())
                 }),
         )
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreatePayout {
+    pub merchant_id: String,
+    pub amount: i64,
+    pub confirmations: i32,
+}
+
+impl Message for CreatePayout {
+    type Result = Result<UnpaidPayout, Error>;
+}
+
+#[derive(Debug, Deserialize, Clone, Deref)]
+pub struct UnpaidPayout(Transaction);
+
+impl Handler<CreatePayout> for Fsm {
+    type Result = ResponseFuture<UnpaidPayout, Error>;
+
+    fn handle(&mut self, msg: CreatePayout, _: &mut Self::Context) -> Self::Result {
+        let res = blocking::run({
+            let pool = self.pool.clone();
+            let merchant_id = msg.merchant_id.clone();
+            move || {
+                use crate::schema::merchants::dsl::*;
+                let conn: &PgConnection = &pool.get().unwrap();
+                let merchant: Merchant = merchants.find(merchant_id.clone()).get_result(conn)?;
+                if merchant.balance < msg.amount {
+                    return Err(Error::NotEnoughFunds);
+                }
+
+                let transfer_fee = TRANSFER_FEE;
+                let knockturn_fee = msg.amount * KNOCKTURN_FEE;
+                let mut total = 0;
+
+                if msg.amount > transfer_fee + knockturn_fee {
+                    total = msg.amount - transfer_fee - knockturn_fee;
+                }
+
+                let amount = Money::from_grin(msg.amount);
+                let new_transaction = Transaction {
+                    id: uuid::Uuid::new_v4(),
+                    external_id: s!(""),
+                    merchant_id: merchant_id.clone(),
+                    email: Some(merchant.email.clone()),
+                    amount: amount,
+                    grin_amount: -msg.amount,
+                    status: TransactionStatus::Unpaid,
+                    confirmations: msg.confirmations,
+                    created_at: Utc::now().naive_utc(),
+                    updated_at: Utc::now().naive_utc(),
+                    report_attempts: 0,
+                    next_report_attempt: None,
+                    reported: false,
+                    wallet_tx_id: None,
+                    wallet_tx_slate_id: None,
+                    message: format!(
+                        "Withdrawal of {} for merchant {}",
+                        amount.clone(),
+                        merchant_id.clone()
+                    ),
+                    slate_messages: None,
+                    transfer_fee: Some(transfer_fee),
+                    knockturn_fee: Some(knockturn_fee),
+                    real_transfer_fee: None,
+                };
+
+                use crate::schema::transactions;
+                let tx = diesel::insert_into(transactions::table)
+                    .values(&new_transaction)
+                    .get_result::<Transaction>(conn)?;
+
+                Ok(UnpaidPayout(tx))
+            }
+        })
+        .from_err();
+
+        Box::new(res)
+
+        /*
+
+        Box::new(
+            self.db
+                .send(GetMerchant {
+                    id: transaction.merchant_id.clone(),
+                })
+                .from_err()
+                .and_then(|res| {
+                    let merchant = res?;
+                    Ok(merchant)
+                })
+                .and_then({
+                    let db = self.db.clone();
+                    move |merchant| {
+                        if merchant.balance < msg.amount {
+                            return err(Error::NotEnoughFunds);
+                        }
+                        db.send(db::CreateTransaction {
+                            merchant_id: msg.merchant_id.clone(),
+                            external_id: s!(""),
+                            amount: msg.amount.clone(),
+                            confirmations: msg.confirmations,
+                            email: merchant.email,
+                            message: format!(
+                                "Withdrawal of {} for merchant {}",
+                                msg.amount.clone(),
+                                merchant_id.clone()
+                            ),
+                        })
+                        .from_err()
+                        .and_then(|db_response| {
+                            let transaction = db_response?;
+                            Ok(UnpaidPayout(transaction))
+                        })
+                    }
+                })
+                .from_err()
+                .and_then(|db_response| {
+                    let data = db_response?;
+                    Ok(data.into_iter().map(UnreportedPayment).collect())
+                }),
+        )
+        */
     }
 }
