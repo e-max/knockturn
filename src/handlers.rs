@@ -71,9 +71,9 @@ pub fn get_transactions(req: &HttpRequest<AppState>) -> FutureResponse<HttpRespo
         None => return ok(HttpResponse::Found().header("location", "/login").finish()).responder(),
     };
 
-    let pool = req.state().pool.clone();
     blocking::run({
         let merch_id = merchant_id.clone();
+        let pool = req.state().pool.clone();
         move || -> Result<Vec<Transaction>, Error> {
             use crate::schema::transactions::dsl::*;
             let conn: &PgConnection = &pool.get().unwrap();
