@@ -54,9 +54,12 @@ impl From<MailboxError> for Error {
     }
 }
 
-impl<E: Fail> From<BlockingError<E>> for Error {
-    fn from(error: BlockingError<E>) -> Self {
-        Error::General(s!(error))
+impl From<BlockingError> for Error {
+    fn from(error: BlockingError) -> Self {
+        match error {
+            BlockingError::Canceled => Error::General(s!("Got blocking error")),
+            BlockingError::Error(e) => e,
+        }
     }
 }
 

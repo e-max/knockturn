@@ -2,6 +2,7 @@
 
 use std::fmt;
 
+use crate::errors;
 use derive_more::Display;
 use failure::Fail;
 use futures::sync::oneshot;
@@ -45,14 +46,14 @@ thread_local! {
 
 /// Blocking operation execution error
 #[derive(Debug, Display, Fail)]
-pub enum BlockingError<E: Fail> {
+pub enum BlockingError {
     #[display(fmt = "{:?}", _0)]
-    Error(E),
+    Error(errors::Error),
     #[display(fmt = "Thread pool is gone")]
     Canceled,
 }
 
-impl<E: fmt::Debug + Send + Sync + Fail> ResponseError for BlockingError<E> {
+impl ResponseError for BlockingError {
     fn error_response(&self) -> HttpResponse {
         HttpResponse::with_body(StatusCode::BAD_REQUEST, format!("{}", self))
     }
@@ -84,9 +85,9 @@ pub struct CpuFuture<I, E> {
     rx: oneshot::Receiver<Result<I, E>>,
 }
 
-impl<I, E: fmt::Debug + Fail> Future for CpuFuture<I, E> {
+impl<I> Future for CpuFuture<I, errors::Error> {
     type Item = I;
-    type Error = BlockingError<E>;
+    type Error = BlockingError;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         let res = futures::try_ready!(self.rx.poll().map_err(|_| BlockingError::Canceled));
