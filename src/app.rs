@@ -20,7 +20,8 @@ pub fn create_app(
     fsm: Addr<Fsm>,
     cookie_secret: &[u8],
 ) -> App<AppState> {
-    App::with_state(AppState { db, wallet, fsm })
+    let state = AppState { db, wallet, fsm };
+    App::with_state(state)
         .middleware(middleware::Logger::new("\"%r\" %s %b %Dms"))
         .middleware(IdentityService::new(
             CookieIdentityPolicy::new(cookie_secret)
