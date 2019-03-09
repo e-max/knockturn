@@ -11,6 +11,8 @@ use actix::{Actor, Addr, Context, Handler, Message, ResponseFuture};
 use actix_web::client;
 use chrono::{Duration, Utc};
 use derive_deref::Deref;
+use diesel::pg::PgConnection;
+use diesel::r2d2::{ConnectionManager, Pool};
 use futures::future::{Either, Future};
 use log::{debug, error};
 use serde::{Deserialize, Serialize};
@@ -19,6 +21,7 @@ use uuid::Uuid;
 pub struct Fsm {
     pub db: Addr<DbExecutor>,
     pub wallet: Wallet,
+    pub pool: Pool<ConnectionManager<PgConnection>>,
 }
 
 impl Actor for Fsm {

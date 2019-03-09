@@ -2,6 +2,7 @@
 mod macros;
 
 mod app;
+mod blocking;
 mod clients;
 mod cron;
 mod db;
@@ -48,7 +49,8 @@ fn main() {
         .build(manager)
         .expect("Failed to create pool.");
 
-    let address: Addr<DbExecutor> = SyncArbiter::start(10, move || DbExecutor(pool.clone()));
+    let pool_clone = pool.clone();
+    let address: Addr<DbExecutor> = SyncArbiter::start(10, move || DbExecutor(pool_clone.clone()));
 
     let wallet_url = env::var("WALLET_URL").expect("WALLET_URL must be set");
     let wallet_user = env::var("WALLET_USER").expect("WALLET_USER must be set");
@@ -62,10 +64,8 @@ fn main() {
     let fsm: Addr<Fsm> = Arbiter::start({
         let wallet = wallet.clone();
         let db = address.clone();
-        move |_| Fsm {
-            db: db,
-            wallet: wallet,
-        }
+        let pool = pool.clone();
+        move |_| Fsm { db, wallet, pool }
     });
     let _cron = Arbiter::start({
         let wallet = wallet.clone();
@@ -78,6 +78,7 @@ fn main() {
             address.clone(),
             wallet.clone(),
             fsm.clone(),
+            pool.clone(),
             cookie_secret.as_bytes(),
         )
     })

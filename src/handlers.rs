@@ -1,4 +1,5 @@
 use crate::app::AppState;
+use crate::blocking;
 use crate::db::{Confirm2FA, CreateMerchant, GetMerchant, GetTransaction, GetTransactions};
 use crate::errors::*;
 use crate::fsm::{CreatePayment, GetUnpaidPayment, MakePayment};
@@ -16,6 +17,9 @@ use askama::Template;
 use bcrypt;
 use bytes::BytesMut;
 use data_encoding::BASE64;
+use diesel::pg::PgConnection;
+use diesel::r2d2::{ConnectionManager, Pool};
+use diesel::{self, prelude::*};
 use futures::future::{ok, result, Either, Future};
 use futures::stream::Stream;
 use mime_guess::get_mime_type;
@@ -53,6 +57,42 @@ pub fn index(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse> {
             Ok(HttpResponse::Ok().content_type("text/html").body(html))
         })
         .responder()
+}
+
+#[derive(Template)]
+#[template(path = "transactions.html")]
+struct TransactionsTemplate {
+    transactions: Vec<Transaction>,
+}
+
+pub fn get_transactions(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse> {
+    let merchant_id = match req.identity() {
+        Some(v) => v,
+        None => return ok(HttpResponse::Found().header("location", "/login").finish()).responder(),
+    };
+
+    blocking::run({
+        let merch_id = merchant_id.clone();
+        let pool = req.state().pool.clone();
+        move || {
+            use crate::schema::transactions::dsl::*;
+            let conn: &PgConnection = &pool.get().unwrap();
+            transactions
+                .filter(merchant_id.eq(merch_id))
+                .offset(0)
+                .limit(10)
+                .load::<Transaction>(conn)
+                .map_err(|e| e.into())
+        }
+    })
+    .from_err()
+    .and_then(|transactions| {
+        let html = TransactionsTemplate { transactions }
+            .render()
+            .map_err(|e| Error::from(e))?;
+        Ok(HttpResponse::Ok().content_type("text/html").body(html))
+    })
+    .responder()
 }
 
 #[derive(Debug, Deserialize)]

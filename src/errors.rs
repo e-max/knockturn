@@ -1,5 +1,7 @@
+use crate::blocking::BlockingError;
 use actix::MailboxError;
 use actix_web::{error::ResponseError, HttpResponse};
+use failure::Fail;
 
 #[derive(Fail, Debug)]
 pub enum Error {
@@ -49,6 +51,15 @@ pub enum Error {
 impl From<MailboxError> for Error {
     fn from(error: MailboxError) -> Self {
         Error::General(s!(error))
+    }
+}
+
+impl From<BlockingError> for Error {
+    fn from(error: BlockingError) -> Self {
+        match error {
+            BlockingError::Canceled => Error::General(s!("Got blocking error")),
+            BlockingError::Error(e) => e,
+        }
     }
 }
 
