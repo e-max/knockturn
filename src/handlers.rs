@@ -159,7 +159,7 @@ pub fn create_merchant(
         .from_err()
         .and_then(|db_response| {
             let merchant = db_response?;
-            Ok(HttpResponse::Ok().json(merchant))
+            Ok(HttpResponse::Created().json(merchant))
         })
         .responder()
 }
@@ -207,7 +207,7 @@ pub fn create_payment(
         .and_then(|db_response| {
             let unpaid_payment = db_response?;
 
-            Ok(HttpResponse::Ok().json(unpaid_payment))
+            Ok(HttpResponse::Created().json(unpaid_payment))
         })
         .responder()
 }
