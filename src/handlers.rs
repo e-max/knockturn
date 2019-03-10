@@ -642,13 +642,6 @@ pub fn generate_slate(
 pub fn accept_slate(
     (tx_id, req, state): (Path<Uuid>, HttpRequest<AppState>, State<AppState>),
 ) -> FutureResponse<HttpResponse, Error> {
-    let merchant_id = req.identity();
-    println!("\x1B[31;1m merchant_id\x1B[0m = {:?}", merchant_id);
-    println!(
-        "\x1B[31;1m req.get_merchant()\x1B[0m = {:?}",
-        req.get_merchant()
-    );
-    let merchant = req.get_merchant().unwrap();
     req.payload()
         .map_err(|e| Error::Internal(format!("Payload error: {:?}", e)))
         //.from_err()
@@ -670,17 +663,10 @@ pub fn accept_slate(
                 .fsm
                 .send(GetInitializedPayout {
                     transaction_id: tx_id.clone(),
-                    merchant_id: merchant.id.clone(),
                 })
                 .from_err()
                 .and_then(move |db_response| {
                     let initialized_payout = db_response?;
-                    if initialized_payout.grin_amount != slate_amount as i64 {
-                        return Err(Error::WrongAmount(
-                            initialized_payout.grin_amount as u64,
-                            slate_amount,
-                        ));
-                    }
                     Ok(initialized_payout)
                 })
                 .and_then({

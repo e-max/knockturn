@@ -692,7 +692,9 @@ impl Handler<GetNewPayout> for Fsm {
 #[derive(Debug, Deserialize)]
 pub struct GetInitializedPayout {
     pub transaction_id: Uuid,
-    pub merchant_id: String,
+    //We don't require merchant_id here because this message is used in handler
+    //which accept signed slate from wallet. i.e. he won't be logged in and we wouldn't
+    //know merchant_id
 }
 
 impl Message for GetInitializedPayout {
@@ -705,14 +707,12 @@ impl Handler<GetInitializedPayout> for Fsm {
     fn handle(&mut self, msg: GetInitializedPayout, _: &mut Self::Context) -> Self::Result {
         let res = blocking::run({
             let pool = self.pool.clone();
-            let merchant_id = msg.merchant_id.clone();
             let tx_id = msg.transaction_id.clone();
             move || {
                 use crate::schema::transactions::dsl::*;
                 let conn: &PgConnection = &pool.get().unwrap();
                 transactions
                     .filter(id.eq(msg.transaction_id))
-                    .filter(merchant_id.eq(msg.merchant_id))
                     .filter(status.eq(TransactionStatus::Initialized))
                     .filter(transaction_type.eq(TransactionType::Sent))
                     .first(conn)
