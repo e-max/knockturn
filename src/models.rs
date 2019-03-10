@@ -6,6 +6,7 @@ use diesel::deserialize::{self, FromSql};
 use diesel::pg::Pg;
 use diesel::serialize::{self, Output, ToSql};
 use diesel::sql_types::{Jsonb, SmallInt};
+use diesel_derive_enum::DbEnum;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::io;
@@ -90,6 +91,12 @@ where
     }
 }
 
+#[derive(Debug, PartialEq, DbEnum, Serialize, Deserialize, Clone)]
+pub enum TransactionType {
+    Received,
+    Sent,
+}
+
 #[derive(
     Debug, Serialize, Deserialize, Queryable, Insertable, Identifiable, Clone, AsExpression,
 )]
@@ -121,6 +128,7 @@ pub struct Transaction {
     pub knockturn_fee: Option<i64>,
     #[serde(skip_serializing)]
     pub real_transfer_fee: Option<i64>,
+    pub transaction_type: TransactionType,
 }
 
 impl Transaction {

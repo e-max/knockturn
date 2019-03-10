@@ -1,5 +1,7 @@
 use crate::errors::*;
-use crate::models::{Currency, Merchant, Money, Rate, Transaction, TransactionStatus};
+use crate::models::{
+    Currency, Merchant, Money, Rate, Transaction, TransactionStatus, TransactionType,
+};
 use actix::{Actor, SyncContext};
 use actix::{Handler, Message};
 use chrono::NaiveDateTime;
@@ -57,6 +59,7 @@ pub struct CreateTransaction {
     pub confirmations: i32,
     pub email: Option<String>,
     pub message: String,
+    pub transaction_type: TransactionType,
 }
 
 #[derive(Debug, Deserialize)]
@@ -344,6 +347,7 @@ impl Handler<CreateTransaction> for DbExecutor {
             transfer_fee: None,
             knockturn_fee: None,
             real_transfer_fee: None,
+            transaction_type: msg.transaction_type,
         };
 
         diesel::insert_into(transactions)

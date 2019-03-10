@@ -6,7 +6,7 @@ use crate::db::{
 };
 use crate::errors::Error;
 use crate::models::Merchant;
-use crate::models::{Money, Transaction, TransactionStatus};
+use crate::models::{Money, Transaction, TransactionStatus, TransactionType};
 use crate::wallet::TxLogEntry;
 use crate::wallet::Wallet;
 use actix::{Actor, Addr, Context, Handler, Message, ResponseFuture};
@@ -60,6 +60,7 @@ impl Handler<CreatePayment> for Fsm {
             confirmations: msg.confirmations,
             email: msg.email.clone(),
             message: msg.message.clone(),
+            transaction_type: TransactionType::Received,
         };
 
         let res = self
@@ -539,6 +540,7 @@ impl Handler<CreatePayout> for Fsm {
                     transfer_fee: Some(transfer_fee),
                     knockturn_fee: Some(knockturn_fee),
                     real_transfer_fee: None,
+                    transaction_type: TransactionType::Sent,
                 };
 
                 use crate::schema::transactions;

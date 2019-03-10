@@ -43,6 +43,7 @@ table! {
         knockturn_fee -> Nullable<Int8>,
         transfer_fee -> Nullable<Int8>,
         real_transfer_fee -> Nullable<Int8>,
+        transaction_type -> crate::models::TransactionTypeMapping,
     }
 }
 
@@ -65,9 +66,4 @@ table! {
 joinable!(transactions -> merchants (merchant_id));
 joinable!(txs -> transactions (order_id));
 
-allow_tables_to_appear_in_same_query!(
-    merchants,
-    rates,
-    transactions,
-    txs,
-);
+allow_tables_to_appear_in_same_query!(merchants, rates, transactions, txs,);
