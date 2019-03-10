@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 const TTL_SECONDS: i64 = 20 * 60; //20 minutes
 
-#[derive(Debug, Serialize, Deserialize, Queryable, Insertable, Identifiable)]
+#[derive(Debug, Serialize, Deserialize, Queryable, Insertable, Identifiable, Clone)]
 #[table_name = "merchants"]
 pub struct Merchant {
     pub id: String,
