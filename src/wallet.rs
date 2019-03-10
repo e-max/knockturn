@@ -120,7 +120,11 @@ impl Wallet {
             })
     }
 
-    pub fn create_slate(&self, amount: u64) -> impl Future<Item = Slate, Error = Error> {
+    pub fn create_slate(
+        &self,
+        amount: u64,
+        message: String,
+    ) -> impl Future<Item = Slate, Error = Error> {
         let url = format!("{}/{}", self.url, SEND_URL);
         debug!("Receive as {} {}: {}", self.username, self.password, url);
         let payment = SendTx {
@@ -131,6 +135,7 @@ impl Wallet {
             max_outputs: 10,
             num_change_outputs: 1,
             selection_strategy_is_use_all: false,
+            message: Some(message),
         };
         client::post(&url) // <- Create request builder
             .auth(&self.username, &self.password)
@@ -418,6 +423,7 @@ struct SendTx {
     max_outputs: u8,
     num_change_outputs: u8,
     selection_strategy_is_use_all: bool,
+    message: Option<String>,
 }
 
 #[cfg(test)]

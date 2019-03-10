@@ -53,6 +53,7 @@ pub enum TransactionStatus {
     Rejected,
     Finalized,
     Confirmed,
+    SlateCreated,
 }
 
 impl<DB: Backend> ToSql<SmallInt, DB> for TransactionStatus
@@ -69,6 +70,7 @@ where
             TransactionStatus::Rejected => 3,
             TransactionStatus::Finalized => 4,
             TransactionStatus::Confirmed => 5,
+            TransactionStatus::SlateCreated => 6,
         };
         v.to_sql(out)
     }
@@ -86,6 +88,7 @@ where
             3 => TransactionStatus::Rejected,
             4 => TransactionStatus::Finalized,
             5 => TransactionStatus::Confirmed,
+            6 => TransactionStatus::SlateCreated,
             _ => return Err("replace me with a real error".into()),
         })
     }
@@ -124,8 +127,8 @@ pub struct Transaction {
     pub wallet_tx_slate_id: Option<String>,
     pub message: String,
     pub slate_messages: Option<Vec<String>>,
-    pub transfer_fee: Option<i64>,
     pub knockturn_fee: Option<i64>,
+    pub transfer_fee: Option<i64>,
     #[serde(skip_serializing)]
     pub real_transfer_fee: Option<i64>,
     pub transaction_type: TransactionType,

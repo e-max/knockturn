@@ -590,3 +590,99 @@ impl Handler<GetPayout> for Fsm {
         Box::new(res)
     }
 }
+
+#[derive(Debug, Deserialize)]
+pub struct AttachSlate {
+    pub unpaid_payout: UnpaidPayout,
+    pub wallet_tx: TxLogEntry,
+}
+
+impl Message for AttachSlate {
+    type Result = Result<PayoutWithSlate, Error>;
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Deref)]
+pub struct PayoutWithSlate(Transaction);
+
+impl Handler<AttachSlate> for Fsm {
+    type Result = ResponseFuture<PayoutWithSlate, Error>;
+
+    fn handle(&mut self, msg: AttachSlate, _: &mut Self::Context) -> Self::Result {
+        let transaction_id = msg.unpaid_payout.id.clone();
+        let wallet_tx = msg.wallet_tx.clone();
+        let messages: Option<Vec<String>> = wallet_tx.messages.map(|pm| {
+            pm.messages
+                .into_iter()
+                .map(|pmd| pmd.message)
+                .filter_map(|x| x)
+                .collect()
+        });
+
+        let msg = UpdateTransactionWithTxLog {
+            transaction_id: transaction_id.clone(),
+            wallet_tx_id: wallet_tx.id as i64,
+            wallet_tx_slate_id: wallet_tx.tx_slate_id.unwrap(),
+            messages: messages,
+        };
+        let res = self
+            .db
+            .send(msg)
+            .from_err()
+            .and_then(|db_response| {
+                db_response?;
+                Ok(())
+            })
+            .and_then({
+                let db = self.db.clone();
+                let transaction_id = transaction_id.clone();
+                move |_| {
+                    db.send(UpdateTransactionStatus {
+                        id: transaction_id,
+                        status: TransactionStatus::SlateCreated,
+                    })
+                    .from_err()
+                }
+            })
+            .and_then(|db_response| {
+                let transaction = db_response?;
+                Ok(PayoutWithSlate(transaction))
+            });
+        Box::new(res)
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetUnpaidPayout {
+    pub transaction_id: Uuid,
+    pub merchant_id: String,
+}
+
+impl Message for GetUnpaidPayout {
+    type Result = Result<UnpaidPayout, Error>;
+}
+
+impl Handler<GetUnpaidPayout> for Fsm {
+    type Result = ResponseFuture<UnpaidPayout, Error>;
+
+    fn handle(&mut self, msg: GetUnpaidPayout, _: &mut Self::Context) -> Self::Result {
+        let res = blocking::run({
+            let pool = self.pool.clone();
+            let merchant_id = msg.merchant_id.clone();
+            let tx_id = msg.transaction_id.clone();
+            move || {
+                use crate::schema::transactions::dsl::*;
+                let conn: &PgConnection = &pool.get().unwrap();
+                transactions
+                    .filter(id.eq(msg.transaction_id))
+                    .filter(merchant_id.eq(msg.merchant_id))
+                    .filter(status.eq(TransactionStatus::Unpaid))
+                    .filter(transaction_type.eq(TransactionType::Sent))
+                    .first(conn)
+                    .map_err(|e| e.into())
+                    .map(UnpaidPayout)
+            }
+        })
+        .from_err();
+        Box::new(res)
+    }
+}

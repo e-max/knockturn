@@ -2,7 +2,10 @@ use crate::app::AppState;
 use crate::blocking;
 use crate::db::{Confirm2FA, CreateMerchant, GetMerchant, GetTransaction, GetTransactions};
 use crate::errors::*;
-use crate::fsm::{CreatePayment, CreatePayout, GetPayout, GetUnpaidPayment, MakePayment};
+use crate::fsm::{
+    AttachSlate, CreatePayment, CreatePayout, GetPayout, GetUnpaidPayment, GetUnpaidPayout,
+    MakePayment,
+};
 use crate::fsm::{KNOCKTURN_SHARE, MINIMAL_WITHDRAW, TRANSFER_FEE};
 use crate::middleware::WithMerchant;
 use crate::models::{Currency, Money, Transaction};
@@ -522,7 +525,7 @@ pub fn create_payout(
         .and_then(|resp| {
             let payout = resp?;
             Ok(HttpResponse::Found()
-                .header("location", format!("/payments/{}", payout.id))
+                .header("location", format!("/payouts/{}", payout.id))
                 .finish())
         })
         .responder()
@@ -577,19 +580,68 @@ pub fn get_payout(
 }
 
 pub fn get_slate(
-    (req, state): (HttpRequest<AppState>, State<AppState>),
+    (req, transaction_id, state): (HttpRequest<AppState>, Path<Uuid>, State<AppState>),
 ) -> FutureResponse<HttpResponse, Error> {
     let merchant_id = match req.identity() {
         Some(v) => v,
         None => return ok(HttpResponse::Found().header("location", "/login").finish()).responder(),
     };
 
-    Box::new(
-        state
-            .wallet
-            .create_slate(1)
-            .and_then(|slate| Ok(HttpResponse::Ok().content_type("text/html").json(slate))),
-    )
+    /*
+    ok(HttpResponse::Ok()
+        .content_type("application/octet-stream")
+        .body(s!("hello")))
+    .responder()
+    */
+
+    let res = state
+        .fsm
+        .send(GetUnpaidPayout {
+            merchant_id: merchant_id,
+            transaction_id: transaction_id.clone(),
+        })
+        .from_err()
+        .and_then(|db_response| {
+            let payout = db_response?;
+            Ok(payout)
+        })
+        .and_then({
+            let wallet = state.wallet.clone();
+            move |unpaid_payout| {
+                wallet
+                    .create_slate(
+                        unpaid_payout.grin_amount as u64,
+                        unpaid_payout.message.clone(),
+                    )
+                    .and_then(move |slate| {
+                        wallet
+                            .get_tx(&slate.id.hyphenated().to_string())
+                            .and_then({
+                                let fsm = state.fsm.clone();
+
+                                move |wallet_tx| {
+                                    fsm.send(AttachSlate {
+                                        unpaid_payout,
+                                        wallet_tx,
+                                    })
+                                    .from_err()
+                                    .and_then(|db_response| {
+                                        db_response?;
+                                        Ok(())
+                                    })
+                                }
+                            })
+                            .and_then(|_| ok(slate))
+                    })
+            }
+        })
+        .and_then(|slate| {
+            Ok(HttpResponse::Ok()
+                .content_type("application/octet-stream")
+                .json(slate))
+        });
+
+    Box::new(res)
 }
 
 pub fn withdraw_confirmation(
