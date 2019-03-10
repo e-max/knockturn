@@ -3,6 +3,7 @@ use crate::blocking;
 use crate::db::{Confirm2FA, CreateMerchant, GetMerchant, GetTransaction, GetTransactions};
 use crate::errors::*;
 use crate::fsm::{CreatePayment, GetUnpaidPayment, MakePayment};
+use crate::middleware::WithMerchant;
 use crate::models::{Currency, Money, Transaction};
 use crate::totp::Totp;
 use crate::wallet::Slate;
@@ -275,40 +276,21 @@ pub struct TotpRequest {
     pub code: String,
 }
 
-pub fn get_totp(req: HttpRequest<AppState>) -> FutureResponse<HttpResponse, Error> {
-    let merchant_id = match req.session().get::<String>("merchant") {
-        Ok(Some(v)) => v,
-        _ => {
-            return Box::new(ok(HttpResponse::Found()
-                .header("location", "/login")
-                .finish()));
-        }
-    };
-    req.state()
-        .db
-        .send(GetMerchant {
-            id: merchant_id.clone(),
-        })
-        .from_err()
-        .and_then(move |db_response| {
-            let merchant = db_response?;
+pub fn get_totp(req: HttpRequest<AppState>) -> Result<HttpResponse, Error> {
+    let merchant = req.get_merchant().ok_or(Error::MerchantNotFound)?;
+    let token = merchant
+        .token_2fa
+        .ok_or(Error::General(s!("No 2fa token")))?;
+    let totp = Totp::new(merchant.id.clone(), token.clone());
 
-            let token = merchant
-                .token_2fa
-                .ok_or(Error::General(s!("No 2fa token")))?;
-            let totp = Totp::new(merchant.id.clone(), token.clone());
-
-            let html = TotpTemplate {
-                msg: "",
-                token: &token,
-                image: &BASE64.encode(&totp.get_png()?),
-            }
-            .render()
-            .map_err(|e| Error::from(e))?;
-            let resp = HttpResponse::Ok().content_type("text/html").body(html);
-            Ok(resp)
-        })
-        .responder()
+    let html = TotpTemplate {
+        msg: "",
+        token: &token,
+        image: &BASE64.encode(&totp.get_png()?),
+    }
+    .render()
+    .map_err(|e| Error::from(e))?;
+    Ok(HttpResponse::Ok().content_type("text/html").body(html))
 }
 
 pub fn post_totp(
