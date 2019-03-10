@@ -137,6 +137,7 @@ impl Handler<MakePayment> for Fsm {
             wallet_tx_id: wallet_tx.id as i64,
             wallet_tx_slate_id: wallet_tx.tx_slate_id.unwrap(),
             messages: messages,
+            fee: wallet_tx.fee,
         };
         let res = self
             .db
@@ -623,6 +624,7 @@ impl Handler<AttachSlate> for Fsm {
             wallet_tx_id: wallet_tx.id as i64,
             wallet_tx_slate_id: wallet_tx.tx_slate_id.unwrap(),
             messages: messages,
+            fee: wallet_tx.fee,
         };
         let res = self
             .db

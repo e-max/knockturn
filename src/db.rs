@@ -120,6 +120,7 @@ pub struct UpdateTransactionWithTxLog {
     pub wallet_tx_id: i64,
     pub wallet_tx_slate_id: String,
     pub messages: Option<Vec<String>>,
+    pub fee: Option<u64>,
 }
 
 impl Message for CreateMerchant {
@@ -383,6 +384,7 @@ impl Handler<UpdateTransactionWithTxLog> for DbExecutor {
                 wallet_tx_id.eq(msg.wallet_tx_id),
                 wallet_tx_slate_id.eq(msg.wallet_tx_slate_id),
                 slate_messages.eq(msg.messages),
+                real_transfer_fee.eq(msg.fee.map(|fee| fee as i64)),
             ))
             .get_result(conn)
             .map_err(|e| e.into())
