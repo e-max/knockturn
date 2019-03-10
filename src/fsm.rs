@@ -636,13 +636,12 @@ impl Handler<GetPayout> for Fsm {
     fn handle(&mut self, msg: GetPayout, _: &mut Self::Context) -> Self::Result {
         let res = blocking::run({
             let pool = self.pool.clone();
-            let merchant_id = msg.merchant_id.clone();
-            let tx_id = msg.transaction_id.clone();
             move || {
                 use crate::schema::transactions::dsl::*;
                 let conn: &PgConnection = &pool.get().unwrap();
                 let tx = transactions
-                    .filter(id.eq(msg.transaction_id))
+                    .filter(id.eq(msg.transaction_id.clone()))
+                    .filter(merchant_id.eq(msg.merchant_id.clone()))
                     .filter(transaction_type.eq(TransactionType::Sent))
                     .first(conn)
                     .map_err(|e| e.into());
@@ -709,8 +708,6 @@ impl Handler<GetNewPayout> for Fsm {
     fn handle(&mut self, msg: GetNewPayout, _: &mut Self::Context) -> Self::Result {
         let res = blocking::run({
             let pool = self.pool.clone();
-            let merchant_id = msg.merchant_id.clone();
-            let tx_id = msg.transaction_id.clone();
             move || {
                 use crate::schema::transactions::dsl::*;
                 let conn: &PgConnection = &pool.get().unwrap();
@@ -735,7 +732,6 @@ impl Handler<GetInitializedPayout> for Fsm {
     fn handle(&mut self, msg: GetInitializedPayout, _: &mut Self::Context) -> Self::Result {
         let res = blocking::run({
             let pool = self.pool.clone();
-            let tx_id = msg.transaction_id.clone();
             move || {
                 use crate::schema::transactions::dsl::*;
                 let conn: &PgConnection = &pool.get().unwrap();
