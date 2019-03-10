@@ -688,3 +688,70 @@ impl Handler<GetNewPayout> for Fsm {
         Box::new(res)
     }
 }
+
+#[derive(Debug, Deserialize)]
+pub struct GetInitializedPayout {
+    pub transaction_id: Uuid,
+    pub merchant_id: String,
+}
+
+impl Message for GetInitializedPayout {
+    type Result = Result<InitializedPayout, Error>;
+}
+
+impl Handler<GetInitializedPayout> for Fsm {
+    type Result = ResponseFuture<InitializedPayout, Error>;
+
+    fn handle(&mut self, msg: GetInitializedPayout, _: &mut Self::Context) -> Self::Result {
+        let res = blocking::run({
+            let pool = self.pool.clone();
+            let merchant_id = msg.merchant_id.clone();
+            let tx_id = msg.transaction_id.clone();
+            move || {
+                use crate::schema::transactions::dsl::*;
+                let conn: &PgConnection = &pool.get().unwrap();
+                transactions
+                    .filter(id.eq(msg.transaction_id))
+                    .filter(merchant_id.eq(msg.merchant_id))
+                    .filter(status.eq(TransactionStatus::Initialized))
+                    .filter(transaction_type.eq(TransactionType::Sent))
+                    .first(conn)
+                    .map_err(|e| e.into())
+                    .map(InitializedPayout)
+            }
+        })
+        .from_err();
+        Box::new(res)
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Deref)]
+pub struct PendingPayout(Transaction);
+
+#[derive(Debug, Deserialize)]
+pub struct FinalizePayout {
+    pub initialized_payout: InitializedPayout,
+}
+
+impl Message for FinalizePayout {
+    type Result = Result<PendingPayout, Error>;
+}
+
+impl Handler<FinalizePayout> for Fsm {
+    type Result = ResponseFuture<PendingPayout, Error>;
+
+    fn handle(&mut self, msg: FinalizePayout, _: &mut Self::Context) -> Self::Result {
+        Box::new(
+            self.db
+                .send(UpdateTransactionStatus {
+                    id: msg.initialized_payout.id.clone(),
+                    status: TransactionStatus::Pending,
+                })
+                .from_err()
+                .and_then(|db_response| {
+                    let tx = db_response?;
+                    Ok(PendingPayout(tx))
+                }),
+        )
+    }
+}

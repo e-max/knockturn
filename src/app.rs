@@ -96,6 +96,7 @@ pub fn create_app(
         })
         .resource("/payouts/{id}", |r| {
             r.method(Method::GET).with(get_payout);
+            r.method(Method::POST).with(accept_slate);
         })
         .resource("/payouts/{id}/knockturn-payout.grinslate", |r| {
             r.method(Method::GET).with(generate_slate);
