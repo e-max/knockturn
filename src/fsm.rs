@@ -521,7 +521,7 @@ impl Handler<CreatePayout> for Fsm {
                     merchant_id: merchant_id.clone(),
                     email: Some(merchant.email.clone()),
                     amount: amount,
-                    grin_amount: -msg.amount,
+                    grin_amount: msg.amount,
                     status: TransactionStatus::Unpaid,
                     confirmations: msg.confirmations,
                     created_at: Utc::now().naive_utc(),
