@@ -46,6 +46,9 @@ pub enum Error {
 
     #[fail(display = "Not authorized")]
     NotAuthorized,
+
+    #[fail(display = "Merchant not found")]
+    MerchantNotFound,
 }
 
 impl From<MailboxError> for Error {
