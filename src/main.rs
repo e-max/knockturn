@@ -31,7 +31,9 @@ use diesel::{r2d2::ConnectionManager, PgConnection};
 use dotenv::dotenv;
 use env_logger;
 use log::info;
+use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 use std::env;
+use std::fs::File;
 
 fn main() {
     dotenv().ok();
@@ -73,7 +75,7 @@ fn main() {
         move |_| cron::Cron::new(cron_db, wallet, fsm)
     });
 
-    server::new(move || {
+    let mut srv = server::new(move || {
         app::create_app(
             address.clone(),
             wallet.clone(),
@@ -81,11 +83,23 @@ fn main() {
             pool.clone(),
             cookie_secret.as_bytes(),
         )
-    })
-    .bind(&host)
-    .expect(&format!("Can not bind to '{}'", &host))
-    .start();
+    });
 
+    srv = if let Ok(folder) = env::var("TLS_FOLDER") {
+        let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
+        builder
+            .set_private_key_file(format!("{}/privkey.pem", folder), SslFiletype::PEM)
+            .unwrap();
+        builder
+            .set_certificate_chain_file(format!("{}/cert.pem", folder))
+            .unwrap();
+        srv.bind_ssl(&host, builder)
+            .expect(&format!("Can not bind_ssl to '{}'", &host))
+    } else {
+        srv.bind(&host)
+            .expect(&format!("Can not bind to '{}'", &host))
+    };
+    srv.start();
     sys.run();
 }
 
