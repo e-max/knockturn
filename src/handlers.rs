@@ -579,20 +579,13 @@ pub fn get_payout(
         .responder()
 }
 
-pub fn get_slate(
+pub fn generate_slate(
     (req, transaction_id, state): (HttpRequest<AppState>, Path<Uuid>, State<AppState>),
 ) -> FutureResponse<HttpResponse, Error> {
     let merchant_id = match req.identity() {
         Some(v) => v,
         None => return ok(HttpResponse::Found().header("location", "/login").finish()).responder(),
     };
-
-    /*
-    ok(HttpResponse::Ok()
-        .content_type("application/octet-stream")
-        .body(s!("hello")))
-    .responder()
-    */
 
     let res = state
         .fsm
@@ -608,11 +601,11 @@ pub fn get_slate(
         .and_then({
             let wallet = state.wallet.clone();
             move |unpaid_payout| {
+                let real_payment = unpaid_payout.grin_amount
+                    - unpaid_payout.transfer_fee.unwrap()
+                    - unpaid_payout.knockturn_fee.unwrap();
                 wallet
-                    .create_slate(
-                        unpaid_payout.grin_amount as u64,
-                        unpaid_payout.message.clone(),
-                    )
+                    .create_slate(real_payment as u64, unpaid_payout.message.clone())
                     .and_then(move |slate| Ok((unpaid_payout, slate)))
             }
         })
