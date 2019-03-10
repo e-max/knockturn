@@ -18,9 +18,11 @@
 		<tr><td>Status</td><td>{{status}}</td></tr>
 	</table>
 
+	{% if download_slate -%}
 	<form action="/payouts/{{tx_id}}/knockturn-payout.grinslate">
 		<input type="submit" value="Download slate">
 	</form>
+	{%- endif -%}
 	
 
 {% endblock %}

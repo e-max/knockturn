@@ -8,7 +8,7 @@ use crate::fsm::{
 };
 use crate::fsm::{KNOCKTURN_SHARE, MINIMAL_WITHDRAW, TRANSFER_FEE};
 use crate::middleware::WithMerchant;
-use crate::models::{Currency, Money, Transaction};
+use crate::models::{Currency, Money, Transaction, TransactionStatus};
 use crate::totp::Totp;
 use crate::wallet::Slate;
 use actix_web::http::Method;
@@ -541,6 +541,7 @@ struct PayoutTemplate {
     transfer_fee: Money,
     knockturn_fee: Money,
     reminder: Money,
+    download_slate: bool,
 }
 
 pub fn get_payout(
@@ -571,6 +572,7 @@ pub fn get_payout(
                 transfer_fee: transfer_fee.into(),
                 knockturn_fee: knockturn_fee.into(),
                 reminder: (transaction.grin_amount - knockturn_fee - transfer_fee).into(),
+                download_slate: transaction.status == TransactionStatus::Unpaid,
             }
             .render()
             .map_err(|e| Error::from(e))?;
