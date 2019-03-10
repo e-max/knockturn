@@ -184,6 +184,12 @@ pub struct Money {
     pub currency: Currency,
 }
 
+impl From<i64> for Money {
+    fn from(val: i64) -> Money {
+        Money::from_grin(val)
+    }
+}
+
 impl Money {
     pub fn new(amount: i64, currency: Currency) -> Self {
         Money { amount, currency }

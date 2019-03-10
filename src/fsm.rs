@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub const MINIMAL_WITHDRAW: i64 = 1_000_000_000;
-pub const KNOCKTURN_FEE: i64 = 0;
+pub const KNOCKTURN_SHARE: f64 = 0.01;
 pub const TRANSFER_FEE: i64 = 8_000_000;
 
 pub struct Fsm {
@@ -506,7 +506,7 @@ impl Handler<CreatePayout> for Fsm {
                 }
 
                 let transfer_fee = TRANSFER_FEE;
-                let knockturn_fee = msg.amount * KNOCKTURN_FEE;
+                let knockturn_fee = (msg.amount as f64 * KNOCKTURN_SHARE) as i64;
                 let mut total = 0;
 
                 if msg.amount > transfer_fee + knockturn_fee {
@@ -552,50 +552,39 @@ impl Handler<CreatePayout> for Fsm {
         .from_err();
 
         Box::new(res)
+    }
+}
 
-        /*
+#[derive(Debug, Deserialize)]
+pub struct GetPayout {
+    pub merchant_id: String,
+    pub transaction_id: Uuid,
+}
 
-        Box::new(
-            self.db
-                .send(GetMerchant {
-                    id: transaction.merchant_id.clone(),
-                })
-                .from_err()
-                .and_then(|res| {
-                    let merchant = res?;
-                    Ok(merchant)
-                })
-                .and_then({
-                    let db = self.db.clone();
-                    move |merchant| {
-                        if merchant.balance < msg.amount {
-                            return err(Error::NotEnoughFunds);
-                        }
-                        db.send(db::CreateTransaction {
-                            merchant_id: msg.merchant_id.clone(),
-                            external_id: s!(""),
-                            amount: msg.amount.clone(),
-                            confirmations: msg.confirmations,
-                            email: merchant.email,
-                            message: format!(
-                                "Withdrawal of {} for merchant {}",
-                                msg.amount.clone(),
-                                merchant_id.clone()
-                            ),
-                        })
-                        .from_err()
-                        .and_then(|db_response| {
-                            let transaction = db_response?;
-                            Ok(UnpaidPayout(transaction))
-                        })
-                    }
-                })
-                .from_err()
-                .and_then(|db_response| {
-                    let data = db_response?;
-                    Ok(data.into_iter().map(UnreportedPayment).collect())
-                }),
-        )
-        */
+impl Message for GetPayout {
+    type Result = Result<Transaction, Error>;
+}
+
+impl Handler<GetPayout> for Fsm {
+    type Result = ResponseFuture<Transaction, Error>;
+
+    fn handle(&mut self, msg: GetPayout, _: &mut Self::Context) -> Self::Result {
+        let res = blocking::run({
+            let pool = self.pool.clone();
+            let merchant_id = msg.merchant_id.clone();
+            let tx_id = msg.transaction_id.clone();
+            move || {
+                use crate::schema::transactions::dsl::*;
+                let conn: &PgConnection = &pool.get().unwrap();
+                let tx = transactions
+                    .find(msg.transaction_id)
+                    .get_result(conn)
+                    .map_err(|e| e.into());
+                tx
+            }
+        })
+        .from_err();
+
+        Box::new(res)
     }
 }

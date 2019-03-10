@@ -94,6 +94,9 @@ pub fn create_app(
         .resource("/withdraw/confirm", |r| {
             r.method(Method::POST).with(withdraw_confirmation);
         })
+        .resource("/payout/{id}", |r| {
+            r.method(Method::GET).with(get_payout);
+        })
         .resource("/payout/{id}.grinslate", |r| {
             r.method(Method::GET).with(get_slate);
         })

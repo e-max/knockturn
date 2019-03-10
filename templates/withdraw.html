@@ -21,8 +21,8 @@ Transfer fee: {{transfer_fee}} </br>
 Total: {{total}} </br>
 
 {% if error.is_none() -%}
-<form >
-	<input type="hidden" name="amount" value="{{total}}>
+<form method="POST">
+	<input type="hidden" name="amount" value="{{balance.amount}}">
 	<button type="submit">Withdraw</button></br>
 </form>
 {%- endif %}

@@ -2,8 +2,8 @@ use crate::app::AppState;
 use crate::blocking;
 use crate::db::{Confirm2FA, CreateMerchant, GetMerchant, GetTransaction, GetTransactions};
 use crate::errors::*;
-use crate::fsm::{CreatePayment, CreatePayout, GetUnpaidPayment, MakePayment};
-use crate::fsm::{KNOCKTURN_FEE, MINIMAL_WITHDRAW, TRANSFER_FEE};
+use crate::fsm::{CreatePayment, CreatePayout, GetPayout, GetUnpaidPayment, MakePayment};
+use crate::fsm::{KNOCKTURN_SHARE, MINIMAL_WITHDRAW, TRANSFER_FEE};
 use crate::middleware::WithMerchant;
 use crate::models::{Currency, Money, Transaction};
 use crate::totp::Totp;
@@ -25,6 +25,7 @@ use futures::stream::Stream;
 use mime_guess::get_mime_type;
 use serde::{Deserialize, Serialize};
 use std::env;
+use uuid::Uuid;
 
 #[derive(Template)]
 #[template(path = "index.html")]
@@ -470,7 +471,7 @@ pub fn withdraw(req: HttpRequest<AppState>) -> FutureResponse<HttpResponse, Erro
             .and_then(|merchant| {
                 let balance = merchant.balance;
                 let transfer_fee = TRANSFER_FEE;
-                let knockturn_fee = balance * KNOCKTURN_FEE;
+                let knockturn_fee = (balance as f64 * KNOCKTURN_SHARE) as i64;
                 let mut total = 0;
 
                 if balance > transfer_fee + knockturn_fee {
@@ -523,6 +524,54 @@ pub fn create_payout(
             Ok(HttpResponse::Found()
                 .header("location", format!("/payments/{}", payout.id))
                 .finish())
+        })
+        .responder()
+}
+
+#[derive(Template)]
+#[template(path = "payout.html")]
+struct PayoutTemplate {
+    tx_id: String,
+    merchant_id: String,
+    status: String,
+    amount: Money,
+    transfer_fee: Money,
+    knockturn_fee: Money,
+    reminder: Money,
+}
+
+pub fn get_payout(
+    (req, transaction_id, state): (HttpRequest<AppState>, Path<Uuid>, State<AppState>),
+) -> FutureResponse<HttpResponse> {
+    let merchant_id = req.identity().unwrap();
+
+    state
+        .fsm
+        .send(GetPayout {
+            merchant_id: merchant_id,
+            transaction_id: transaction_id.clone(),
+        })
+        .from_err()
+        .and_then(|db_response| {
+            let transaction = db_response?;
+            let knockturn_fee = transaction
+                .knockturn_fee
+                .ok_or(Error::General(s!("Transaction doesn't have knockturn_fee")))?;
+            let transfer_fee = transaction
+                .transfer_fee
+                .ok_or(Error::General(s!("Transaction doesn't have transfer_fee")))?;
+            let html = PayoutTemplate {
+                tx_id: transaction.id.to_string(),
+                merchant_id: transaction.merchant_id.clone(),
+                status: transaction.status.to_string(),
+                amount: transaction.amount.into(),
+                transfer_fee: transfer_fee.into(),
+                knockturn_fee: knockturn_fee.into(),
+                reminder: (transaction.grin_amount - knockturn_fee - transfer_fee).into(),
+            }
+            .render()
+            .map_err(|e| Error::from(e))?;
+            Ok(HttpResponse::Ok().content_type("text/html").body(html))
         })
         .responder()
 }

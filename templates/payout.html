@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+
+{% block title %} Payout {% endblock %}
+
+{% block head %}
+  <style>
+  </style>
+{% endblock %}
+
+{% block content %}
+
+	<h1>Transaction {{tx_id}}</h1>
+	<table>
+		<tr><td>Amount</td><td>{{amount}}</td></tr>
+		<tr><td>Transfer fee</td><td>{{transfer_fee}}</td></tr>
+		<tr><td>Knokturn fee</td><td>{{knockturn_fee}}</td></tr>
+		<tr><td>Reminder</td><td>{{reminder}}</td></tr>
+	</table>
+
+	<form action="/payouts/{{tx_id}}/knockturn-payout.grinslate">
+		<input type="submit" value="Download slate">
+	</form>
+	
+
+{% endblock %}
