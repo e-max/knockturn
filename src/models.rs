@@ -34,14 +34,14 @@ pub struct Merchant {
 
 /*
  * The status of payment changes flow is as follows:
- * Unpaid - transaction was created but no attempts were maid to pay
+ * New - transaction was created but no attempts were maid to pay
  * Pending - user sent a slate and we succesfully sent it to wallet
  * Finalized - transaction was accepted to chain (Not used yet)
  * Confirmed - we got required number of confirmation for this transaction
- * Rejected - transaction spent too much time in Unpaid or Pending state
+ * Rejected - transaction spent too much time in New or Pending state
  *
  * The status of payout changes as follows:
- * Unpaid - payout created in db
+ * New - payout created in db
  * Initialized - we created transaction in wallet, created slate and sent it to merchant
  * Pending - user returned to us slate, we finalized it in wallet and wait for required number of confimations
  * Confirmed - we got required number of confimations
@@ -52,7 +52,7 @@ pub struct Merchant {
 )]
 #[sql_type = "SmallInt"]
 pub enum TransactionStatus {
-    Unpaid,
+    New,
     Pending,
     Rejected,
     Finalized,
@@ -69,7 +69,7 @@ where
         W: io::Write,
     {
         let v = match *self {
-            TransactionStatus::Unpaid => 1,
+            TransactionStatus::New => 1,
             TransactionStatus::Pending => 2,
             TransactionStatus::Rejected => 3,
             TransactionStatus::Finalized => 4,
@@ -87,7 +87,7 @@ where
     fn from_sql(bytes: Option<&DB::RawValue>) -> deserialize::Result<Self> {
         let v = i16::from_sql(bytes)?;
         Ok(match v {
-            1 => TransactionStatus::Unpaid,
+            1 => TransactionStatus::New,
             2 => TransactionStatus::Pending,
             3 => TransactionStatus::Rejected,
             4 => TransactionStatus::Finalized,

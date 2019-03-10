@@ -46,11 +46,11 @@ pub struct CreatePayment {
 }
 
 impl Message for CreatePayment {
-    type Result = Result<UnpaidPayment, Error>;
+    type Result = Result<NewPayment, Error>;
 }
 
 impl Handler<CreatePayment> for Fsm {
-    type Result = ResponseFuture<UnpaidPayment, Error>;
+    type Result = ResponseFuture<NewPayment, Error>;
 
     fn handle(&mut self, msg: CreatePayment, _: &mut Self::Context) -> Self::Result {
         let create_transaction = CreateTransaction {
@@ -69,28 +69,28 @@ impl Handler<CreatePayment> for Fsm {
             .from_err()
             .and_then(move |db_response| {
                 let transaction = db_response?;
-                Ok(UnpaidPayment(transaction))
+                Ok(NewPayment(transaction))
             });
         Box::new(res)
     }
 }
 
 #[derive(Debug, Deserialize)]
-pub struct GetUnpaidPayment {
+pub struct GetNewPayment {
     pub transaction_id: Uuid,
 }
 
-impl Message for GetUnpaidPayment {
-    type Result = Result<UnpaidPayment, Error>;
+impl Message for GetNewPayment {
+    type Result = Result<NewPayment, Error>;
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Deref)]
-pub struct UnpaidPayment(Transaction);
+pub struct NewPayment(Transaction);
 
-impl Handler<GetUnpaidPayment> for Fsm {
-    type Result = ResponseFuture<UnpaidPayment, Error>;
+impl Handler<GetNewPayment> for Fsm {
+    type Result = ResponseFuture<NewPayment, Error>;
 
-    fn handle(&mut self, msg: GetUnpaidPayment, _: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: GetNewPayment, _: &mut Self::Context) -> Self::Result {
         let res = self
             .db
             .send(GetTransaction {
@@ -99,10 +99,10 @@ impl Handler<GetUnpaidPayment> for Fsm {
             .from_err()
             .and_then(move |db_response| {
                 let transaction = db_response?;
-                if transaction.status != TransactionStatus::Unpaid {
+                if transaction.status != TransactionStatus::New {
                     return Err(Error::WrongTransactionStatus(s!(transaction.status)));
                 }
-                Ok(UnpaidPayment(transaction))
+                Ok(NewPayment(transaction))
             });
         Box::new(res)
     }
@@ -110,7 +110,7 @@ impl Handler<GetUnpaidPayment> for Fsm {
 
 #[derive(Debug, Deserialize)]
 pub struct MakePayment {
-    pub unpaid_payment: UnpaidPayment,
+    pub new_payment: NewPayment,
     pub wallet_tx: TxLogEntry,
 }
 
@@ -122,7 +122,7 @@ impl Handler<MakePayment> for Fsm {
     type Result = ResponseFuture<PendingPayment, Error>;
 
     fn handle(&mut self, msg: MakePayment, _: &mut Self::Context) -> Self::Result {
-        let transaction_id = msg.unpaid_payment.id.clone();
+        let transaction_id = msg.new_payment.id.clone();
         let wallet_tx = msg.wallet_tx.clone();
         let messages: Option<Vec<String>> = wallet_tx.messages.map(|pm| {
             pm.messages
@@ -283,7 +283,7 @@ pub struct RejectPayment<T> {
     pub payment: T,
 }
 
-impl Message for RejectPayment<UnpaidPayment> {
+impl Message for RejectPayment<NewPayment> {
     type Result = Result<RejectedPayment, Error>;
 }
 
@@ -291,10 +291,10 @@ impl Message for RejectPayment<PendingPayment> {
     type Result = Result<RejectedPayment, Error>;
 }
 
-impl Handler<RejectPayment<UnpaidPayment>> for Fsm {
+impl Handler<RejectPayment<NewPayment>> for Fsm {
     type Result = ResponseFuture<RejectedPayment, Error>;
 
-    fn handle(&mut self, msg: RejectPayment<UnpaidPayment>, _: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: RejectPayment<NewPayment>, _: &mut Self::Context) -> Self::Result {
         Box::new(reject_transaction(&self.db, &msg.payment.id).map(RejectedPayment))
     }
 }
@@ -486,14 +486,14 @@ pub struct CreatePayout {
 }
 
 impl Message for CreatePayout {
-    type Result = Result<UnpaidPayout, Error>;
+    type Result = Result<NewPayout, Error>;
 }
 
 #[derive(Debug, Deserialize, Clone, Deref)]
-pub struct UnpaidPayout(Transaction);
+pub struct NewPayout(Transaction);
 
 impl Handler<CreatePayout> for Fsm {
-    type Result = ResponseFuture<UnpaidPayout, Error>;
+    type Result = ResponseFuture<NewPayout, Error>;
 
     fn handle(&mut self, msg: CreatePayout, _: &mut Self::Context) -> Self::Result {
         let res = blocking::run({
@@ -523,7 +523,7 @@ impl Handler<CreatePayout> for Fsm {
                     email: Some(merchant.email.clone()),
                     amount: amount,
                     grin_amount: msg.amount,
-                    status: TransactionStatus::Unpaid,
+                    status: TransactionStatus::New,
                     confirmations: msg.confirmations,
                     created_at: Utc::now().naive_utc(),
                     updated_at: Utc::now().naive_utc(),
@@ -549,7 +549,7 @@ impl Handler<CreatePayout> for Fsm {
                     .values(&new_transaction)
                     .get_result::<Transaction>(conn)?;
 
-                Ok(UnpaidPayout(tx))
+                Ok(NewPayout(tx))
             }
         })
         .from_err();
@@ -594,7 +594,7 @@ impl Handler<GetPayout> for Fsm {
 
 #[derive(Debug, Deserialize)]
 pub struct InitializePayout {
-    pub unpaid_payout: UnpaidPayout,
+    pub new_payout: NewPayout,
     pub wallet_tx: TxLogEntry,
 }
 
@@ -609,7 +609,7 @@ impl Handler<InitializePayout> for Fsm {
     type Result = ResponseFuture<InitializedPayout, Error>;
 
     fn handle(&mut self, msg: InitializePayout, _: &mut Self::Context) -> Self::Result {
-        let transaction_id = msg.unpaid_payout.id.clone();
+        let transaction_id = msg.new_payout.id.clone();
         let wallet_tx = msg.wallet_tx.clone();
         let messages: Option<Vec<String>> = wallet_tx.messages.map(|pm| {
             pm.messages
@@ -654,19 +654,19 @@ impl Handler<InitializePayout> for Fsm {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct GetUnpaidPayout {
+pub struct GetNewPayout {
     pub transaction_id: Uuid,
     pub merchant_id: String,
 }
 
-impl Message for GetUnpaidPayout {
-    type Result = Result<UnpaidPayout, Error>;
+impl Message for GetNewPayout {
+    type Result = Result<NewPayout, Error>;
 }
 
-impl Handler<GetUnpaidPayout> for Fsm {
-    type Result = ResponseFuture<UnpaidPayout, Error>;
+impl Handler<GetNewPayout> for Fsm {
+    type Result = ResponseFuture<NewPayout, Error>;
 
-    fn handle(&mut self, msg: GetUnpaidPayout, _: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: GetNewPayout, _: &mut Self::Context) -> Self::Result {
         let res = blocking::run({
             let pool = self.pool.clone();
             let merchant_id = msg.merchant_id.clone();
@@ -677,11 +677,11 @@ impl Handler<GetUnpaidPayout> for Fsm {
                 transactions
                     .filter(id.eq(msg.transaction_id))
                     .filter(merchant_id.eq(msg.merchant_id))
-                    .filter(status.eq(TransactionStatus::Unpaid))
+                    .filter(status.eq(TransactionStatus::New))
                     .filter(transaction_type.eq(TransactionType::Sent))
                     .first(conn)
                     .map_err(|e| e.into())
-                    .map(UnpaidPayout)
+                    .map(NewPayout)
             }
         })
         .from_err();

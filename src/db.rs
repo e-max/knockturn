@@ -273,12 +273,12 @@ impl Handler<GetPendingTransactions> for DbExecutor {
         use crate::schema::transactions::dsl::*;
         let conn: &PgConnection = &self.0.get().unwrap();
 
-        let unpaid_transactions = transactions
+        let pending_transactions = transactions
             .filter(status.eq(TransactionStatus::Pending))
             .load::<Transaction>(conn)
             .map_err(|e| Error::Db(s!(e)))?;
 
-        Ok(unpaid_transactions)
+        Ok(pending_transactions)
     }
 }
 
@@ -334,7 +334,7 @@ impl Handler<CreateTransaction> for DbExecutor {
             email: msg.email,
             amount: msg.amount,
             grin_amount: grins.amount,
-            status: TransactionStatus::Unpaid,
+            status: TransactionStatus::New,
             confirmations: msg.confirmations,
             created_at: Local::now().naive_local(),
             updated_at: Local::now().naive_local(),

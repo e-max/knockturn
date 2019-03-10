@@ -3,7 +3,7 @@ use crate::blocking;
 use crate::db::{Confirm2FA, CreateMerchant, GetMerchant, GetTransaction, GetTransactions};
 use crate::errors::*;
 use crate::fsm::{
-    CreatePayment, CreatePayout, GetPayout, GetUnpaidPayment, GetUnpaidPayout, InitializePayout,
+    CreatePayment, CreatePayout, GetNewPayment, GetNewPayout, GetPayout, InitializePayout,
     MakePayment,
 };
 use crate::fsm::{KNOCKTURN_SHARE, MINIMAL_WITHDRAW, TRANSFER_FEE};
@@ -209,9 +209,9 @@ pub fn create_payment(
         .send(create_transaction)
         .from_err()
         .and_then(|db_response| {
-            let unpaid_payment = db_response?;
+            let new_payment = db_response?;
 
-            Ok(HttpResponse::Created().json(unpaid_payment))
+            Ok(HttpResponse::Created().json(new_payment))
         })
         .responder()
 }
@@ -379,11 +379,7 @@ pub fn post_totp(
 }
 
 pub fn make_payment(
-    (payment, req, state): (
-        Path<GetUnpaidPayment>,
-        HttpRequest<AppState>,
-        State<AppState>,
-    ),
+    (payment, req, state): (Path<GetNewPayment>, HttpRequest<AppState>, State<AppState>),
 ) -> FutureResponse<HttpResponse, Error> {
     req.payload()
         .map_err(|e| Error::Internal(format!("Payload error: {:?}", e)))
@@ -407,26 +403,26 @@ pub fn make_payment(
                 .send(payment.into_inner())
                 .from_err()
                 .and_then(move |db_response| {
-                    let unpaid_payment = db_response?;
-                    if unpaid_payment.grin_amount != slate_amount as i64 {
+                    let new_payment = db_response?;
+                    if new_payment.grin_amount != slate_amount as i64 {
                         return Err(Error::WrongAmount(
-                            unpaid_payment.grin_amount as u64,
+                            new_payment.grin_amount as u64,
                             slate_amount,
                         ));
                     }
-                    Ok(unpaid_payment)
+                    Ok(new_payment)
                 })
                 .and_then({
                     let wallet = state.wallet.clone();
                     let fsm = state.fsm.clone();
-                    move |unpaid_payment| {
+                    move |new_payment| {
                         let slate = wallet.receive(&slate);
                         slate.and_then(move |slate| {
                             wallet
                                 .get_tx(&slate.id.hyphenated().to_string())
                                 .and_then(move |wallet_tx| {
                                     fsm.send(MakePayment {
-                                        unpaid_payment,
+                                        new_payment,
                                         wallet_tx,
                                     })
                                     .from_err()
@@ -572,7 +568,7 @@ pub fn get_payout(
                 transfer_fee: transfer_fee.into(),
                 knockturn_fee: knockturn_fee.into(),
                 reminder: (transaction.grin_amount - knockturn_fee - transfer_fee).into(),
-                download_slate: transaction.status == TransactionStatus::Unpaid,
+                download_slate: transaction.status == TransactionStatus::New,
             }
             .render()
             .map_err(|e| Error::from(e))?;
@@ -591,7 +587,7 @@ pub fn generate_slate(
 
     let res = state
         .fsm
-        .send(GetUnpaidPayout {
+        .send(GetNewPayout {
             merchant_id: merchant_id,
             transaction_id: transaction_id.clone(),
         })
@@ -602,28 +598,28 @@ pub fn generate_slate(
         })
         .and_then({
             let wallet = state.wallet.clone();
-            move |unpaid_payout| {
-                let real_payment = unpaid_payout.grin_amount
-                    - unpaid_payout.transfer_fee.unwrap()
-                    - unpaid_payout.knockturn_fee.unwrap();
+            move |new_payout| {
+                let real_payment = new_payout.grin_amount
+                    - new_payout.transfer_fee.unwrap()
+                    - new_payout.knockturn_fee.unwrap();
                 wallet
-                    .create_slate(real_payment as u64, unpaid_payout.message.clone())
-                    .and_then(move |slate| Ok((unpaid_payout, slate)))
+                    .create_slate(real_payment as u64, new_payout.message.clone())
+                    .and_then(move |slate| Ok((new_payout, slate)))
             }
         })
         .and_then({
             let wallet = state.wallet.clone();
-            move |(unpaid_payout, slate)| {
+            move |(new_payout, slate)| {
                 wallet
                     .get_tx(&slate.id.hyphenated().to_string())
-                    .and_then(|wallet_tx| Ok((unpaid_payout, slate, wallet_tx)))
+                    .and_then(|wallet_tx| Ok((new_payout, slate, wallet_tx)))
             }
         })
         .and_then({
             let fsm = state.fsm.clone();
-            move |(unpaid_payout, slate, wallet_tx)| {
+            move |(new_payout, slate, wallet_tx)| {
                 fsm.send(InitializePayout {
-                    unpaid_payout,
+                    new_payout,
                     wallet_tx,
                 })
                 .from_err()
