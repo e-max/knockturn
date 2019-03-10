@@ -613,26 +613,30 @@ pub fn get_slate(
                         unpaid_payout.grin_amount as u64,
                         unpaid_payout.message.clone(),
                     )
-                    .and_then(move |slate| {
-                        wallet
-                            .get_tx(&slate.id.hyphenated().to_string())
-                            .and_then({
-                                let fsm = state.fsm.clone();
-
-                                move |wallet_tx| {
-                                    fsm.send(AttachSlate {
-                                        unpaid_payout,
-                                        wallet_tx,
-                                    })
-                                    .from_err()
-                                    .and_then(|db_response| {
-                                        db_response?;
-                                        Ok(())
-                                    })
-                                }
-                            })
-                            .and_then(|_| ok(slate))
-                    })
+                    .and_then(move |slate| Ok((unpaid_payout, slate)))
+            }
+        })
+        .and_then({
+            let wallet = state.wallet.clone();
+            move |(unpaid_payout, slate)| {
+                wallet
+                    .get_tx(&slate.id.hyphenated().to_string())
+                    .and_then(|wallet_tx| Ok((unpaid_payout, slate, wallet_tx)))
+            }
+        })
+        .and_then({
+            let fsm = state.fsm.clone();
+            move |(unpaid_payout, slate, wallet_tx)| {
+                fsm.send(AttachSlate {
+                    unpaid_payout,
+                    wallet_tx,
+                })
+                .from_err()
+                .and_then(|db_response| {
+                    db_response?;
+                    Ok(())
+                })
+                .and_then(|_| ok(slate))
             }
         })
         .and_then(|slate| {
