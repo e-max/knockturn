@@ -35,6 +35,26 @@ impl Actor for Fsm {
     type Context = Context<Self>;
 }
 
+/*
+ * These are messages to control Payments State Machine
+ *
+ */
+
+#[derive(Debug, Serialize, Deserialize, Clone, Deref)]
+pub struct NewPayment(Transaction);
+
+#[derive(Debug, Deserialize, Clone, Deref)]
+pub struct PendingPayment(Transaction);
+
+#[derive(Debug, Deserialize, Clone, Deref, Serialize)]
+pub struct ConfirmedPayment(Transaction);
+
+#[derive(Debug, Deserialize, Clone, Deref)]
+pub struct RejectedPayment(Transaction);
+
+#[derive(Debug, Deserialize, Clone, Deref)]
+pub struct UnreportedPayment(Transaction);
+
 #[derive(Debug, Deserialize)]
 pub struct CreatePayment {
     pub merchant_id: String,
@@ -47,6 +67,166 @@ pub struct CreatePayment {
 
 impl Message for CreatePayment {
     type Result = Result<NewPayment, Error>;
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MakePayment {
+    pub new_payment: NewPayment,
+    pub wallet_tx: TxLogEntry,
+}
+
+impl Message for MakePayment {
+    type Result = Result<PendingPayment, Error>;
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ConfirmPayment {
+    pub payment: PendingPayment,
+    pub wallet_tx: TxLogEntry,
+}
+
+impl Message for ConfirmPayment {
+    type Result = Result<ConfirmedPayment, Error>;
+}
+
+#[derive(Debug, Deserialize, Deref)]
+pub struct RejectPayment<T> {
+    pub payment: T,
+}
+
+impl Message for RejectPayment<NewPayment> {
+    type Result = Result<RejectedPayment, Error>;
+}
+
+impl Message for RejectPayment<PendingPayment> {
+    type Result = Result<RejectedPayment, Error>;
+}
+
+#[derive(Debug, Deserialize, Deref)]
+pub struct ReportPayment<T> {
+    pub payment: T,
+}
+
+impl Message for ReportPayment<ConfirmedPayment> {
+    type Result = Result<(), Error>;
+}
+
+impl Message for ReportPayment<RejectedPayment> {
+    type Result = Result<(), Error>;
+}
+
+impl Message for ReportPayment<UnreportedPayment> {
+    type Result = Result<(), Error>;
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetNewPayment {
+    pub transaction_id: Uuid,
+}
+
+impl Message for GetNewPayment {
+    type Result = Result<NewPayment, Error>;
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetPendingPayments;
+
+impl Message for GetPendingPayments {
+    type Result = Result<Vec<PendingPayment>, Error>;
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetConfirmedPayments;
+
+impl Message for GetConfirmedPayments {
+    type Result = Result<Vec<ConfirmedPayment>, Error>;
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetUnreportedPayments;
+
+impl Message for GetUnreportedPayments {
+    type Result = Result<Vec<UnreportedPayment>, Error>;
+}
+
+/*
+ * These are messages to control Payout State Machine
+ *
+ *
+ *
+ *
+ *
+ */
+
+#[derive(Debug, Deserialize, Clone, Deref)]
+pub struct NewPayout(Transaction);
+
+#[derive(Debug, Serialize, Deserialize, Clone, Deref)]
+pub struct InitializedPayout(Transaction);
+
+#[derive(Debug, Serialize, Deserialize, Clone, Deref)]
+pub struct PendingPayout(Transaction);
+
+#[derive(Debug, Deserialize)]
+pub struct CreatePayout {
+    pub merchant_id: String,
+    pub amount: i64,
+    pub confirmations: i32,
+}
+
+impl Message for CreatePayout {
+    type Result = Result<NewPayout, Error>;
+}
+
+#[derive(Debug, Deserialize)]
+pub struct InitializePayout {
+    pub new_payout: NewPayout,
+    pub wallet_tx: TxLogEntry,
+}
+
+impl Message for InitializePayout {
+    type Result = Result<InitializedPayout, Error>;
+}
+
+#[derive(Debug, Deserialize)]
+pub struct FinalizePayout {
+    pub initialized_payout: InitializedPayout,
+}
+
+impl Message for FinalizePayout {
+    type Result = Result<PendingPayout, Error>;
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetPayout {
+    pub merchant_id: String,
+    pub transaction_id: Uuid,
+}
+
+impl Message for GetPayout {
+    type Result = Result<Transaction, Error>;
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetNewPayout {
+    pub transaction_id: Uuid,
+    pub merchant_id: String,
+}
+
+impl Message for GetNewPayout {
+    type Result = Result<NewPayout, Error>;
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetInitializedPayout {
+    pub transaction_id: Uuid,
+    //We don't require merchant_id here because this message is used in handler
+    //which accept signed slate from wallet. i.e. he won't be logged in and we wouldn't
+    //know merchant_id
+}
+
+impl Message for GetInitializedPayout {
+    type Result = Result<InitializedPayout, Error>;
 }
 
 impl Handler<CreatePayment> for Fsm {
@@ -75,18 +255,6 @@ impl Handler<CreatePayment> for Fsm {
     }
 }
 
-#[derive(Debug, Deserialize)]
-pub struct GetNewPayment {
-    pub transaction_id: Uuid,
-}
-
-impl Message for GetNewPayment {
-    type Result = Result<NewPayment, Error>;
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Deref)]
-pub struct NewPayment(Transaction);
-
 impl Handler<GetNewPayment> for Fsm {
     type Result = ResponseFuture<NewPayment, Error>;
 
@@ -106,16 +274,6 @@ impl Handler<GetNewPayment> for Fsm {
             });
         Box::new(res)
     }
-}
-
-#[derive(Debug, Deserialize)]
-pub struct MakePayment {
-    pub new_payment: NewPayment,
-    pub wallet_tx: TxLogEntry,
-}
-
-impl Message for MakePayment {
-    type Result = Result<PendingPayment, Error>;
 }
 
 impl Handler<MakePayment> for Fsm {
@@ -166,16 +324,6 @@ impl Handler<MakePayment> for Fsm {
     }
 }
 
-#[derive(Debug, Deserialize)]
-pub struct GetPendingPayments;
-
-impl Message for GetPendingPayments {
-    type Result = Result<Vec<PendingPayment>, Error>;
-}
-
-#[derive(Debug, Deserialize, Clone, Deref)]
-pub struct PendingPayment(Transaction);
-
 impl Handler<GetPendingPayments> for Fsm {
     type Result = ResponseFuture<Vec<PendingPayment>, Error>;
 
@@ -192,16 +340,6 @@ impl Handler<GetPendingPayments> for Fsm {
     }
 }
 
-#[derive(Debug, Deserialize)]
-pub struct ConfirmPayment {
-    pub payment: PendingPayment,
-    pub wallet_tx: TxLogEntry,
-}
-
-impl Message for ConfirmPayment {
-    type Result = Result<ConfirmedPayment, Error>;
-}
-
 impl Handler<ConfirmPayment> for Fsm {
     type Result = ResponseFuture<ConfirmedPayment, Error>;
 
@@ -216,16 +354,6 @@ impl Handler<ConfirmPayment> for Fsm {
         }))
     }
 }
-
-#[derive(Debug, Deserialize)]
-pub struct GetConfirmedPayments;
-
-impl Message for GetConfirmedPayments {
-    type Result = Result<Vec<ConfirmedPayment>, Error>;
-}
-
-#[derive(Debug, Deserialize, Clone, Deref, Serialize)]
-pub struct ConfirmedPayment(Transaction);
 
 impl Handler<GetConfirmedPayments> for Fsm {
     type Result = ResponseFuture<Vec<ConfirmedPayment>, Error>;
@@ -278,19 +406,6 @@ fn run_callback(
         })
 }
 
-#[derive(Debug, Deserialize, Deref)]
-pub struct RejectPayment<T> {
-    pub payment: T,
-}
-
-impl Message for RejectPayment<NewPayment> {
-    type Result = Result<RejectedPayment, Error>;
-}
-
-impl Message for RejectPayment<PendingPayment> {
-    type Result = Result<RejectedPayment, Error>;
-}
-
 impl Handler<RejectPayment<NewPayment>> for Fsm {
     type Result = ResponseFuture<RejectedPayment, Error>;
 
@@ -324,23 +439,6 @@ fn reject_transaction(
         let tx = db_response?;
         Ok(tx)
     })
-}
-
-#[derive(Debug, Deserialize, Deref)]
-pub struct ReportPayment<T> {
-    pub payment: T,
-}
-
-impl Message for ReportPayment<ConfirmedPayment> {
-    type Result = Result<(), Error>;
-}
-
-impl Message for ReportPayment<RejectedPayment> {
-    type Result = Result<(), Error>;
-}
-
-impl Message for ReportPayment<UnreportedPayment> {
-    type Result = Result<(), Error>;
 }
 
 impl Handler<ReportPayment<ConfirmedPayment>> for Fsm {
@@ -450,18 +548,6 @@ fn report_transaction(
     })
 }
 
-pub struct RejectedPayment(Transaction);
-
-#[derive(Debug, Deserialize)]
-pub struct GetUnreportedPayments;
-
-impl Message for GetUnreportedPayments {
-    type Result = Result<Vec<UnreportedPayment>, Error>;
-}
-
-#[derive(Debug, Deserialize, Clone, Deref)]
-pub struct UnreportedPayment(Transaction);
-
 impl Handler<GetUnreportedPayments> for Fsm {
     type Result = ResponseFuture<Vec<UnreportedPayment>, Error>;
 
@@ -477,20 +563,6 @@ impl Handler<GetUnreportedPayments> for Fsm {
         )
     }
 }
-
-#[derive(Debug, Deserialize)]
-pub struct CreatePayout {
-    pub merchant_id: String,
-    pub amount: i64,
-    pub confirmations: i32,
-}
-
-impl Message for CreatePayout {
-    type Result = Result<NewPayout, Error>;
-}
-
-#[derive(Debug, Deserialize, Clone, Deref)]
-pub struct NewPayout(Transaction);
 
 impl Handler<CreatePayout> for Fsm {
     type Result = ResponseFuture<NewPayout, Error>;
@@ -558,16 +630,6 @@ impl Handler<CreatePayout> for Fsm {
     }
 }
 
-#[derive(Debug, Deserialize)]
-pub struct GetPayout {
-    pub merchant_id: String,
-    pub transaction_id: Uuid,
-}
-
-impl Message for GetPayout {
-    type Result = Result<Transaction, Error>;
-}
-
 impl Handler<GetPayout> for Fsm {
     type Result = ResponseFuture<Transaction, Error>;
 
@@ -591,19 +653,6 @@ impl Handler<GetPayout> for Fsm {
         Box::new(res)
     }
 }
-
-#[derive(Debug, Deserialize)]
-pub struct InitializePayout {
-    pub new_payout: NewPayout,
-    pub wallet_tx: TxLogEntry,
-}
-
-impl Message for InitializePayout {
-    type Result = Result<InitializedPayout, Error>;
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Deref)]
-pub struct InitializedPayout(Transaction);
 
 impl Handler<InitializePayout> for Fsm {
     type Result = ResponseFuture<InitializedPayout, Error>;
@@ -653,16 +702,6 @@ impl Handler<InitializePayout> for Fsm {
     }
 }
 
-#[derive(Debug, Deserialize)]
-pub struct GetNewPayout {
-    pub transaction_id: Uuid,
-    pub merchant_id: String,
-}
-
-impl Message for GetNewPayout {
-    type Result = Result<NewPayout, Error>;
-}
-
 impl Handler<GetNewPayout> for Fsm {
     type Result = ResponseFuture<NewPayout, Error>;
 
@@ -689,18 +728,6 @@ impl Handler<GetNewPayout> for Fsm {
     }
 }
 
-#[derive(Debug, Deserialize)]
-pub struct GetInitializedPayout {
-    pub transaction_id: Uuid,
-    //We don't require merchant_id here because this message is used in handler
-    //which accept signed slate from wallet. i.e. he won't be logged in and we wouldn't
-    //know merchant_id
-}
-
-impl Message for GetInitializedPayout {
-    type Result = Result<InitializedPayout, Error>;
-}
-
 impl Handler<GetInitializedPayout> for Fsm {
     type Result = ResponseFuture<InitializedPayout, Error>;
 
@@ -723,18 +750,6 @@ impl Handler<GetInitializedPayout> for Fsm {
         .from_err();
         Box::new(res)
     }
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Deref)]
-pub struct PendingPayout(Transaction);
-
-#[derive(Debug, Deserialize)]
-pub struct FinalizePayout {
-    pub initialized_payout: InitializedPayout,
-}
-
-impl Message for FinalizePayout {
-    type Result = Result<PendingPayout, Error>;
 }
 
 impl Handler<FinalizePayout> for Fsm {
