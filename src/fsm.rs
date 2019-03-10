@@ -593,22 +593,22 @@ impl Handler<GetPayout> for Fsm {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct AttachSlate {
+pub struct InitializePayout {
     pub unpaid_payout: UnpaidPayout,
     pub wallet_tx: TxLogEntry,
 }
 
-impl Message for AttachSlate {
-    type Result = Result<PayoutWithSlate, Error>;
+impl Message for InitializePayout {
+    type Result = Result<InitializedPayout, Error>;
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Deref)]
-pub struct PayoutWithSlate(Transaction);
+pub struct InitializedPayout(Transaction);
 
-impl Handler<AttachSlate> for Fsm {
-    type Result = ResponseFuture<PayoutWithSlate, Error>;
+impl Handler<InitializePayout> for Fsm {
+    type Result = ResponseFuture<InitializedPayout, Error>;
 
-    fn handle(&mut self, msg: AttachSlate, _: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: InitializePayout, _: &mut Self::Context) -> Self::Result {
         let transaction_id = msg.unpaid_payout.id.clone();
         let wallet_tx = msg.wallet_tx.clone();
         let messages: Option<Vec<String>> = wallet_tx.messages.map(|pm| {
@@ -640,14 +640,14 @@ impl Handler<AttachSlate> for Fsm {
                 move |_| {
                     db.send(UpdateTransactionStatus {
                         id: transaction_id,
-                        status: TransactionStatus::SlateCreated,
+                        status: TransactionStatus::Initialized,
                     })
                     .from_err()
                 }
             })
             .and_then(|db_response| {
                 let transaction = db_response?;
-                Ok(PayoutWithSlate(transaction))
+                Ok(InitializedPayout(transaction))
             });
         Box::new(res)
     }

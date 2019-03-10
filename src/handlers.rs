@@ -3,7 +3,7 @@ use crate::blocking;
 use crate::db::{Confirm2FA, CreateMerchant, GetMerchant, GetTransaction, GetTransactions};
 use crate::errors::*;
 use crate::fsm::{
-    AttachSlate, CreatePayment, CreatePayout, GetPayout, GetUnpaidPayment, GetUnpaidPayout,
+    CreatePayment, CreatePayout, GetPayout, GetUnpaidPayment, GetUnpaidPayout, InitializePayout,
     MakePayment,
 };
 use crate::fsm::{KNOCKTURN_SHARE, MINIMAL_WITHDRAW, TRANSFER_FEE};
@@ -622,7 +622,7 @@ pub fn generate_slate(
         .and_then({
             let fsm = state.fsm.clone();
             move |(unpaid_payout, slate, wallet_tx)| {
-                fsm.send(AttachSlate {
+                fsm.send(InitializePayout {
                     unpaid_payout,
                     wallet_tx,
                 })

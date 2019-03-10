@@ -33,14 +33,18 @@ pub struct Merchant {
 }
 
 /*
- * The status changes flow is as follows:
+ * The status of payment changes flow is as follows:
  * Unpaid - transaction was created but no attempts were maid to pay
  * Pending - user sent a slate and we succesfully sent it to wallet
  * Finalized - transaction was accepted to chain (Not used yet)
  * Confirmed - we got required number of confirmation for this transaction
- * Reported - we've reported result to merchant
  * Rejected - transaction spent too much time in Unpaid or Pending state
- * Dead - We mark Rejected transaction as Dead as soon as we report it to merchant
+ *
+ * The status of payout changes as follows:
+ * Unpaid - payout created in db
+ * Initialized - we created transaction in wallet, created slate and sent it to merchant
+ * Pending - user returned to us slate, we finalized it in wallet and wait for required number of confimations
+ * Confirmed - we got required number of confimations
  */
 
 #[derive(
@@ -53,7 +57,7 @@ pub enum TransactionStatus {
     Rejected,
     Finalized,
     Confirmed,
-    SlateCreated,
+    Initialized,
 }
 
 impl<DB: Backend> ToSql<SmallInt, DB> for TransactionStatus
@@ -70,7 +74,7 @@ where
             TransactionStatus::Rejected => 3,
             TransactionStatus::Finalized => 4,
             TransactionStatus::Confirmed => 5,
-            TransactionStatus::SlateCreated => 6,
+            TransactionStatus::Initialized => 6,
         };
         v.to_sql(out)
     }
@@ -88,7 +92,7 @@ where
             3 => TransactionStatus::Rejected,
             4 => TransactionStatus::Finalized,
             5 => TransactionStatus::Confirmed,
-            6 => TransactionStatus::SlateCreated,
+            6 => TransactionStatus::Initialized,
             _ => return Err("replace me with a real error".into()),
         })
     }
