@@ -642,8 +642,9 @@ impl Handler<GetPayout> for Fsm {
                 use crate::schema::transactions::dsl::*;
                 let conn: &PgConnection = &pool.get().unwrap();
                 let tx = transactions
-                    .find(msg.transaction_id)
-                    .get_result(conn)
+                    .filter(id.eq(msg.transaction_id))
+                    .filter(transaction_type.eq(TransactionType::Sent))
+                    .first(conn)
                     .map_err(|e| e.into());
                 tx
             }
