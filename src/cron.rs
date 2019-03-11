@@ -154,3 +154,7 @@ fn process_unreported_payments(cron: &mut Cron, _: &mut Context<Cron>) {
         ()
     }));
 }
+
+fn process_outdated_payouts(cron: &mut Cron, _: &mut Context<Cron>) {
+    debug!("run process_outdated_payouts");
+}

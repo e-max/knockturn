@@ -20,6 +20,7 @@ use actix_web::{
 use askama::Template;
 use bcrypt;
 use bytes::BytesMut;
+use chrono::Duration;
 use data_encoding::BASE64;
 use diesel::pg::PgConnection;
 use diesel::{self, prelude::*};
@@ -220,6 +221,7 @@ pub fn create_payment(
 struct PaymentStatus {
     pub transaction_id: String,
     pub status: String,
+    pub seconds_until_expired: Option<i64>,
 }
 
 pub fn get_payment_status(
@@ -234,6 +236,7 @@ pub fn get_payment_status(
             let payment_status = PaymentStatus {
                 transaction_id: tx.id.to_string(),
                 status: tx.status.to_string(),
+                seconds_until_expired: tx.time_until_expired().map(|d| d.num_seconds()),
             };
             Ok(HttpResponse::Ok().json(payment_status))
         })
@@ -261,6 +264,7 @@ pub fn get_payment(
                     transaction.merchant_id,
                     transaction.id.to_string()
                 ),
+                time_until_expired: transaction.time_until_expired(),
             }
             .render()
             .map_err(|e| Error::from(e))?;
@@ -278,6 +282,7 @@ struct PaymentTemplate {
     amount: Money,
     grin_amount: Money,
     payment_url: String,
+    time_until_expired: Option<Duration>,
 }
 
 const MAX_SIZE: usize = 262_144; // max payload size is 256k
