@@ -3,9 +3,7 @@ use crate::db::GetMerchant;
 use crate::models::Merchant;
 use actix_web::middleware::identity::RequestIdentity;
 use actix_web::middleware::{Middleware, Started};
-use actix_web::{
-    http::header, http::Method, server, App, HttpRequest, HttpResponse, ResponseError,
-};
+use actix_web::{http::header, HttpRequest, HttpResponse};
 use futures::future::Future;
 
 pub struct SiteAuthMiddleware;

@@ -13,18 +13,16 @@ use actix_web::middleware::session::RequestSession;
 use actix_web::{
     AsyncResponder, Form, FutureResponse, HttpMessage, HttpRequest, HttpResponse, Json, Path, State,
 };
-use actix_web_httpauth::extractors::basic::BasicAuth;
 use askama::Template;
 use bcrypt;
 use bytes::BytesMut;
 use data_encoding::BASE64;
 use diesel::pg::PgConnection;
-use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::{self, prelude::*};
 use futures::future::{ok, result, Either, Future};
 use futures::stream::Stream;
 use mime_guess::get_mime_type;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::env;
 
 #[derive(Template)]
@@ -213,6 +211,30 @@ pub fn create_payment(
         .responder()
 }
 
+#[derive(Debug, Serialize)]
+struct PaymentStatus {
+    pub transaction_id: String,
+    pub status: String,
+}
+
+pub fn get_payment_status(
+    (get_transaction, state): (Path<GetTransaction>, State<AppState>),
+) -> FutureResponse<HttpResponse> {
+    state
+        .db
+        .send(get_transaction.into_inner())
+        .from_err()
+        .and_then(|db_response| {
+            let tx = db_response?;
+            let payment_status = PaymentStatus {
+                transaction_id: tx.id.to_string(),
+                status: tx.status.to_string(),
+            };
+            Ok(HttpResponse::Ok().json(payment_status))
+        })
+        .responder()
+}
+
 pub fn get_payment(
     (get_transaction, state): (Path<GetTransaction>, State<AppState>),
 ) -> FutureResponse<HttpResponse> {
@@ -251,14 +273,6 @@ struct PaymentTemplate {
     amount: Money,
     grin_amount: Money,
     payment_url: String,
-}
-
-pub fn get_tx(state: State<AppState>) -> Box<Future<Item = HttpResponse, Error = Error>> {
-    state
-        .wallet
-        .get_tx("c3b4be4a-b72c-46f5-8fb0-e318ca19ba2b")
-        .and_then(|body| Ok(HttpResponse::Ok().json(body)))
-        .responder()
 }
 
 const MAX_SIZE: usize = 262_144; // max payload size is 256k

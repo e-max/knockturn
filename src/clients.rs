@@ -1,11 +1,6 @@
-use crate::app::AppState;
-use crate::errors::*;
-use crate::models::Merchant;
 use actix_web::client::ClientRequestBuilder;
 use actix_web::http::header;
-use actix_web::HttpRequest;
-use base64::{decode, encode};
-use futures::future::{err, ok, result, Either, Future};
+use base64::encode;
 
 pub trait PlainHttpAuth {
     fn auth(&mut self, username: &str, password: &str) -> &mut Self;

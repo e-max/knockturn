@@ -59,12 +59,17 @@ pub fn create_app(
             r.method(Method::POST).with(make_payment);
         })
         .resource(
+            "/merchants/{merchant_id}/payments/{transaction_id}/status",
+            |r| {
+                r.method(Method::GET).with(get_payment_status);
+            },
+        )
+        .resource(
             "/merchants/{merchant_id}/payments/{transaction_id}/{grin_path:.*}",
             |r| {
                 r.method(Method::POST).with(make_payment);
             },
         )
-        .resource("/tx", |r| r.method(Method::GET).with(get_tx))
         .resource("/login", |r| {
             r.method(Method::POST).with(login);
             r.method(Method::GET).with(login_form);

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %} Transaction {% endblock %}
+{% block title %} Payment {% endblock %}
 
 {% block head %}
   <style>
@@ -9,10 +9,10 @@
 
 {% block content %}
 
-	<h1>Transaction {{transaction_id}}</h1>
+<h1>Payment {{transaction_id}} to a merchant {{merchant_id}}</h1>
 	<table>
 		<tr><td>Send {{grin_amount}} to:</td></tr>
-		<tr><td><pre>grin --floonet wallet send -s smallest -d {{payment_url}} {{grin_amount}}</pre></td></tr>
+		<tr><td><pre>grin --floonet wallet send -s smallest -d {{payment_url}} {{grin_amount.amount()}}</pre></td></tr>
 		<tr><td>Status</td></tr>
 		<tr><td>{{status}}</td></tr>
 		<tr><td>Amount</td></tr>

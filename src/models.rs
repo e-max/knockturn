@@ -193,6 +193,17 @@ impl Money {
             currency: currency,
         }
     }
+
+    pub fn amount(&self) -> String {
+        let pr = self.currency.precision();
+        let grins = self.amount / pr;
+        let mgrins = self.amount % pr;
+        match self.currency {
+            Currency::BTC => format!("{}.{:08}", grins, mgrins),
+            Currency::GRIN => format!("{}.{:09}", grins, mgrins),
+            _ => format!("{}.{:02}", grins, mgrins),
+        }
+    }
 }
 
 impl ToSql<Jsonb, Pg> for Money {
@@ -216,14 +227,7 @@ impl FromSql<Jsonb, Pg> for Money {
 
 impl fmt::Display for Money {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let pr = self.currency.precision();
-        let grins = self.amount / pr;
-        let mgrins = self.amount % pr;
-        match self.currency {
-            Currency::BTC => write!(f, "{}.{:08} {}", grins, mgrins, self.currency),
-            Currency::GRIN => write!(f, "{}.{:09} {}", grins, mgrins, self.currency),
-            _ => write!(f, "{}.{:02} {}", grins, mgrins, self.currency),
-        }
+        write!(f, "{} {}", self.amount(), self.currency)
     }
 }
 

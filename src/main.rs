@@ -18,8 +18,6 @@ mod wallet;
 
 #[macro_use]
 extern crate diesel;
-#[macro_use]
-extern crate failure;
 
 use actix::prelude::*;
 use actix_web::server;
@@ -33,7 +31,6 @@ use env_logger;
 use log::info;
 use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 use std::env;
-use std::fs::File;
 
 fn main() {
     dotenv().ok();
