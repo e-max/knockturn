@@ -91,7 +91,7 @@ fn main() {
             .set_private_key_file(format!("{}/privkey.pem", folder), SslFiletype::PEM)
             .unwrap();
         builder
-            .set_certificate_chain_file(format!("{}/cert.pem", folder))
+            .set_certificate_chain_file(format!("{}/fullchain.pem", folder))
             .unwrap();
         srv.bind_ssl(&host, builder)
             .expect(&format!("Can not bind_ssl to '{}'", &host))
