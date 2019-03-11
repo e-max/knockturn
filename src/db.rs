@@ -80,10 +80,12 @@ pub struct ConvertCurrency {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct GetPendingTransactions;
+pub struct GetPayment {
+    pub transaction_id: Uuid,
+}
 
 #[derive(Debug, Deserialize)]
-pub struct GetConfirmedTransactions;
+pub struct GetPaymentsByStatus(pub TransactionStatus);
 
 pub struct ConfirmTransaction {
     pub transaction: Transaction,
@@ -135,6 +137,14 @@ impl Message for GetTransaction {
     type Result = Result<Transaction, Error>;
 }
 
+impl Message for GetPayment {
+    type Result = Result<Transaction, Error>;
+}
+
+impl Message for GetPaymentsByStatus {
+    type Result = Result<Vec<Transaction>, Error>;
+}
+
 impl Message for GetTransactions {
     type Result = Result<Vec<Transaction>, Error>;
 }
@@ -156,14 +166,6 @@ impl Message for ConvertCurrency {
 }
 impl Message for ConfirmTransaction {
     type Result = Result<Transaction, Error>;
-}
-
-impl Message for GetPendingTransactions {
-    type Result = Result<Vec<Transaction>, Error>;
-}
-
-impl Message for GetConfirmedTransactions {
-    type Result = Result<Vec<Transaction>, Error>;
 }
 
 impl Message for ReportAttempt {
@@ -251,6 +253,34 @@ impl Handler<GetTransaction> for DbExecutor {
     }
 }
 
+impl Handler<GetPayment> for DbExecutor {
+    type Result = Result<Transaction, Error>;
+
+    fn handle(&mut self, msg: GetPayment, _: &mut Self::Context) -> Self::Result {
+        use crate::schema::transactions::dsl::*;
+        let conn: &PgConnection = &self.0.get().unwrap();
+        transactions
+            .filter(id.eq(msg.transaction_id))
+            .filter(transaction_type.eq(TransactionType::Received))
+            .get_result(conn)
+            .map_err(|e| e.into())
+    }
+}
+
+impl Handler<GetPaymentsByStatus> for DbExecutor {
+    type Result = Result<Vec<Transaction>, Error>;
+
+    fn handle(&mut self, msg: GetPaymentsByStatus, _: &mut Self::Context) -> Self::Result {
+        use crate::schema::transactions::dsl::*;
+        let conn: &PgConnection = &self.0.get().unwrap();
+        transactions
+            .filter(transaction_type.eq(TransactionType::Received))
+            .filter(status.eq(msg.0))
+            .load::<Transaction>(conn)
+            .map_err(|e| e.into())
+    }
+}
+
 impl Handler<GetTransactions> for DbExecutor {
     type Result = Result<Vec<Transaction>, Error>;
 
@@ -263,38 +293,6 @@ impl Handler<GetTransactions> for DbExecutor {
             .limit(msg.limit)
             .load::<Transaction>(conn)
             .map_err(|e| e.into())
-    }
-}
-
-impl Handler<GetPendingTransactions> for DbExecutor {
-    type Result = Result<Vec<Transaction>, Error>;
-
-    fn handle(&mut self, _: GetPendingTransactions, _: &mut Self::Context) -> Self::Result {
-        use crate::schema::transactions::dsl::*;
-        let conn: &PgConnection = &self.0.get().unwrap();
-
-        let pending_transactions = transactions
-            .filter(status.eq(TransactionStatus::Pending))
-            .load::<Transaction>(conn)
-            .map_err(|e| Error::Db(s!(e)))?;
-
-        Ok(pending_transactions)
-    }
-}
-
-impl Handler<GetConfirmedTransactions> for DbExecutor {
-    type Result = Result<Vec<Transaction>, Error>;
-
-    fn handle(&mut self, _: GetConfirmedTransactions, _: &mut Self::Context) -> Self::Result {
-        use crate::schema::transactions::dsl::*;
-        let conn: &PgConnection = &self.0.get().unwrap();
-
-        let confirmed_transactions = transactions
-            .filter(status.eq(TransactionStatus::Confirmed))
-            .load::<Transaction>(conn)
-            .map_err(|e| Error::Db(s!(e)))?;
-
-        Ok(confirmed_transactions)
     }
 }
 

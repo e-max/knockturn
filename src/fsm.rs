@@ -1,7 +1,7 @@
 use crate::blocking;
 use crate::clients::BearerTokenAuth;
 use crate::db::{
-    self, CreateTransaction, DbExecutor, GetMerchant, GetTransaction, MarkAsReported,
+    self, CreateTransaction, DbExecutor, GetMerchant, GetPayment, GetTransaction, MarkAsReported,
     ReportAttempt, UpdateTransactionStatus, UpdateTransactionWithTxLog,
 };
 use crate::errors::Error;
@@ -261,7 +261,7 @@ impl Handler<GetNewPayment> for Fsm {
     fn handle(&mut self, msg: GetNewPayment, _: &mut Self::Context) -> Self::Result {
         let res = self
             .db
-            .send(GetTransaction {
+            .send(GetPayment {
                 transaction_id: msg.transaction_id,
             })
             .from_err()
@@ -330,7 +330,7 @@ impl Handler<GetPendingPayments> for Fsm {
     fn handle(&mut self, _: GetPendingPayments, _: &mut Self::Context) -> Self::Result {
         Box::new(
             self.db
-                .send(db::GetPendingTransactions)
+                .send(db::GetPaymentsByStatus(TransactionStatus::Pending))
                 .from_err()
                 .and_then(|db_response| {
                     let data = db_response?;
@@ -361,7 +361,7 @@ impl Handler<GetConfirmedPayments> for Fsm {
     fn handle(&mut self, _: GetConfirmedPayments, _: &mut Self::Context) -> Self::Result {
         Box::new(
             self.db
-                .send(db::GetConfirmedTransactions)
+                .send(db::GetPaymentsByStatus(TransactionStatus::Confirmed))
                 .from_err()
                 .and_then(|db_response| {
                     let data = db_response?;
