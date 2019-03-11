@@ -574,52 +574,61 @@ impl Handler<CreatePayout> for Fsm {
             move || {
                 use crate::schema::merchants::dsl::*;
                 let conn: &PgConnection = &pool.get().unwrap();
-                let merchant: Merchant = merchants.find(merchant_id.clone()).get_result(conn)?;
-                if merchant.balance < msg.amount {
-                    return Err(Error::NotEnoughFunds);
-                }
+                let tx = conn.transaction(|| {
+                    let merchant: Merchant =
+                        merchants.find(merchant_id.clone()).get_result(conn)?;
+                    if merchant.balance < msg.amount {
+                        return Err(Error::NotEnoughFunds);
+                    }
 
-                let transfer_fee = TRANSFER_FEE;
-                let knockturn_fee = (msg.amount as f64 * KNOCKTURN_SHARE) as i64;
-                let mut total = 0;
+                    diesel::update(merchants.filter(id.eq(merchant_id.clone())))
+                        .set(balance.eq(balance - msg.amount))
+                        .get_result::<Merchant>(conn)
+                        .map_err::<Error, _>(|e| e.into())?;
 
-                if msg.amount > transfer_fee + knockturn_fee {
-                    total = msg.amount - transfer_fee - knockturn_fee;
-                }
+                    let transfer_fee = TRANSFER_FEE;
+                    let knockturn_fee = (msg.amount as f64 * KNOCKTURN_SHARE) as i64;
+                    let mut total = 0;
 
-                let amount = Money::from_grin(msg.amount);
-                let new_transaction = Transaction {
-                    id: uuid::Uuid::new_v4(),
-                    external_id: s!(""),
-                    merchant_id: merchant_id.clone(),
-                    email: Some(merchant.email.clone()),
-                    amount: amount,
-                    grin_amount: msg.amount,
-                    status: TransactionStatus::New,
-                    confirmations: msg.confirmations,
-                    created_at: Utc::now().naive_utc(),
-                    updated_at: Utc::now().naive_utc(),
-                    report_attempts: 0,
-                    next_report_attempt: None,
-                    reported: false,
-                    wallet_tx_id: None,
-                    wallet_tx_slate_id: None,
-                    message: format!(
-                        "Withdrawal of {} for merchant {}",
-                        amount.clone(),
-                        merchant_id.clone()
-                    ),
-                    slate_messages: None,
-                    transfer_fee: Some(transfer_fee),
-                    knockturn_fee: Some(knockturn_fee),
-                    real_transfer_fee: None,
-                    transaction_type: TransactionType::Sent,
-                };
+                    if msg.amount > transfer_fee + knockturn_fee {
+                        total = msg.amount - transfer_fee - knockturn_fee;
+                    }
 
-                use crate::schema::transactions;
-                let tx = diesel::insert_into(transactions::table)
-                    .values(&new_transaction)
-                    .get_result::<Transaction>(conn)?;
+                    let amount = Money::from_grin(msg.amount);
+                    let new_transaction = Transaction {
+                        id: uuid::Uuid::new_v4(),
+                        external_id: s!(""),
+                        merchant_id: merchant_id.clone(),
+                        email: Some(merchant.email.clone()),
+                        amount: amount,
+                        grin_amount: msg.amount,
+                        status: TransactionStatus::New,
+                        confirmations: msg.confirmations,
+                        created_at: Utc::now().naive_utc(),
+                        updated_at: Utc::now().naive_utc(),
+                        report_attempts: 0,
+                        next_report_attempt: None,
+                        reported: false,
+                        wallet_tx_id: None,
+                        wallet_tx_slate_id: None,
+                        message: format!(
+                            "Withdrawal of {} for merchant {}",
+                            amount.clone(),
+                            merchant_id.clone()
+                        ),
+                        slate_messages: None,
+                        transfer_fee: Some(transfer_fee),
+                        knockturn_fee: Some(knockturn_fee),
+                        real_transfer_fee: None,
+                        transaction_type: TransactionType::Sent,
+                    };
+
+                    use crate::schema::transactions;
+                    let tx = diesel::insert_into(transactions::table)
+                        .values(&new_transaction)
+                        .get_result::<Transaction>(conn)?;
+                    Ok(tx)
+                })?;
 
                 Ok(NewPayout(tx))
             }
