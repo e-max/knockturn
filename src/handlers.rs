@@ -701,15 +701,21 @@ pub fn accept_slate(
                     let wallet = state.wallet.clone();
                     let fsm = state.fsm.clone();
                     move |initialized_payout| {
-                        let slate = wallet.finalize(&slate);
-                        slate.and_then(move |slate| {
-                            fsm.send(FinalizePayout { initialized_payout })
-                                .from_err()
-                                .and_then(|db_response| {
-                                    db_response?;
-                                    Ok(())
-                                })
-                                .and_then(|_| ok(slate))
+                        wallet.finalize(&slate).and_then({
+                            let wallet = wallet.clone();
+                            move |slate| {
+                                wallet
+                                    .post_tx()
+                                    .and_then(move |_| {
+                                        fsm.send(FinalizePayout { initialized_payout })
+                                            .from_err()
+                                            .and_then(|db_response| {
+                                                db_response?;
+                                                Ok(())
+                                            })
+                                    })
+                                    .and_then(|_| ok(slate))
+                            }
                         })
                     }
                 })

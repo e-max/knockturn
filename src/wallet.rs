@@ -176,7 +176,7 @@ impl Wallet {
             })
     }
 
-    pub fn post_tx(&self, tx_slate_id: &str) -> impl Future<Item = (), Error = Error> {
+    pub fn post_tx(&self) -> impl Future<Item = (), Error = Error> {
         let url = format!("{}/{}", self.url, POST_TX_URL);
         debug!("Post transaction in chain by wallet as {}", url);
         client::post(&url) // <- Create request builder
