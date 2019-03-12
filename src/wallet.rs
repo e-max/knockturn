@@ -22,6 +22,10 @@ pub struct Wallet {
 
 const RETRIEVE_TXS_URL: &'static str = "v1/wallet/owner/retrieve_txs";
 const RECEIVE_URL: &'static str = "v1/wallet/foreign/receive_tx";
+const SEND_URL: &'static str = "/v1/wallet/owner/issue_send_tx";
+const FINALIZE_URL: &'static str = "/v1/wallet/owner/finalize_tx";
+const CANCEL_TX_URL: &'static str = "/v1/wallet/owner/cancel_tx";
+const POST_TX_URL: &'static str = "/v1/wallet/owner/post_tx?fluff";
 
 impl Wallet {
     pub fn new(url: &str, username: &str, password: &str) -> Self {
@@ -39,6 +43,7 @@ impl Wallet {
     pub fn get_tx(&self, tx_id: &str) -> impl Future<Item = TxLogEntry, Error = Error> {
         let tx_id = tx_id.to_owned();
         let url = format!("{}/{}?tx_id={}&refresh", self.url, RETRIEVE_TXS_URL, tx_id);
+        debug!("Get transaction from wallet {}", url);
         client::get(&url) // <- Create request builder
             .auth(&self.username, &self.password)
             .finish()
@@ -86,10 +91,129 @@ impl Wallet {
 
     pub fn receive(&self, slate: &Slate) -> impl Future<Item = Slate, Error = Error> {
         let url = format!("{}/{}", self.url, RECEIVE_URL);
-        debug!("Receive as {} {}: {}", self.username, self.password, url);
+        debug!("Receive slate by wallet  {}", url);
         client::post(&url) // <- Create request builder
             .auth(&self.username, &self.password)
             .json(slate)
+            .unwrap()
+            .send() // <- Send http request
+            .map_err(|e| Error::WalletAPIError(s!(e)))
+            .and_then(|resp| {
+                if !resp.status().is_success() {
+                    Err(Error::WalletAPIError(format!("Error status: {:?}", resp)))
+                } else {
+                    Ok(resp)
+                }
+            })
+            .and_then(|resp| {
+                // <- server http response
+                debug!("Response: {:?}", resp);
+                resp.body()
+                    .map_err(|e| Error::WalletAPIError(s!(e)))
+                    .and_then(move |bytes| {
+                        let slate_resp: Slate = from_slice(&bytes).map_err(|e| {
+                            error!(
+                                "Cannot decode json {:?}:\n with error {} ",
+                                from_utf8(&bytes),
+                                e
+                            );
+                            Error::WalletAPIError(format!("Cannot decode json {}", e))
+                        })?;
+                        Ok(slate_resp)
+                    })
+            })
+    }
+
+    pub fn finalize(&self, slate: &Slate) -> impl Future<Item = Slate, Error = Error> {
+        let url = format!("{}/{}", self.url, FINALIZE_URL);
+        debug!("Finalize slate by wallet {}", url);
+        client::post(&url) // <- Create request builder
+            .auth(&self.username, &self.password)
+            .json(slate)
+            .unwrap()
+            .send() // <- Send http request
+            .map_err(|e| Error::WalletAPIError(s!(e)))
+            .and_then(|resp| {
+                if !resp.status().is_success() {
+                    Err(Error::WalletAPIError(format!("Error status: {:?}", resp)))
+                } else {
+                    Ok(resp)
+                }
+            })
+            .and_then(|resp| {
+                // <- server http response
+                debug!("Response: {:?}", resp);
+                resp.body()
+                    .map_err(|e| Error::WalletAPIError(s!(e)))
+                    .and_then(move |bytes| {
+                        let slate_resp: Slate = from_slice(&bytes).map_err(|e| {
+                            error!(
+                                "Cannot decode json {:?}:\n with error {} ",
+                                from_utf8(&bytes),
+                                e
+                            );
+                            Error::WalletAPIError(format!("Cannot decode json {}", e))
+                        })?;
+                        Ok(slate_resp)
+                    })
+            })
+    }
+    pub fn cancel_tx(&self, tx_slate_id: &str) -> impl Future<Item = (), Error = Error> {
+        let url = format!("{}/{}?tx_id={}", self.url, CANCEL_TX_URL, tx_slate_id);
+        debug!("Cancel transaction in wallet {}", url);
+        client::post(&url) // <- Create request builder
+            .auth(&self.username, &self.password)
+            .finish()
+            .unwrap()
+            .send() // <- Send http request
+            .map_err(|e| Error::WalletAPIError(s!(e)))
+            .and_then(|resp| {
+                if !resp.status().is_success() {
+                    Err(Error::WalletAPIError(format!("Error status: {:?}", resp)))
+                } else {
+                    Ok(())
+                }
+            })
+    }
+
+    pub fn post_tx(&self) -> impl Future<Item = (), Error = Error> {
+        let url = format!("{}/{}", self.url, POST_TX_URL);
+        debug!("Post transaction in chain by wallet as {}", url);
+        client::post(&url) // <- Create request builder
+            .auth(&self.username, &self.password)
+            .finish()
+            .unwrap()
+            .send() // <- Send http request
+            .map_err(|e| Error::WalletAPIError(s!(e)))
+            .and_then(|resp| {
+                if !resp.status().is_success() {
+                    Err(Error::WalletAPIError(format!("Error status: {:?}", resp)))
+                } else {
+                    Ok(())
+                }
+            })
+    }
+
+    pub fn create_slate(
+        &self,
+        amount: u64,
+        message: String,
+    ) -> impl Future<Item = Slate, Error = Error> {
+        let url = format!("{}/{}", self.url, SEND_URL);
+        debug!("Receive as {} {}: {}", self.username, self.password, url);
+        let payment = SendTx {
+            amount: amount,
+            minimum_confirmations: 10,
+            method: "file",
+            dest: "./gpp_always_pays.grinslate",
+            max_outputs: 10,
+            num_change_outputs: 1,
+            selection_strategy_is_use_all: false,
+            message: Some(message),
+        };
+        client::post(&url) // <- Create request builder
+            .auth(&self.username, &self.password)
+            .json(&payment)
             .unwrap()
             .send() // <- Send http request
             .map_err(|e| Error::WalletAPIError(s!(e)))
@@ -362,6 +486,18 @@ pub enum OutputFeatures {
     Plain = 0,
     /// A coinbase output.
     Coinbase = 1,
+}
+
+#[derive(Debug, Serialize)]
+struct SendTx {
+    amount: u64,
+    minimum_confirmations: u64,
+    method: &'static str,
+    dest: &'static str,
+    max_outputs: u8,
+    num_change_outputs: u8,
+    selection_strategy_is_use_all: bool,
+    message: Option<String>,
 }
 
 #[cfg(test)]

@@ -28,7 +28,7 @@ table! {
         merchant_id -> Text,
         grin_amount -> Int8,
         amount -> Jsonb,
-        status -> Int2,
+        status -> crate::models::TransactionStatusMapping,
         confirmations -> Int4,
         email -> Nullable<Text>,
         created_at -> Timestamp,
@@ -40,6 +40,10 @@ table! {
         wallet_tx_slate_id -> Nullable<Text>,
         message -> Text,
         slate_messages -> Nullable<Array<Text>>,
+        knockturn_fee -> Nullable<Int8>,
+        transfer_fee -> Nullable<Int8>,
+        real_transfer_fee -> Nullable<Int8>,
+        transaction_type -> crate::models::TransactionTypeMapping,
     }
 }
 
@@ -62,9 +66,4 @@ table! {
 joinable!(transactions -> merchants (merchant_id));
 joinable!(txs -> transactions (order_id));
 
-allow_tables_to_appear_in_same_query!(
-    merchants,
-    rates,
-    transactions,
-    txs,
-);
+allow_tables_to_appear_in_same_query!(merchants, rates, transactions, txs,);

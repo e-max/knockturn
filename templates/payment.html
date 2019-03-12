@@ -11,12 +11,13 @@
 
 <h1>Payment {{transaction_id}} to a merchant {{merchant_id}}</h1>
 	<table>
-		<tr><td>Send {{grin_amount}} to:</td></tr>
-		<tr><td><pre>grin --floonet wallet send -s smallest -d {{payment_url}} {{grin_amount.amount()}}</pre></td></tr>
-		<tr><td>Status</td></tr>
-		<tr><td>{{status}}</td></tr>
-		<tr><td>Amount</td></tr>
-		<tr><td>{{amount}}</td></tr>
+		<tr><td colspan=2>Send {{grin_amount}} to:</td></tr>
+		<tr><td colspan=2><pre>grin --floonet wallet send -s smallest -d {{payment_url}} {{grin_amount.amount()}}</pre></td></tr>
+		<tr><td>Status: </td> <td>{{status}}</td></tr>
+		{% if time_until_expired.is_some() -%}
+		<tr><td>Time until expired </td> <td>{{time_until_expired.unwrap()}}</td></tr>
+		{%- endif -%}
+		<tr><td>Amount: </td><td>{{amount}}</td></tr>
 	</table>
 
 {% endblock %}

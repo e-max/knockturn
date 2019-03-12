@@ -2,9 +2,13 @@ use crate::app::AppState;
 use crate::blocking;
 use crate::db::{Confirm2FA, CreateMerchant, GetMerchant, GetTransaction, GetTransactions};
 use crate::errors::*;
-use crate::fsm::{CreatePayment, GetUnpaidPayment, MakePayment};
+use crate::fsm::{
+    CreatePayment, CreatePayout, FinalizePayout, GetInitializedPayout, GetNewPayment, GetNewPayout,
+    GetPayout, InitializePayout, MakePayment,
+};
+use crate::fsm::{KNOCKTURN_SHARE, MINIMAL_WITHDRAW, TRANSFER_FEE};
 use crate::middleware::WithMerchant;
-use crate::models::{Currency, Money, Transaction};
+use crate::models::{Currency, Merchant, Money, Transaction, TransactionStatus};
 use crate::totp::Totp;
 use crate::wallet::Slate;
 use actix_web::http::Method;
@@ -16,6 +20,7 @@ use actix_web::{
 use askama::Template;
 use bcrypt;
 use bytes::BytesMut;
+use chrono::Duration;
 use data_encoding::BASE64;
 use diesel::pg::PgConnection;
 use diesel::{self, prelude::*};
@@ -24,6 +29,7 @@ use futures::stream::Stream;
 use mime_guess::get_mime_type;
 use serde::{Deserialize, Serialize};
 use std::env;
+use uuid::Uuid;
 
 #[derive(Template)]
 #[template(path = "index.html")]
@@ -204,9 +210,9 @@ pub fn create_payment(
         .send(create_transaction)
         .from_err()
         .and_then(|db_response| {
-            let unpaid_payment = db_response?;
+            let new_payment = db_response?;
 
-            Ok(HttpResponse::Created().json(unpaid_payment))
+            Ok(HttpResponse::Created().json(new_payment))
         })
         .responder()
 }
@@ -215,6 +221,7 @@ pub fn create_payment(
 struct PaymentStatus {
     pub transaction_id: String,
     pub status: String,
+    pub seconds_until_expired: Option<i64>,
 }
 
 pub fn get_payment_status(
@@ -229,6 +236,7 @@ pub fn get_payment_status(
             let payment_status = PaymentStatus {
                 transaction_id: tx.id.to_string(),
                 status: tx.status.to_string(),
+                seconds_until_expired: tx.time_until_expired().map(|d| d.num_seconds()),
             };
             Ok(HttpResponse::Ok().json(payment_status))
         })
@@ -256,6 +264,7 @@ pub fn get_payment(
                     transaction.merchant_id,
                     transaction.id.to_string()
                 ),
+                time_until_expired: transaction.time_until_expired(),
             }
             .render()
             .map_err(|e| Error::from(e))?;
@@ -273,6 +282,7 @@ struct PaymentTemplate {
     amount: Money,
     grin_amount: Money,
     payment_url: String,
+    time_until_expired: Option<Duration>,
 }
 
 const MAX_SIZE: usize = 262_144; // max payload size is 256k
@@ -374,11 +384,7 @@ pub fn post_totp(
 }
 
 pub fn make_payment(
-    (payment, req, state): (
-        Path<GetUnpaidPayment>,
-        HttpRequest<AppState>,
-        State<AppState>,
-    ),
+    (payment, req, state): (Path<GetNewPayment>, HttpRequest<AppState>, State<AppState>),
 ) -> FutureResponse<HttpResponse, Error> {
     req.payload()
         .map_err(|e| Error::Internal(format!("Payload error: {:?}", e)))
@@ -402,26 +408,26 @@ pub fn make_payment(
                 .send(payment.into_inner())
                 .from_err()
                 .and_then(move |db_response| {
-                    let unpaid_payment = db_response?;
-                    if unpaid_payment.grin_amount != slate_amount as i64 {
+                    let new_payment = db_response?;
+                    if new_payment.grin_amount != slate_amount as i64 {
                         return Err(Error::WrongAmount(
-                            unpaid_payment.grin_amount as u64,
+                            new_payment.grin_amount as u64,
                             slate_amount,
                         ));
                     }
-                    Ok(unpaid_payment)
+                    Ok(new_payment)
                 })
                 .and_then({
                     let wallet = state.wallet.clone();
                     let fsm = state.fsm.clone();
-                    move |unpaid_payment| {
+                    move |new_payment| {
                         let slate = wallet.receive(&slate);
                         slate.and_then(move |slate| {
                             wallet
                                 .get_tx(&slate.id.hyphenated().to_string())
                                 .and_then(move |wallet_tx| {
                                     fsm.send(MakePayment {
-                                        unpaid_payment,
+                                        new_payment,
                                         wallet_tx,
                                     })
                                     .from_err()
@@ -436,6 +442,307 @@ pub fn make_payment(
                 })
                 .and_then(|slate| Ok(HttpResponse::Ok().json(slate)))
         })
+        .responder()
+}
+
+#[derive(Template, Debug)]
+#[template(path = "withdraw.html")]
+struct WithdrawTemplate<'a> {
+    error: Option<String>,
+    balance: Money,
+    knockturn_fee: Money,
+    transfer_fee: Money,
+    total: Money,
+    url: &'a str,
+}
+
+pub fn withdraw(req: HttpRequest<AppState>) -> FutureResponse<HttpResponse, Error> {
+    let merchant_id = match req.identity() {
+        Some(v) => v,
+        None => return ok(HttpResponse::Found().header("location", "/login").finish()).responder(),
+    };
+    Box::new(
+        req.state()
+            .db
+            .send(GetMerchant {
+                id: merchant_id.clone(),
+            })
+            .from_err()
+            .and_then(move |db_response| {
+                let merchant = db_response?;
+                Ok(merchant)
+            })
+            .and_then(|merchant| {
+                let balance = merchant.balance;
+                let transfer_fee = TRANSFER_FEE;
+                let knockturn_fee = (balance as f64 * KNOCKTURN_SHARE) as i64;
+                let mut total = 0;
+
+                if balance > transfer_fee + knockturn_fee {
+                    total = balance - transfer_fee - knockturn_fee;
+                }
+
+                let mut template = WithdrawTemplate {
+                    error: None,
+                    balance: Money::from_grin(balance),
+                    transfer_fee: Money::from_grin(transfer_fee),
+                    knockturn_fee: Money::from_grin(knockturn_fee),
+                    total: Money::from_grin(total),
+                    url: "http://localhost:6000/withdraw/confirm",
+                };
+
+                if balance < MINIMAL_WITHDRAW {
+                    template.error = Some(format!(
+                        "You balance is too small. Minimal withdraw amount is {}",
+                        Money::from_grin(MINIMAL_WITHDRAW)
+                    ));
+                }
+
+                template.into_response()
+            }),
+    )
+}
+
+fn check_2fa_code(merchant: &Merchant, code: &str) -> Result<bool, Error> {
+    let token_2fa = merchant
+        .token_2fa
+        .clone()
+        .ok_or(Error::General(s!("No 2fa token")))?;
+    let totp = Totp::new(merchant.id.clone(), token_2fa);
+    Ok(totp.check(code)?)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreatePayoutForm {
+    pub amount: i64,
+    pub code: String,
+}
+
+pub fn create_payout(
+    (req, form): (HttpRequest<AppState>, Form<CreatePayoutForm>),
+) -> FutureResponse<HttpResponse, Error> {
+    let merchant = req.get_merchant().unwrap();
+    Box::new(
+        ok(())
+            .and_then({
+                let code = form.code.clone();
+                move |_| {
+                    let validated = check_2fa_code(&merchant, &code)?;
+                    Ok((merchant, validated))
+                }
+            })
+            .and_then(move |(merchant, validated)| {
+                if !validated {
+                    withdraw(req)
+                } else {
+                    req.state()
+                        .fsm
+                        .send(CreatePayout {
+                            amount: form.amount,
+                            merchant_id: merchant.id,
+                            confirmations: 10,
+                        })
+                        .from_err()
+                        .and_then(|resp| {
+                            let payout = resp?;
+                            Ok(HttpResponse::Found()
+                                .header("location", format!("/payouts/{}", payout.id))
+                                .finish())
+                        })
+                        .responder()
+                }
+            }),
+    )
+}
+
+#[derive(Template)]
+#[template(path = "payout.html")]
+struct PayoutTemplate {
+    tx_id: String,
+    merchant_id: String,
+    status: String,
+    amount: Money,
+    transfer_fee: Money,
+    knockturn_fee: Money,
+    reminder: Money,
+    download_slate: bool,
+}
+
+pub fn get_payout(
+    (req, transaction_id, state): (HttpRequest<AppState>, Path<Uuid>, State<AppState>),
+) -> FutureResponse<HttpResponse> {
+    let merchant_id = req.identity().unwrap();
+
+    state
+        .fsm
+        .send(GetPayout {
+            merchant_id: merchant_id,
+            transaction_id: transaction_id.clone(),
+        })
+        .from_err()
+        .and_then(|db_response| {
+            let transaction = db_response?;
+            let knockturn_fee = transaction
+                .knockturn_fee
+                .ok_or(Error::General(s!("Transaction doesn't have knockturn_fee")))?;
+            let transfer_fee = transaction
+                .transfer_fee
+                .ok_or(Error::General(s!("Transaction doesn't have transfer_fee")))?;
+            let html = PayoutTemplate {
+                tx_id: transaction.id.to_string(),
+                merchant_id: transaction.merchant_id.clone(),
+                status: transaction.status.to_string(),
+                amount: transaction.amount.into(),
+                transfer_fee: transfer_fee.into(),
+                knockturn_fee: knockturn_fee.into(),
+                reminder: (transaction.grin_amount - knockturn_fee - transfer_fee).into(),
+                download_slate: transaction.status == TransactionStatus::New,
+            }
+            .render()
+            .map_err(|e| Error::from(e))?;
+            Ok(HttpResponse::Ok().content_type("text/html").body(html))
+        })
+        .responder()
+}
+
+pub fn generate_slate(
+    (req, transaction_id, state): (HttpRequest<AppState>, Path<Uuid>, State<AppState>),
+) -> FutureResponse<HttpResponse, Error> {
+    let merchant_id = match req.identity() {
+        Some(v) => v,
+        None => return ok(HttpResponse::Found().header("location", "/login").finish()).responder(),
+    };
+
+    let res = state
+        .fsm
+        .send(GetNewPayout {
+            merchant_id: merchant_id,
+            transaction_id: transaction_id.clone(),
+        })
+        .from_err()
+        .and_then(|db_response| {
+            let payout = db_response?;
+            Ok(payout)
+        })
+        .and_then({
+            let wallet = state.wallet.clone();
+            move |new_payout| {
+                let real_payment = new_payout.grin_amount
+                    - new_payout.transfer_fee.unwrap()
+                    - new_payout.knockturn_fee.unwrap();
+                wallet
+                    .create_slate(real_payment as u64, new_payout.message.clone())
+                    .and_then(move |slate| Ok((new_payout, slate)))
+            }
+        })
+        .and_then({
+            let wallet = state.wallet.clone();
+            move |(new_payout, slate)| {
+                wallet
+                    .get_tx(&slate.id.hyphenated().to_string())
+                    .and_then(|wallet_tx| Ok((new_payout, slate, wallet_tx)))
+            }
+        })
+        .and_then({
+            let fsm = state.fsm.clone();
+            move |(new_payout, slate, wallet_tx)| {
+                fsm.send(InitializePayout {
+                    new_payout,
+                    wallet_tx,
+                })
+                .from_err()
+                .and_then(|db_response| {
+                    db_response?;
+                    Ok(())
+                })
+                .and_then(|_| ok(slate))
+            }
+        })
+        .and_then(|slate| {
+            Ok(HttpResponse::Ok()
+                .content_type("application/octet-stream")
+                .json(slate))
+        });
+
+    Box::new(res)
+}
+
+pub fn accept_slate(
+    (tx_id, req, state): (Path<Uuid>, HttpRequest<AppState>, State<AppState>),
+) -> FutureResponse<HttpResponse, Error> {
+    req.payload()
+        .map_err(|e| Error::Internal(format!("Payload error: {:?}", e)))
+        //.from_err()
+        .fold(BytesMut::new(), move |mut body, chunk| {
+            if (body.len() + chunk.len()) > MAX_SIZE {
+                Err(Error::Internal("overflow".to_owned()))
+            } else {
+                body.extend_from_slice(&chunk);
+                Ok(body)
+            }
+        })
+        .and_then(|body| {
+            let slate = serde_json::from_slice::<Slate>(&body)?;
+            Ok(slate)
+        })
+        .and_then(move |slate| {
+            let slate_amount = slate.amount;
+            state
+                .fsm
+                .send(GetInitializedPayout {
+                    transaction_id: tx_id.clone(),
+                })
+                .from_err()
+                .and_then(move |db_response| {
+                    let initialized_payout = db_response?;
+                    Ok(initialized_payout)
+                })
+                .and_then({
+                    let wallet = state.wallet.clone();
+                    let fsm = state.fsm.clone();
+                    move |initialized_payout| {
+                        wallet.finalize(&slate).and_then({
+                            let wallet = wallet.clone();
+                            move |slate| {
+                                wallet
+                                    .post_tx()
+                                    .and_then(move |_| {
+                                        fsm.send(FinalizePayout { initialized_payout })
+                                            .from_err()
+                                            .and_then(|db_response| {
+                                                db_response?;
+                                                Ok(())
+                                            })
+                                    })
+                                    .and_then(|_| ok(slate))
+                            }
+                        })
+                    }
+                })
+                .and_then(|slate| Ok(HttpResponse::Ok().json(slate)))
+        })
+        .responder()
+}
+
+pub fn withdraw_confirmation(
+    (req, state): (HttpRequest<AppState>, State<AppState>),
+) -> FutureResponse<HttpResponse, Error> {
+    req.payload()
+        .map_err(|e| Error::Internal(format!("Payload error: {:?}", e)))
+        //.from_err()
+        .fold(BytesMut::new(), move |mut body, chunk| {
+            if (body.len() + chunk.len()) > MAX_SIZE {
+                Err(Error::Internal("overflow".to_owned()))
+            } else {
+                body.extend_from_slice(&chunk);
+                Ok(body)
+            }
+        })
+        .and_then(|body| {
+            let slate = serde_json::from_slice::<Slate>(&body)?;
+            Ok(slate)
+        })
+        .and_then(|_| Ok(HttpResponse::Ok().body("hello")))
         .responder()
 }
 

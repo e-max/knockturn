@@ -6,13 +6,19 @@ use diesel::deserialize::{self, FromSql};
 use diesel::pg::Pg;
 use diesel::serialize::{self, Output, ToSql};
 use diesel::sql_types::{Jsonb, SmallInt};
+use diesel_derive_enum::DbEnum;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::io;
 use strum_macros::{Display, EnumString};
 use uuid::Uuid;
 
-const TTL_SECONDS: i64 = 20 * 60; //20 minutes
+pub const NEW_PAYMENT_TTL_SECONDS: i64 = 15 * 60; //15 minutes since creation time
+pub const PENDING_PAYMENT_TTL_SECONDS: i64 = 7 * 60; //7  minutes since became pending
+
+pub const NEW_PAYOUT_TTL_SECONDS: i64 = 5 * 60; //5  minutes since creation time
+pub const INITIALIZED_PAYOUT_TTL_SECONDS: i64 = 5 * 60; //5  minutes since creation time
+pub const PENDING_PAYOUT_TTL_SECONDS: i64 = 15 * 60; //15 minutes since became pending
 
 #[derive(Debug, Serialize, Deserialize, Queryable, Insertable, Identifiable, Clone)]
 #[table_name = "merchants"]
@@ -32,62 +38,34 @@ pub struct Merchant {
 }
 
 /*
- * The status changes flow is as follows:
- * Unpaid - transaction was created but no attempts were maid to pay
+ * The status of payment changes flow is as follows:
+ * New - transaction was created but no attempts were maid to pay
  * Pending - user sent a slate and we succesfully sent it to wallet
  * Finalized - transaction was accepted to chain (Not used yet)
  * Confirmed - we got required number of confirmation for this transaction
- * Reported - we've reported result to merchant
- * Rejected - transaction spent too much time in Unpaid or Pending state
- * Dead - We mark Rejected transaction as Dead as soon as we report it to merchant
+ * Rejected - transaction spent too much time in New or Pending state
+ *
+ * The status of payout changes as follows:
+ * New - payout created in db
+ * Initialized - we created transaction in wallet, created slate and sent it to merchant
+ * Pending - user returned to us slate, we finalized it in wallet and wait for required number of confimations
+ * Confirmed - we got required number of confimations
  */
 
-#[derive(
-    Clone, EnumString, Display, Debug, PartialEq, AsExpression, Serialize, Deserialize, FromSqlRow,
-)]
-#[sql_type = "SmallInt"]
+#[derive(Debug, PartialEq, DbEnum, Serialize, Deserialize, Clone, Copy, EnumString, Display)]
 pub enum TransactionStatus {
-    Unpaid,
+    New,
     Pending,
     Rejected,
     Finalized,
     Confirmed,
+    Initialized,
 }
 
-impl<DB: Backend> ToSql<SmallInt, DB> for TransactionStatus
-where
-    i16: ToSql<SmallInt, DB>,
-{
-    fn to_sql<W>(&self, out: &mut Output<W, DB>) -> serialize::Result
-    where
-        W: io::Write,
-    {
-        let v = match *self {
-            TransactionStatus::Unpaid => 1,
-            TransactionStatus::Pending => 2,
-            TransactionStatus::Rejected => 3,
-            TransactionStatus::Finalized => 4,
-            TransactionStatus::Confirmed => 5,
-        };
-        v.to_sql(out)
-    }
-}
-
-impl<DB: Backend> FromSql<SmallInt, DB> for TransactionStatus
-where
-    i16: FromSql<SmallInt, DB>,
-{
-    fn from_sql(bytes: Option<&DB::RawValue>) -> deserialize::Result<Self> {
-        let v = i16::from_sql(bytes)?;
-        Ok(match v {
-            1 => TransactionStatus::Unpaid,
-            2 => TransactionStatus::Pending,
-            3 => TransactionStatus::Rejected,
-            4 => TransactionStatus::Finalized,
-            5 => TransactionStatus::Confirmed,
-            _ => return Err("replace me with a real error".into()),
-        })
-    }
+#[derive(Debug, PartialEq, DbEnum, Serialize, Deserialize, Clone, Copy, EnumString, Display)]
+pub enum TransactionType {
+    Payment,
+    Payout,
 }
 
 #[derive(
@@ -117,11 +95,41 @@ pub struct Transaction {
     pub wallet_tx_slate_id: Option<String>,
     pub message: String,
     pub slate_messages: Option<Vec<String>>,
+    pub knockturn_fee: Option<i64>,
+    pub transfer_fee: Option<i64>,
+    #[serde(skip_serializing)]
+    pub real_transfer_fee: Option<i64>,
+    pub transaction_type: TransactionType,
 }
 
 impl Transaction {
     pub fn is_expired(&self) -> bool {
-        self.created_at + Duration::seconds(TTL_SECONDS) < Utc::now().naive_utc()
+        match self.time_until_expired() {
+            Some(time) => time < Duration::zero(),
+            None => false,
+        }
+    }
+
+    pub fn time_until_expired(&self) -> Option<Duration> {
+        let expiration_time = match (self.transaction_type, self.status) {
+            (TransactionType::Payment, TransactionStatus::New) => {
+                Some(self.created_at + Duration::seconds(NEW_PAYMENT_TTL_SECONDS))
+            }
+            (TransactionType::Payment, TransactionStatus::Pending) => {
+                Some(self.updated_at + Duration::seconds(PENDING_PAYMENT_TTL_SECONDS))
+            }
+            (TransactionType::Payout, TransactionStatus::New) => {
+                Some(self.created_at + Duration::seconds(NEW_PAYOUT_TTL_SECONDS))
+            }
+            (TransactionType::Payout, TransactionStatus::Initialized) => {
+                Some(self.created_at + Duration::seconds(PENDING_PAYOUT_TTL_SECONDS))
+            }
+            (TransactionType::Payout, TransactionStatus::Pending) => {
+                Some(self.updated_at + Duration::seconds(PENDING_PAYOUT_TTL_SECONDS))
+            }
+            (_, _) => None,
+        };
+        expiration_time.map(|exp_time| exp_time - Utc::now().naive_utc())
     }
 
     pub fn grins(&self) -> Money {
@@ -180,9 +188,22 @@ pub struct Money {
     pub currency: Currency,
 }
 
+impl From<i64> for Money {
+    fn from(val: i64) -> Money {
+        Money::from_grin(val)
+    }
+}
+
 impl Money {
     pub fn new(amount: i64, currency: Currency) -> Self {
         Money { amount, currency }
+    }
+
+    pub fn from_grin(amount: i64) -> Self {
+        Money {
+            amount: amount,
+            currency: Currency::GRIN,
+        }
     }
 
     pub fn convert_to(&self, currency: Currency, rate: f64) -> Money {

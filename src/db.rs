@@ -1,5 +1,8 @@
 use crate::errors::*;
-use crate::models::{Currency, Merchant, Money, Rate, Transaction, TransactionStatus};
+use crate::models::{
+    Currency, Merchant, Money, Rate, Transaction, TransactionStatus, TransactionType,
+    NEW_PAYMENT_TTL_SECONDS,
+};
 use actix::{Actor, SyncContext};
 use actix::{Handler, Message};
 use chrono::NaiveDateTime;
@@ -57,6 +60,7 @@ pub struct CreateTransaction {
     pub confirmations: i32,
     pub email: Option<String>,
     pub message: String,
+    pub transaction_type: TransactionType,
 }
 
 #[derive(Debug, Deserialize)]
@@ -77,10 +81,15 @@ pub struct ConvertCurrency {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct GetPendingTransactions;
+pub struct GetPayment {
+    pub transaction_id: Uuid,
+}
 
 #[derive(Debug, Deserialize)]
-pub struct GetConfirmedTransactions;
+pub struct GetPaymentsByStatus(pub TransactionStatus);
+
+#[derive(Debug, Deserialize)]
+pub struct GetPayoutsByStatus(pub TransactionStatus);
 
 pub struct ConfirmTransaction {
     pub transaction: Transaction,
@@ -117,7 +126,11 @@ pub struct UpdateTransactionWithTxLog {
     pub wallet_tx_id: i64,
     pub wallet_tx_slate_id: String,
     pub messages: Option<Vec<String>>,
+    pub fee: Option<u64>,
 }
+
+#[derive(Debug, Deserialize)]
+pub struct RejectExpiredPayments;
 
 impl Message for CreateMerchant {
     type Result = Result<Merchant, Error>;
@@ -129,6 +142,18 @@ impl Message for GetMerchant {
 
 impl Message for GetTransaction {
     type Result = Result<Transaction, Error>;
+}
+
+impl Message for GetPayment {
+    type Result = Result<Transaction, Error>;
+}
+
+impl Message for GetPaymentsByStatus {
+    type Result = Result<Vec<Transaction>, Error>;
+}
+
+impl Message for GetPayoutsByStatus {
+    type Result = Result<Vec<Transaction>, Error>;
 }
 
 impl Message for GetTransactions {
@@ -154,14 +179,6 @@ impl Message for ConfirmTransaction {
     type Result = Result<Transaction, Error>;
 }
 
-impl Message for GetPendingTransactions {
-    type Result = Result<Vec<Transaction>, Error>;
-}
-
-impl Message for GetConfirmedTransactions {
-    type Result = Result<Vec<Transaction>, Error>;
-}
-
 impl Message for ReportAttempt {
     type Result = Result<(), Error>;
 }
@@ -183,6 +200,10 @@ impl Message for Reset2FA {
 }
 
 impl Message for UpdateTransactionWithTxLog {
+    type Result = Result<(), Error>;
+}
+
+impl Message for RejectExpiredPayments {
     type Result = Result<(), Error>;
 }
 
@@ -247,6 +268,48 @@ impl Handler<GetTransaction> for DbExecutor {
     }
 }
 
+impl Handler<GetPayment> for DbExecutor {
+    type Result = Result<Transaction, Error>;
+
+    fn handle(&mut self, msg: GetPayment, _: &mut Self::Context) -> Self::Result {
+        use crate::schema::transactions::dsl::*;
+        let conn: &PgConnection = &self.0.get().unwrap();
+        transactions
+            .filter(id.eq(msg.transaction_id))
+            .filter(transaction_type.eq(TransactionType::Payment))
+            .get_result(conn)
+            .map_err(|e| e.into())
+    }
+}
+
+impl Handler<GetPaymentsByStatus> for DbExecutor {
+    type Result = Result<Vec<Transaction>, Error>;
+
+    fn handle(&mut self, msg: GetPaymentsByStatus, _: &mut Self::Context) -> Self::Result {
+        use crate::schema::transactions::dsl::*;
+        let conn: &PgConnection = &self.0.get().unwrap();
+        transactions
+            .filter(transaction_type.eq(TransactionType::Payment))
+            .filter(status.eq(msg.0))
+            .load::<Transaction>(conn)
+            .map_err(|e| e.into())
+    }
+}
+
+impl Handler<GetPayoutsByStatus> for DbExecutor {
+    type Result = Result<Vec<Transaction>, Error>;
+
+    fn handle(&mut self, msg: GetPayoutsByStatus, _: &mut Self::Context) -> Self::Result {
+        use crate::schema::transactions::dsl::*;
+        let conn: &PgConnection = &self.0.get().unwrap();
+        transactions
+            .filter(transaction_type.eq(TransactionType::Payout))
+            .filter(status.eq(msg.0))
+            .load::<Transaction>(conn)
+            .map_err(|e| e.into())
+    }
+}
+
 impl Handler<GetTransactions> for DbExecutor {
     type Result = Result<Vec<Transaction>, Error>;
 
@@ -259,38 +322,6 @@ impl Handler<GetTransactions> for DbExecutor {
             .limit(msg.limit)
             .load::<Transaction>(conn)
             .map_err(|e| e.into())
-    }
-}
-
-impl Handler<GetPendingTransactions> for DbExecutor {
-    type Result = Result<Vec<Transaction>, Error>;
-
-    fn handle(&mut self, _: GetPendingTransactions, _: &mut Self::Context) -> Self::Result {
-        use crate::schema::transactions::dsl::*;
-        let conn: &PgConnection = &self.0.get().unwrap();
-
-        let unpaid_transactions = transactions
-            .filter(status.eq(TransactionStatus::Pending))
-            .load::<Transaction>(conn)
-            .map_err(|e| Error::Db(s!(e)))?;
-
-        Ok(unpaid_transactions)
-    }
-}
-
-impl Handler<GetConfirmedTransactions> for DbExecutor {
-    type Result = Result<Vec<Transaction>, Error>;
-
-    fn handle(&mut self, _: GetConfirmedTransactions, _: &mut Self::Context) -> Self::Result {
-        use crate::schema::transactions::dsl::*;
-        let conn: &PgConnection = &self.0.get().unwrap();
-
-        let confirmed_transactions = transactions
-            .filter(status.eq(TransactionStatus::Confirmed))
-            .load::<Transaction>(conn)
-            .map_err(|e| Error::Db(s!(e)))?;
-
-        Ok(confirmed_transactions)
     }
 }
 
@@ -330,7 +361,7 @@ impl Handler<CreateTransaction> for DbExecutor {
             email: msg.email,
             amount: msg.amount,
             grin_amount: grins.amount,
-            status: TransactionStatus::Unpaid,
+            status: TransactionStatus::New,
             confirmations: msg.confirmations,
             created_at: Local::now().naive_local(),
             updated_at: Local::now().naive_local(),
@@ -341,6 +372,10 @@ impl Handler<CreateTransaction> for DbExecutor {
             wallet_tx_slate_id: None,
             message: msg.message,
             slate_messages: None,
+            transfer_fee: None,
+            knockturn_fee: None,
+            real_transfer_fee: None,
+            transaction_type: msg.transaction_type,
         };
 
         diesel::insert_into(transactions)
@@ -376,6 +411,7 @@ impl Handler<UpdateTransactionWithTxLog> for DbExecutor {
                 wallet_tx_id.eq(msg.wallet_tx_id),
                 wallet_tx_slate_id.eq(msg.wallet_tx_slate_id),
                 slate_messages.eq(msg.messages),
+                real_transfer_fee.eq(msg.fee.map(|fee| fee as i64)),
             ))
             .get_result(conn)
             .map_err(|e| e.into())
@@ -532,5 +568,32 @@ impl Handler<Reset2FA> for DbExecutor {
             .get_result(conn)
             .map_err(|e| e.into())
             .map(|_: Merchant| ())
+    }
+}
+
+impl Handler<RejectExpiredPayments> for DbExecutor {
+    type Result = Result<(), Error>;
+
+    fn handle(&mut self, _: RejectExpiredPayments, _: &mut Self::Context) -> Self::Result {
+        use crate::schema::transactions::dsl::*;
+        let conn: &PgConnection = &self.0.get().unwrap();
+        diesel::update(
+            transactions
+                .filter(status.eq(TransactionStatus::New))
+                .filter(transaction_type.eq(TransactionType::Payment))
+                .filter(
+                    created_at
+                        .lt(Utc::now().naive_utc() - Duration::seconds(NEW_PAYMENT_TTL_SECONDS)),
+                ),
+        )
+        .set(status.eq(TransactionStatus::Rejected))
+        .execute(conn)
+        .map_err(|e| e.into())
+        .map(|n| {
+            if n > 0 {
+                info!("Rejected {} expired new payments", n);
+            }
+            ()
+        })
     }
 }

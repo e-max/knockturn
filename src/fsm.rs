@@ -1,10 +1,16 @@
+use crate::blocking;
 use crate::clients::BearerTokenAuth;
 use crate::db::{
-    self, CreateTransaction, DbExecutor, GetMerchant, GetTransaction, MarkAsReported,
+    self, CreateTransaction, DbExecutor, GetMerchant, GetPayment, GetTransaction, MarkAsReported,
     ReportAttempt, UpdateTransactionStatus, UpdateTransactionWithTxLog,
 };
 use crate::errors::Error;
-use crate::models::{Money, Transaction, TransactionStatus};
+use crate::models::Merchant;
+use crate::models::{Money, Transaction, TransactionStatus, TransactionType};
+use crate::models::{
+    INITIALIZED_PAYOUT_TTL_SECONDS, NEW_PAYMENT_TTL_SECONDS, NEW_PAYOUT_TTL_SECONDS,
+    PENDING_PAYMENT_TTL_SECONDS, PENDING_PAYOUT_TTL_SECONDS,
+};
 use crate::wallet::TxLogEntry;
 use crate::wallet::Wallet;
 use actix::{Actor, Addr, Context, Handler, Message, ResponseFuture};
@@ -13,10 +19,15 @@ use chrono::{Duration, Utc};
 use derive_deref::Deref;
 use diesel::pg::PgConnection;
 use diesel::r2d2::{ConnectionManager, Pool};
+use diesel::{self, prelude::*};
 use futures::future::{Either, Future};
-use log::{debug, error};
+use log::{debug, error, warn};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+pub const MINIMAL_WITHDRAW: i64 = 1_000_000_000;
+pub const KNOCKTURN_SHARE: f64 = 0.01;
+pub const TRANSFER_FEE: i64 = 8_000_000;
 
 pub struct Fsm {
     pub db: Addr<DbExecutor>,
@@ -27,6 +38,26 @@ pub struct Fsm {
 impl Actor for Fsm {
     type Context = Context<Self>;
 }
+
+/*
+ * These are messages to control Payments State Machine
+ *
+ */
+
+#[derive(Debug, Serialize, Deserialize, Clone, Deref)]
+pub struct NewPayment(Transaction);
+
+#[derive(Debug, Deserialize, Clone, Deref)]
+pub struct PendingPayment(Transaction);
+
+#[derive(Debug, Deserialize, Clone, Deref, Serialize)]
+pub struct ConfirmedPayment(Transaction);
+
+#[derive(Debug, Deserialize, Clone, Deref)]
+pub struct RejectedPayment(Transaction);
+
+#[derive(Debug, Deserialize, Clone, Deref)]
+pub struct UnreportedPayment(Transaction);
 
 #[derive(Debug, Deserialize)]
 pub struct CreatePayment {
@@ -39,11 +70,225 @@ pub struct CreatePayment {
 }
 
 impl Message for CreatePayment {
-    type Result = Result<UnpaidPayment, Error>;
+    type Result = Result<NewPayment, Error>;
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MakePayment {
+    pub new_payment: NewPayment,
+    pub wallet_tx: TxLogEntry,
+}
+
+impl Message for MakePayment {
+    type Result = Result<PendingPayment, Error>;
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ConfirmPayment {
+    pub payment: PendingPayment,
+    pub wallet_tx: TxLogEntry,
+}
+
+impl Message for ConfirmPayment {
+    type Result = Result<ConfirmedPayment, Error>;
+}
+
+#[derive(Debug, Deserialize, Deref)]
+pub struct RejectPayment<T> {
+    pub payment: T,
+}
+
+impl Message for RejectPayment<NewPayment> {
+    type Result = Result<RejectedPayment, Error>;
+}
+
+impl Message for RejectPayment<PendingPayment> {
+    type Result = Result<RejectedPayment, Error>;
+}
+
+#[derive(Debug, Deserialize, Deref)]
+pub struct ReportPayment<T> {
+    pub payment: T,
+}
+
+impl Message for ReportPayment<ConfirmedPayment> {
+    type Result = Result<(), Error>;
+}
+
+impl Message for ReportPayment<RejectedPayment> {
+    type Result = Result<(), Error>;
+}
+
+impl Message for ReportPayment<UnreportedPayment> {
+    type Result = Result<(), Error>;
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetNewPayment {
+    pub transaction_id: Uuid,
+}
+
+impl Message for GetNewPayment {
+    type Result = Result<NewPayment, Error>;
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetPendingPayments;
+
+impl Message for GetPendingPayments {
+    type Result = Result<Vec<PendingPayment>, Error>;
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetConfirmedPayments;
+
+impl Message for GetConfirmedPayments {
+    type Result = Result<Vec<ConfirmedPayment>, Error>;
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetUnreportedPayments;
+
+impl Message for GetUnreportedPayments {
+    type Result = Result<Vec<UnreportedPayment>, Error>;
+}
+
+/*
+ * These are messages to control Payout State Machine
+ *
+ *
+ *
+ *
+ *
+ */
+
+#[derive(Debug, Deserialize, Clone, Deref)]
+pub struct NewPayout(Transaction);
+
+#[derive(Debug, Serialize, Deserialize, Clone, Deref)]
+pub struct InitializedPayout(Transaction);
+
+#[derive(Debug, Serialize, Deserialize, Clone, Deref)]
+pub struct PendingPayout(Transaction);
+
+#[derive(Debug, Serialize, Deserialize, Clone, Deref)]
+pub struct ConfirmedPayout(Transaction);
+
+#[derive(Debug, Serialize, Deserialize, Clone, Deref)]
+pub struct RejectedPayout(Transaction);
+
+#[derive(Debug, Deserialize)]
+pub struct CreatePayout {
+    pub merchant_id: String,
+    pub amount: i64,
+    pub confirmations: i32,
+}
+
+impl Message for CreatePayout {
+    type Result = Result<NewPayout, Error>;
+}
+
+#[derive(Debug, Deserialize)]
+pub struct InitializePayout {
+    pub new_payout: NewPayout,
+    pub wallet_tx: TxLogEntry,
+}
+
+impl Message for InitializePayout {
+    type Result = Result<InitializedPayout, Error>;
+}
+
+#[derive(Debug, Deserialize)]
+pub struct FinalizePayout {
+    pub initialized_payout: InitializedPayout,
+}
+
+impl Message for FinalizePayout {
+    type Result = Result<PendingPayout, Error>;
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ConfirmPayout {
+    pub pending_payout: PendingPayout,
+    pub wallet_tx: TxLogEntry,
+}
+
+impl Message for ConfirmPayout {
+    type Result = Result<ConfirmedPayout, Error>;
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RejectPayout<T> {
+    pub payout: T,
+}
+
+impl Message for RejectPayout<NewPayout> {
+    type Result = Result<RejectedPayout, Error>;
+}
+
+impl Message for RejectPayout<InitializedPayout> {
+    type Result = Result<RejectedPayout, Error>;
+}
+
+impl Message for RejectPayout<PendingPayout> {
+    type Result = Result<RejectedPayout, Error>;
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetPayout {
+    pub merchant_id: String,
+    pub transaction_id: Uuid,
+}
+
+impl Message for GetPayout {
+    type Result = Result<Transaction, Error>;
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetNewPayout {
+    pub transaction_id: Uuid,
+    pub merchant_id: String,
+}
+
+impl Message for GetNewPayout {
+    type Result = Result<NewPayout, Error>;
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetInitializedPayout {
+    pub transaction_id: Uuid,
+    //We don't require merchant_id here because this message is used in handler
+    //which accept signed slate from wallet. i.e. he won't be logged in and we wouldn't
+    //know merchant_id
+}
+
+impl Message for GetInitializedPayout {
+    type Result = Result<InitializedPayout, Error>;
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetPendingPayouts;
+
+impl Message for GetPendingPayouts {
+    type Result = Result<Vec<PendingPayout>, Error>;
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetExpiredNewPayouts;
+
+impl Message for GetExpiredNewPayouts {
+    type Result = Result<Vec<NewPayout>, Error>;
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetExpiredInitializedPayouts;
+
+impl Message for GetExpiredInitializedPayouts {
+    type Result = Result<Vec<InitializedPayout>, Error>;
 }
 
 impl Handler<CreatePayment> for Fsm {
-    type Result = ResponseFuture<UnpaidPayment, Error>;
+    type Result = ResponseFuture<NewPayment, Error>;
 
     fn handle(&mut self, msg: CreatePayment, _: &mut Self::Context) -> Self::Result {
         let create_transaction = CreateTransaction {
@@ -53,6 +298,7 @@ impl Handler<CreatePayment> for Fsm {
             confirmations: msg.confirmations,
             email: msg.email.clone(),
             message: msg.message.clone(),
+            transaction_type: TransactionType::Payment,
         };
 
         let res = self
@@ -61,60 +307,38 @@ impl Handler<CreatePayment> for Fsm {
             .from_err()
             .and_then(move |db_response| {
                 let transaction = db_response?;
-                Ok(UnpaidPayment(transaction))
+                Ok(NewPayment(transaction))
             });
         Box::new(res)
     }
 }
 
-#[derive(Debug, Deserialize)]
-pub struct GetUnpaidPayment {
-    pub transaction_id: Uuid,
-}
+impl Handler<GetNewPayment> for Fsm {
+    type Result = ResponseFuture<NewPayment, Error>;
 
-impl Message for GetUnpaidPayment {
-    type Result = Result<UnpaidPayment, Error>;
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Deref)]
-pub struct UnpaidPayment(Transaction);
-
-impl Handler<GetUnpaidPayment> for Fsm {
-    type Result = ResponseFuture<UnpaidPayment, Error>;
-
-    fn handle(&mut self, msg: GetUnpaidPayment, _: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: GetNewPayment, _: &mut Self::Context) -> Self::Result {
         let res = self
             .db
-            .send(GetTransaction {
+            .send(GetPayment {
                 transaction_id: msg.transaction_id,
             })
             .from_err()
             .and_then(move |db_response| {
                 let transaction = db_response?;
-                if transaction.status != TransactionStatus::Unpaid {
+                if transaction.status != TransactionStatus::New {
                     return Err(Error::WrongTransactionStatus(s!(transaction.status)));
                 }
-                Ok(UnpaidPayment(transaction))
+                Ok(NewPayment(transaction))
             });
         Box::new(res)
     }
-}
-
-#[derive(Debug, Deserialize)]
-pub struct MakePayment {
-    pub unpaid_payment: UnpaidPayment,
-    pub wallet_tx: TxLogEntry,
-}
-
-impl Message for MakePayment {
-    type Result = Result<PendingPayment, Error>;
 }
 
 impl Handler<MakePayment> for Fsm {
     type Result = ResponseFuture<PendingPayment, Error>;
 
     fn handle(&mut self, msg: MakePayment, _: &mut Self::Context) -> Self::Result {
-        let transaction_id = msg.unpaid_payment.id.clone();
+        let transaction_id = msg.new_payment.id.clone();
         let wallet_tx = msg.wallet_tx.clone();
         let messages: Option<Vec<String>> = wallet_tx.messages.map(|pm| {
             pm.messages
@@ -129,6 +353,7 @@ impl Handler<MakePayment> for Fsm {
             wallet_tx_id: wallet_tx.id as i64,
             wallet_tx_slate_id: wallet_tx.tx_slate_id.unwrap(),
             messages: messages,
+            fee: wallet_tx.fee,
         };
         let res = self
             .db
@@ -157,23 +382,13 @@ impl Handler<MakePayment> for Fsm {
     }
 }
 
-#[derive(Debug, Deserialize)]
-pub struct GetPendingPayments;
-
-impl Message for GetPendingPayments {
-    type Result = Result<Vec<PendingPayment>, Error>;
-}
-
-#[derive(Debug, Deserialize, Clone, Deref)]
-pub struct PendingPayment(Transaction);
-
 impl Handler<GetPendingPayments> for Fsm {
     type Result = ResponseFuture<Vec<PendingPayment>, Error>;
 
     fn handle(&mut self, _: GetPendingPayments, _: &mut Self::Context) -> Self::Result {
         Box::new(
             self.db
-                .send(db::GetPendingTransactions)
+                .send(db::GetPaymentsByStatus(TransactionStatus::Pending))
                 .from_err()
                 .and_then(|db_response| {
                     let data = db_response?;
@@ -181,16 +396,6 @@ impl Handler<GetPendingPayments> for Fsm {
                 }),
         )
     }
-}
-
-#[derive(Debug, Deserialize)]
-pub struct ConfirmPayment {
-    pub payment: PendingPayment,
-    pub wallet_tx: TxLogEntry,
-}
-
-impl Message for ConfirmPayment {
-    type Result = Result<ConfirmedPayment, Error>;
 }
 
 impl Handler<ConfirmPayment> for Fsm {
@@ -208,23 +413,13 @@ impl Handler<ConfirmPayment> for Fsm {
     }
 }
 
-#[derive(Debug, Deserialize)]
-pub struct GetConfirmedPayments;
-
-impl Message for GetConfirmedPayments {
-    type Result = Result<Vec<ConfirmedPayment>, Error>;
-}
-
-#[derive(Debug, Deserialize, Clone, Deref, Serialize)]
-pub struct ConfirmedPayment(Transaction);
-
 impl Handler<GetConfirmedPayments> for Fsm {
     type Result = ResponseFuture<Vec<ConfirmedPayment>, Error>;
 
     fn handle(&mut self, _: GetConfirmedPayments, _: &mut Self::Context) -> Self::Result {
         Box::new(
             self.db
-                .send(db::GetConfirmedTransactions)
+                .send(db::GetPaymentsByStatus(TransactionStatus::Confirmed))
                 .from_err()
                 .and_then(|db_response| {
                     let data = db_response?;
@@ -269,23 +464,10 @@ fn run_callback(
         })
 }
 
-#[derive(Debug, Deserialize, Deref)]
-pub struct RejectPayment<T> {
-    pub payment: T,
-}
-
-impl Message for RejectPayment<UnpaidPayment> {
-    type Result = Result<RejectedPayment, Error>;
-}
-
-impl Message for RejectPayment<PendingPayment> {
-    type Result = Result<RejectedPayment, Error>;
-}
-
-impl Handler<RejectPayment<UnpaidPayment>> for Fsm {
+impl Handler<RejectPayment<NewPayment>> for Fsm {
     type Result = ResponseFuture<RejectedPayment, Error>;
 
-    fn handle(&mut self, msg: RejectPayment<UnpaidPayment>, _: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: RejectPayment<NewPayment>, _: &mut Self::Context) -> Self::Result {
         Box::new(reject_transaction(&self.db, &msg.payment.id).map(RejectedPayment))
     }
 }
@@ -315,23 +497,6 @@ fn reject_transaction(
         let tx = db_response?;
         Ok(tx)
     })
-}
-
-#[derive(Debug, Deserialize, Deref)]
-pub struct ReportPayment<T> {
-    pub payment: T,
-}
-
-impl Message for ReportPayment<ConfirmedPayment> {
-    type Result = Result<(), Error>;
-}
-
-impl Message for ReportPayment<RejectedPayment> {
-    type Result = Result<(), Error>;
-}
-
-impl Message for ReportPayment<UnreportedPayment> {
-    type Result = Result<(), Error>;
 }
 
 impl Handler<ReportPayment<ConfirmedPayment>> for Fsm {
@@ -441,18 +606,6 @@ fn report_transaction(
     })
 }
 
-pub struct RejectedPayment(Transaction);
-
-#[derive(Debug, Deserialize)]
-pub struct GetUnreportedPayments;
-
-impl Message for GetUnreportedPayments {
-    type Result = Result<Vec<UnreportedPayment>, Error>;
-}
-
-#[derive(Debug, Deserialize, Clone, Deref)]
-pub struct UnreportedPayment(Transaction);
-
 impl Handler<GetUnreportedPayments> for Fsm {
     type Result = ResponseFuture<Vec<UnreportedPayment>, Error>;
 
@@ -466,5 +619,460 @@ impl Handler<GetUnreportedPayments> for Fsm {
                     Ok(data.into_iter().map(UnreportedPayment).collect())
                 }),
         )
+    }
+}
+
+impl Handler<CreatePayout> for Fsm {
+    type Result = ResponseFuture<NewPayout, Error>;
+
+    fn handle(&mut self, msg: CreatePayout, _: &mut Self::Context) -> Self::Result {
+        let res = blocking::run({
+            let pool = self.pool.clone();
+            let merchant_id = msg.merchant_id.clone();
+            move || {
+                use crate::schema::merchants::dsl::*;
+                let conn: &PgConnection = &pool.get().unwrap();
+                let tx = conn.transaction(|| {
+                    let merchant: Merchant =
+                        merchants.find(merchant_id.clone()).get_result(conn)?;
+                    if merchant.balance < msg.amount {
+                        return Err(Error::NotEnoughFunds);
+                    }
+
+                    diesel::update(merchants.filter(id.eq(merchant_id.clone())))
+                        .set(balance.eq(balance - msg.amount))
+                        .get_result::<Merchant>(conn)
+                        .map_err::<Error, _>(|e| e.into())?;
+
+                    let transfer_fee = TRANSFER_FEE;
+                    let knockturn_fee = (msg.amount as f64 * KNOCKTURN_SHARE) as i64;
+                    let mut total = 0;
+
+                    if msg.amount > transfer_fee + knockturn_fee {
+                        total = msg.amount - transfer_fee - knockturn_fee;
+                    }
+
+                    let amount = Money::from_grin(msg.amount);
+                    let new_id = uuid::Uuid::new_v4();
+                    let new_transaction = Transaction {
+                        id: new_id,
+                        external_id: new_id.to_string(),
+                        merchant_id: merchant_id.clone(),
+                        email: Some(merchant.email.clone()),
+                        amount: amount,
+                        grin_amount: msg.amount,
+                        status: TransactionStatus::New,
+                        confirmations: msg.confirmations,
+                        created_at: Utc::now().naive_utc(),
+                        updated_at: Utc::now().naive_utc(),
+                        report_attempts: 0,
+                        next_report_attempt: None,
+                        reported: false,
+                        wallet_tx_id: None,
+                        wallet_tx_slate_id: None,
+                        message: format!(
+                            "Withdrawal of {} for merchant {}",
+                            amount.clone(),
+                            merchant_id.clone()
+                        ),
+                        slate_messages: None,
+                        transfer_fee: Some(transfer_fee),
+                        knockturn_fee: Some(knockturn_fee),
+                        real_transfer_fee: None,
+                        transaction_type: TransactionType::Payout,
+                    };
+
+                    use crate::schema::transactions;
+                    let tx = diesel::insert_into(transactions::table)
+                        .values(&new_transaction)
+                        .get_result::<Transaction>(conn)?;
+                    Ok(tx)
+                })?;
+
+                Ok(NewPayout(tx))
+            }
+        })
+        .from_err();
+
+        Box::new(res)
+    }
+}
+
+impl Handler<GetPayout> for Fsm {
+    type Result = ResponseFuture<Transaction, Error>;
+
+    fn handle(&mut self, msg: GetPayout, _: &mut Self::Context) -> Self::Result {
+        let res = blocking::run({
+            let pool = self.pool.clone();
+            move || {
+                use crate::schema::transactions::dsl::*;
+                let conn: &PgConnection = &pool.get().unwrap();
+                let tx = transactions
+                    .filter(id.eq(msg.transaction_id.clone()))
+                    .filter(merchant_id.eq(msg.merchant_id.clone()))
+                    .filter(transaction_type.eq(TransactionType::Payout))
+                    .first(conn)
+                    .map_err(|e| e.into());
+                tx
+            }
+        })
+        .from_err();
+
+        Box::new(res)
+    }
+}
+
+impl Handler<InitializePayout> for Fsm {
+    type Result = ResponseFuture<InitializedPayout, Error>;
+
+    fn handle(&mut self, msg: InitializePayout, _: &mut Self::Context) -> Self::Result {
+        let transaction_id = msg.new_payout.id.clone();
+        let wallet_tx = msg.wallet_tx.clone();
+        let messages: Option<Vec<String>> = wallet_tx.messages.map(|pm| {
+            pm.messages
+                .into_iter()
+                .map(|pmd| pmd.message)
+                .filter_map(|x| x)
+                .collect()
+        });
+
+        let msg = UpdateTransactionWithTxLog {
+            transaction_id: transaction_id.clone(),
+            wallet_tx_id: wallet_tx.id as i64,
+            wallet_tx_slate_id: wallet_tx.tx_slate_id.unwrap(),
+            messages: messages,
+            fee: wallet_tx.fee,
+        };
+        let res = self
+            .db
+            .send(msg)
+            .from_err()
+            .and_then(|db_response| {
+                db_response?;
+                Ok(())
+            })
+            .and_then({
+                let db = self.db.clone();
+                let transaction_id = transaction_id.clone();
+                move |_| {
+                    db.send(UpdateTransactionStatus {
+                        id: transaction_id,
+                        status: TransactionStatus::Initialized,
+                    })
+                    .from_err()
+                }
+            })
+            .and_then(|db_response| {
+                let transaction = db_response?;
+                Ok(InitializedPayout(transaction))
+            });
+        Box::new(res)
+    }
+}
+
+impl Handler<GetNewPayout> for Fsm {
+    type Result = ResponseFuture<NewPayout, Error>;
+
+    fn handle(&mut self, msg: GetNewPayout, _: &mut Self::Context) -> Self::Result {
+        let res = blocking::run({
+            let pool = self.pool.clone();
+            move || {
+                use crate::schema::transactions::dsl::*;
+                let conn: &PgConnection = &pool.get().unwrap();
+                transactions
+                    .filter(id.eq(msg.transaction_id))
+                    .filter(merchant_id.eq(msg.merchant_id))
+                    .filter(status.eq(TransactionStatus::New))
+                    .filter(transaction_type.eq(TransactionType::Payout))
+                    .first(conn)
+                    .map_err(|e| e.into())
+                    .map(NewPayout)
+            }
+        })
+        .from_err();
+        Box::new(res)
+    }
+}
+
+impl Handler<GetInitializedPayout> for Fsm {
+    type Result = ResponseFuture<InitializedPayout, Error>;
+
+    fn handle(&mut self, msg: GetInitializedPayout, _: &mut Self::Context) -> Self::Result {
+        let res = blocking::run({
+            let pool = self.pool.clone();
+            move || {
+                use crate::schema::transactions::dsl::*;
+                let conn: &PgConnection = &pool.get().unwrap();
+                transactions
+                    .filter(id.eq(msg.transaction_id))
+                    .filter(status.eq(TransactionStatus::Initialized))
+                    .filter(transaction_type.eq(TransactionType::Payout))
+                    .first(conn)
+                    .map_err(|e| e.into())
+                    .map(InitializedPayout)
+            }
+        })
+        .from_err();
+        Box::new(res)
+    }
+}
+
+impl Handler<FinalizePayout> for Fsm {
+    type Result = ResponseFuture<PendingPayout, Error>;
+
+    fn handle(&mut self, msg: FinalizePayout, _: &mut Self::Context) -> Self::Result {
+        Box::new(
+            self.db
+                .send(UpdateTransactionStatus {
+                    id: msg.initialized_payout.id.clone(),
+                    status: TransactionStatus::Pending,
+                })
+                .from_err()
+                .and_then(|db_response| {
+                    let tx = db_response?;
+                    Ok(PendingPayout(tx))
+                }),
+        )
+    }
+}
+
+impl Handler<ConfirmPayout> for Fsm {
+    type Result = ResponseFuture<ConfirmedPayout, Error>;
+
+    fn handle(&mut self, msg: ConfirmPayout, _: &mut Self::Context) -> Self::Result {
+        let tx_msg = db::ConfirmTransaction {
+            transaction: msg.pending_payout.0,
+            confirmed_at: msg.wallet_tx.confirmation_ts.map(|dt| dt.naive_utc()),
+        };
+        Box::new(self.db.send(tx_msg).from_err().and_then(|res| {
+            let tx = res?;
+            Ok(ConfirmedPayout(tx))
+        }))
+    }
+}
+
+impl Handler<GetPendingPayouts> for Fsm {
+    type Result = ResponseFuture<Vec<PendingPayout>, Error>;
+
+    fn handle(&mut self, _: GetPendingPayouts, _: &mut Self::Context) -> Self::Result {
+        Box::new(
+            self.db
+                .send(db::GetPayoutsByStatus(TransactionStatus::Pending))
+                .from_err()
+                .and_then(|db_response| {
+                    let data = db_response?;
+                    Ok(data.into_iter().map(PendingPayout).collect())
+                }),
+        )
+    }
+}
+
+impl Handler<GetExpiredNewPayouts> for Fsm {
+    type Result = ResponseFuture<Vec<NewPayout>, Error>;
+
+    fn handle(&mut self, _: GetExpiredNewPayouts, _: &mut Self::Context) -> Self::Result {
+        let res = blocking::run({
+            let pool = self.pool.clone();
+            move || {
+                use crate::schema::transactions::dsl::*;
+                let conn: &PgConnection = &pool.get().unwrap();
+                transactions
+                    .filter(status.eq(TransactionStatus::New))
+                    .filter(transaction_type.eq(TransactionType::Payout))
+                    .filter(
+                        created_at
+                            .lt(Utc::now().naive_utc()
+                                - Duration::seconds(PENDING_PAYOUT_TTL_SECONDS)),
+                    )
+                    .load::<Transaction>(conn)
+                    .map_err(|e| e.into())
+                    .map(|txs| txs.into_iter().map(NewPayout).collect())
+            }
+        })
+        .from_err();
+        Box::new(res)
+    }
+}
+
+impl Handler<GetExpiredInitializedPayouts> for Fsm {
+    type Result = ResponseFuture<Vec<InitializedPayout>, Error>;
+
+    fn handle(&mut self, _: GetExpiredInitializedPayouts, _: &mut Self::Context) -> Self::Result {
+        let res = blocking::run({
+            let pool = self.pool.clone();
+            move || {
+                use crate::schema::transactions::dsl::*;
+                let conn: &PgConnection = &pool.get().unwrap();
+                transactions
+                    .filter(status.eq(TransactionStatus::Initialized))
+                    .filter(transaction_type.eq(TransactionType::Payout))
+                    .filter(
+                        created_at
+                            .lt(Utc::now().naive_utc()
+                                - Duration::seconds(PENDING_PAYOUT_TTL_SECONDS)),
+                    )
+                    .load::<Transaction>(conn)
+                    .map_err(|e| e.into())
+                    .map(|txs| txs.into_iter().map(InitializedPayout).collect())
+            }
+        })
+        .from_err();
+        Box::new(res)
+    }
+}
+
+impl Handler<RejectPayout<NewPayout>> for Fsm {
+    type Result = ResponseFuture<RejectedPayout, Error>;
+
+    fn handle(&mut self, msg: RejectPayout<NewPayout>, _: &mut Self::Context) -> Self::Result {
+        let res = blocking::run({
+            let pool = self.pool.clone();
+            move || {
+                use crate::schema::merchants;
+                use crate::schema::transactions;
+                let conn: &PgConnection = &pool.get().unwrap();
+                let tx: Transaction = conn.transaction(|| -> Result<Transaction, Error> {
+                    warn!("Reject payout {:?}", msg.payout);
+                    diesel::update(
+                        merchants::table
+                            .filter(merchants::columns::id.eq(msg.payout.merchant_id.clone())),
+                    )
+                    .set(
+                        merchants::columns::balance
+                            .eq(merchants::columns::balance + msg.payout.grin_amount),
+                    )
+                    .get_result::<Merchant>(conn)?;
+                    //.map_err::<Error, _>(|e| e.into())?;
+
+                    let tx = diesel::update(
+                        transactions::table
+                            .filter(transactions::columns::id.eq(msg.payout.id.clone())),
+                    )
+                    .set((
+                        transactions::columns::status.eq(TransactionStatus::Rejected),
+                        transactions::columns::updated_at.eq(Utc::now().naive_utc()),
+                    ))
+                    .get_result(conn)?;
+                    //.map_err::<Error, _>(|e| e.into())?;
+                    Ok(tx)
+                })?;
+
+                Ok(RejectedPayout(tx))
+            }
+        })
+        .from_err();
+        Box::new(res)
+    }
+}
+
+impl Handler<RejectPayout<InitializedPayout>> for Fsm {
+    type Result = ResponseFuture<RejectedPayout, Error>;
+
+    fn handle(
+        &mut self,
+        msg: RejectPayout<InitializedPayout>,
+        _: &mut Self::Context,
+    ) -> Self::Result {
+        let res = self
+            .wallet
+            .cancel_tx(&msg.payout.wallet_tx_slate_id.clone().unwrap())
+            .and_then({
+                let pool = self.pool.clone();
+                move |_| {
+                    blocking::run({
+                        move || {
+                            use crate::schema::merchants;
+                            use crate::schema::transactions;
+                            let conn: &PgConnection = &pool.get().unwrap();
+                            let tx: Transaction =
+                                conn.transaction(|| -> Result<Transaction, Error> {
+                                    warn!("Reject payout {:?}", msg.payout);
+                                    diesel::update(merchants::table.filter(
+                                        merchants::columns::id.eq(msg.payout.merchant_id.clone()),
+                                    ))
+                                    .set(
+                                        merchants::columns::balance
+                                            .eq(merchants::columns::balance
+                                                + msg.payout.grin_amount),
+                                    )
+                                    .get_result::<Merchant>(conn)?;
+                                    //.map_err::<Error, _>(|e| e.into())?;
+
+                                    let tx = diesel::update(transactions::table.filter(
+                                        transactions::columns::id.eq(msg.payout.id.clone()),
+                                    ))
+                                    .set((
+                                        transactions::columns::status
+                                            .eq(TransactionStatus::Rejected),
+                                        transactions::columns::updated_at
+                                            .eq(Utc::now().naive_utc()),
+                                    ))
+                                    .get_result(conn)?;
+                                    //.map_err::<Error, _>(|e| e.into())?;
+                                    Ok(tx)
+                                })?;
+
+                            Ok(RejectedPayout(tx))
+                        }
+                    })
+                    .from_err()
+                }
+            });
+
+        Box::new(res)
+    }
+}
+
+impl Handler<RejectPayout<PendingPayout>> for Fsm {
+    type Result = ResponseFuture<RejectedPayout, Error>;
+
+    fn handle(&mut self, msg: RejectPayout<PendingPayout>, _: &mut Self::Context) -> Self::Result {
+        let res = self
+            .wallet
+            .cancel_tx(&msg.payout.wallet_tx_slate_id.clone().unwrap())
+            .and_then({
+                let pool = self.pool.clone();
+                move |_| {
+                    blocking::run({
+                        move || {
+                            use crate::schema::merchants;
+                            use crate::schema::transactions;
+                            let conn: &PgConnection = &pool.get().unwrap();
+                            let tx: Transaction =
+                                conn.transaction(|| -> Result<Transaction, Error> {
+                                    warn!("Reject payout {:?}", msg.payout);
+                                    diesel::update(merchants::table.filter(
+                                        merchants::columns::id.eq(msg.payout.merchant_id.clone()),
+                                    ))
+                                    .set(
+                                        merchants::columns::balance
+                                            .eq(merchants::columns::balance
+                                                + msg.payout.grin_amount),
+                                    )
+                                    .get_result::<Merchant>(conn)?;
+                                    //.map_err::<Error, _>(|e| e.into())?;
+
+                                    let tx = diesel::update(transactions::table.filter(
+                                        transactions::columns::id.eq(msg.payout.id.clone()),
+                                    ))
+                                    .set((
+                                        transactions::columns::status
+                                            .eq(TransactionStatus::Rejected),
+                                        transactions::columns::updated_at
+                                            .eq(Utc::now().naive_utc()),
+                                    ))
+                                    .get_result(conn)?;
+                                    //.map_err::<Error, _>(|e| e.into())?;
+                                    Ok(tx)
+                                })?;
+
+                            Ok(RejectedPayout(tx))
+                        }
+                    })
+                    .from_err()
+                }
+            });
+
+        Box::new(res)
     }
 }
