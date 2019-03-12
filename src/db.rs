@@ -276,7 +276,7 @@ impl Handler<GetPayment> for DbExecutor {
         let conn: &PgConnection = &self.0.get().unwrap();
         transactions
             .filter(id.eq(msg.transaction_id))
-            .filter(transaction_type.eq(TransactionType::Received))
+            .filter(transaction_type.eq(TransactionType::Payment))
             .get_result(conn)
             .map_err(|e| e.into())
     }
@@ -289,7 +289,7 @@ impl Handler<GetPaymentsByStatus> for DbExecutor {
         use crate::schema::transactions::dsl::*;
         let conn: &PgConnection = &self.0.get().unwrap();
         transactions
-            .filter(transaction_type.eq(TransactionType::Received))
+            .filter(transaction_type.eq(TransactionType::Payment))
             .filter(status.eq(msg.0))
             .load::<Transaction>(conn)
             .map_err(|e| e.into())
@@ -303,7 +303,7 @@ impl Handler<GetPayoutsByStatus> for DbExecutor {
         use crate::schema::transactions::dsl::*;
         let conn: &PgConnection = &self.0.get().unwrap();
         transactions
-            .filter(transaction_type.eq(TransactionType::Received))
+            .filter(transaction_type.eq(TransactionType::Payment))
             .filter(status.eq(msg.0))
             .load::<Transaction>(conn)
             .map_err(|e| e.into())
@@ -580,7 +580,7 @@ impl Handler<RejectExpiredPayments> for DbExecutor {
         diesel::update(
             transactions
                 .filter(status.eq(TransactionStatus::New))
-                .filter(transaction_type.eq(TransactionType::Received))
+                .filter(transaction_type.eq(TransactionType::Payment))
                 .filter(
                     created_at
                         .lt(Utc::now().naive_utc() - Duration::seconds(NEW_PAYMENT_TTL_SECONDS)),

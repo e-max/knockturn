@@ -64,8 +64,8 @@ pub enum TransactionStatus {
 
 #[derive(Debug, PartialEq, DbEnum, Serialize, Deserialize, Clone, Copy, EnumString, Display)]
 pub enum TransactionType {
-    Received,
-    Sent,
+    Payment,
+    Payout,
 }
 
 #[derive(
@@ -112,19 +112,19 @@ impl Transaction {
 
     pub fn time_until_expired(&self) -> Option<Duration> {
         let expiration_time = match (self.transaction_type, self.status) {
-            (TransactionType::Received, TransactionStatus::New) => {
+            (TransactionType::Payment, TransactionStatus::New) => {
                 Some(self.created_at + Duration::seconds(NEW_PAYMENT_TTL_SECONDS))
             }
-            (TransactionType::Received, TransactionStatus::Pending) => {
+            (TransactionType::Payment, TransactionStatus::Pending) => {
                 Some(self.updated_at + Duration::seconds(PENDING_PAYMENT_TTL_SECONDS))
             }
-            (TransactionType::Sent, TransactionStatus::New) => {
+            (TransactionType::Payout, TransactionStatus::New) => {
                 Some(self.created_at + Duration::seconds(NEW_PAYOUT_TTL_SECONDS))
             }
-            (TransactionType::Sent, TransactionStatus::Initialized) => {
+            (TransactionType::Payout, TransactionStatus::Initialized) => {
                 Some(self.created_at + Duration::seconds(PENDING_PAYOUT_TTL_SECONDS))
             }
-            (TransactionType::Sent, TransactionStatus::Pending) => {
+            (TransactionType::Payout, TransactionStatus::Pending) => {
                 Some(self.updated_at + Duration::seconds(PENDING_PAYOUT_TTL_SECONDS))
             }
             (_, _) => None,

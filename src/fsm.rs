@@ -298,7 +298,7 @@ impl Handler<CreatePayment> for Fsm {
             confirmations: msg.confirmations,
             email: msg.email.clone(),
             message: msg.message.clone(),
-            transaction_type: TransactionType::Received,
+            transaction_type: TransactionType::Payment,
         };
 
         let res = self
@@ -678,7 +678,7 @@ impl Handler<CreatePayout> for Fsm {
                         transfer_fee: Some(transfer_fee),
                         knockturn_fee: Some(knockturn_fee),
                         real_transfer_fee: None,
-                        transaction_type: TransactionType::Sent,
+                        transaction_type: TransactionType::Payout,
                     };
 
                     use crate::schema::transactions;
@@ -709,7 +709,7 @@ impl Handler<GetPayout> for Fsm {
                 let tx = transactions
                     .filter(id.eq(msg.transaction_id.clone()))
                     .filter(merchant_id.eq(msg.merchant_id.clone()))
-                    .filter(transaction_type.eq(TransactionType::Sent))
+                    .filter(transaction_type.eq(TransactionType::Payout))
                     .first(conn)
                     .map_err(|e| e.into());
                 tx
@@ -782,7 +782,7 @@ impl Handler<GetNewPayout> for Fsm {
                     .filter(id.eq(msg.transaction_id))
                     .filter(merchant_id.eq(msg.merchant_id))
                     .filter(status.eq(TransactionStatus::New))
-                    .filter(transaction_type.eq(TransactionType::Sent))
+                    .filter(transaction_type.eq(TransactionType::Payout))
                     .first(conn)
                     .map_err(|e| e.into())
                     .map(NewPayout)
@@ -805,7 +805,7 @@ impl Handler<GetInitializedPayout> for Fsm {
                 transactions
                     .filter(id.eq(msg.transaction_id))
                     .filter(status.eq(TransactionStatus::Initialized))
-                    .filter(transaction_type.eq(TransactionType::Sent))
+                    .filter(transaction_type.eq(TransactionType::Payout))
                     .first(conn)
                     .map_err(|e| e.into())
                     .map(InitializedPayout)
@@ -877,7 +877,7 @@ impl Handler<GetExpiredNewPayouts> for Fsm {
                 let conn: &PgConnection = &pool.get().unwrap();
                 transactions
                     .filter(status.eq(TransactionStatus::New))
-                    .filter(transaction_type.eq(TransactionType::Sent))
+                    .filter(transaction_type.eq(TransactionType::Payout))
                     .filter(
                         created_at
                             .lt(Utc::now().naive_utc()
@@ -904,7 +904,7 @@ impl Handler<GetExpiredInitializedPayouts> for Fsm {
                 let conn: &PgConnection = &pool.get().unwrap();
                 transactions
                     .filter(status.eq(TransactionStatus::Initialized))
-                    .filter(transaction_type.eq(TransactionType::Sent))
+                    .filter(transaction_type.eq(TransactionType::Payout))
                     .filter(
                         created_at
                             .lt(Utc::now().naive_utc()
