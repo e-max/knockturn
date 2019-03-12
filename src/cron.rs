@@ -1,4 +1,4 @@
-use crate::db::DbExecutor;
+use crate::db::{DbExecutor, RejectExpiredPayments};
 use crate::errors::Error;
 use crate::fsm::{
     ConfirmPayment, ConfirmPayout, Fsm, GetExpiredInitializedPayouts, GetExpiredNewPayouts,
@@ -29,6 +29,7 @@ impl Actor for Cron {
                 rates.fetch();
             },
         );
+        ctx.run_interval(std::time::Duration::new(5, 0), reject_expired_payments);
         ctx.run_interval(std::time::Duration::new(5, 0), process_pending_payments);
         ctx.run_interval(std::time::Duration::new(5, 0), process_unreported_payments);
         ctx.run_interval(std::time::Duration::new(5, 0), process_expired_new_payouts);
@@ -48,6 +49,18 @@ impl Cron {
     pub fn new(db: Addr<DbExecutor>, wallet: Wallet, fsm: Addr<Fsm>) -> Self {
         Cron { db, wallet, fsm }
     }
+}
+fn reject_expired_payments(cron: &mut Cron, _: &mut Context<Cron>) {
+    debug!("run process_expired_payments");
+    let res = cron
+        .db
+        .send(RejectExpiredPayments)
+        .map_err(|e| Error::from(e))
+        .and_then(|db_response| {
+            db_response?;
+            Ok(())
+        });
+    actix::spawn(res.map_err(|e| error!("Got an error in rejecting exprired payments {}", e)));
 }
 
 fn process_pending_payments(cron: &mut Cron, _: &mut Context<Cron>) {

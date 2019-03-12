@@ -1,6 +1,7 @@
 use crate::errors::*;
 use crate::models::{
     Currency, Merchant, Money, Rate, Transaction, TransactionStatus, TransactionType,
+    NEW_PAYMENT_TTL_SECONDS,
 };
 use actix::{Actor, SyncContext};
 use actix::{Handler, Message};
@@ -128,6 +129,9 @@ pub struct UpdateTransactionWithTxLog {
     pub fee: Option<u64>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct RejectExpiredPayments;
+
 impl Message for CreateMerchant {
     type Result = Result<Merchant, Error>;
 }
@@ -196,6 +200,10 @@ impl Message for Reset2FA {
 }
 
 impl Message for UpdateTransactionWithTxLog {
+    type Result = Result<(), Error>;
+}
+
+impl Message for RejectExpiredPayments {
     type Result = Result<(), Error>;
 }
 
@@ -295,7 +303,7 @@ impl Handler<GetPayoutsByStatus> for DbExecutor {
         use crate::schema::transactions::dsl::*;
         let conn: &PgConnection = &self.0.get().unwrap();
         transactions
-            .filter(transaction_type.eq(TransactionType::Sent))
+            .filter(transaction_type.eq(TransactionType::Received))
             .filter(status.eq(msg.0))
             .load::<Transaction>(conn)
             .map_err(|e| e.into())
@@ -560,5 +568,32 @@ impl Handler<Reset2FA> for DbExecutor {
             .get_result(conn)
             .map_err(|e| e.into())
             .map(|_: Merchant| ())
+    }
+}
+
+impl Handler<RejectExpiredPayments> for DbExecutor {
+    type Result = Result<(), Error>;
+
+    fn handle(&mut self, _: RejectExpiredPayments, _: &mut Self::Context) -> Self::Result {
+        use crate::schema::transactions::dsl::*;
+        let conn: &PgConnection = &self.0.get().unwrap();
+        diesel::update(
+            transactions
+                .filter(status.eq(TransactionStatus::New))
+                .filter(transaction_type.eq(TransactionType::Received))
+                .filter(
+                    created_at
+                        .lt(Utc::now().naive_utc() - Duration::seconds(NEW_PAYMENT_TTL_SECONDS)),
+                ),
+        )
+        .set(status.eq(TransactionStatus::Rejected))
+        .execute(conn)
+        .map_err(|e| e.into())
+        .map(|n| {
+            if n > 0 {
+                info!("Rejected {} expired new payments", n);
+            }
+            ()
+        })
     }
 }
