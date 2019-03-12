@@ -7,6 +7,10 @@ use crate::db::{
 use crate::errors::Error;
 use crate::models::Merchant;
 use crate::models::{Money, Transaction, TransactionStatus, TransactionType};
+use crate::models::{
+    INITIALIZED_PAYOUT_TTL_SECONDS, NEW_PAYMENT_TTL_SECONDS, NEW_PAYOUT_TTL_SECONDS,
+    PENDING_PAYMENT_TTL_SECONDS, PENDING_PAYOUT_TTL_SECONDS,
+};
 use crate::wallet::TxLogEntry;
 use crate::wallet::Wallet;
 use actix::{Actor, Addr, Context, Handler, Message, ResponseFuture};
@@ -218,6 +222,14 @@ pub struct RejectPayout<T> {
     pub payout: T,
 }
 
+impl Message for RejectPayout<NewPayout> {
+    type Result = Result<RejectedPayout, Error>;
+}
+
+impl Message for RejectPayout<InitializedPayout> {
+    type Result = Result<RejectedPayout, Error>;
+}
+
 impl Message for RejectPayout<PendingPayout> {
     type Result = Result<RejectedPayout, Error>;
 }
@@ -259,6 +271,20 @@ pub struct GetPendingPayouts;
 
 impl Message for GetPendingPayouts {
     type Result = Result<Vec<PendingPayout>, Error>;
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetExpiredNewPayouts;
+
+impl Message for GetExpiredNewPayouts {
+    type Result = Result<Vec<NewPayout>, Error>;
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetExpiredInitializedPayouts;
+
+impl Message for GetExpiredInitializedPayouts {
+    type Result = Result<Vec<InitializedPayout>, Error>;
 }
 
 impl Handler<CreatePayment> for Fsm {
@@ -837,6 +863,162 @@ impl Handler<GetPendingPayouts> for Fsm {
                     Ok(data.into_iter().map(PendingPayout).collect())
                 }),
         )
+    }
+}
+
+impl Handler<GetExpiredNewPayouts> for Fsm {
+    type Result = ResponseFuture<Vec<NewPayout>, Error>;
+
+    fn handle(&mut self, _: GetExpiredNewPayouts, _: &mut Self::Context) -> Self::Result {
+        let res = blocking::run({
+            let pool = self.pool.clone();
+            move || {
+                use crate::schema::transactions::dsl::*;
+                let conn: &PgConnection = &pool.get().unwrap();
+                transactions
+                    .filter(status.eq(TransactionStatus::New))
+                    .filter(transaction_type.eq(TransactionType::Sent))
+                    .filter(
+                        created_at
+                            .lt(Utc::now().naive_utc()
+                                - Duration::seconds(PENDING_PAYOUT_TTL_SECONDS)),
+                    )
+                    .load::<Transaction>(conn)
+                    .map_err(|e| e.into())
+                    .map(|txs| txs.into_iter().map(NewPayout).collect())
+            }
+        })
+        .from_err();
+        Box::new(res)
+    }
+}
+
+impl Handler<GetExpiredInitializedPayouts> for Fsm {
+    type Result = ResponseFuture<Vec<InitializedPayout>, Error>;
+
+    fn handle(&mut self, _: GetExpiredInitializedPayouts, _: &mut Self::Context) -> Self::Result {
+        let res = blocking::run({
+            let pool = self.pool.clone();
+            move || {
+                use crate::schema::transactions::dsl::*;
+                let conn: &PgConnection = &pool.get().unwrap();
+                transactions
+                    .filter(status.eq(TransactionStatus::Initialized))
+                    .filter(transaction_type.eq(TransactionType::Sent))
+                    .filter(
+                        created_at
+                            .lt(Utc::now().naive_utc()
+                                - Duration::seconds(PENDING_PAYOUT_TTL_SECONDS)),
+                    )
+                    .load::<Transaction>(conn)
+                    .map_err(|e| e.into())
+                    .map(|txs| txs.into_iter().map(InitializedPayout).collect())
+            }
+        })
+        .from_err();
+        Box::new(res)
+    }
+}
+
+impl Handler<RejectPayout<NewPayout>> for Fsm {
+    type Result = ResponseFuture<RejectedPayout, Error>;
+
+    fn handle(&mut self, msg: RejectPayout<NewPayout>, _: &mut Self::Context) -> Self::Result {
+        let res = blocking::run({
+            let pool = self.pool.clone();
+            move || {
+                use crate::schema::merchants;
+                use crate::schema::transactions;
+                let conn: &PgConnection = &pool.get().unwrap();
+                let tx: Transaction = conn.transaction(|| -> Result<Transaction, Error> {
+                    warn!("Reject payout {:?}", msg.payout);
+                    diesel::update(
+                        merchants::table
+                            .filter(merchants::columns::id.eq(msg.payout.merchant_id.clone())),
+                    )
+                    .set(
+                        merchants::columns::balance
+                            .eq(merchants::columns::balance + msg.payout.grin_amount),
+                    )
+                    .get_result::<Merchant>(conn)?;
+                    //.map_err::<Error, _>(|e| e.into())?;
+
+                    let tx = diesel::update(
+                        transactions::table
+                            .filter(transactions::columns::id.eq(msg.payout.id.clone())),
+                    )
+                    .set((
+                        transactions::columns::status.eq(TransactionStatus::Rejected),
+                        transactions::columns::updated_at.eq(Utc::now().naive_utc()),
+                    ))
+                    .get_result(conn)?;
+                    //.map_err::<Error, _>(|e| e.into())?;
+                    Ok(tx)
+                })?;
+
+                Ok(RejectedPayout(tx))
+            }
+        })
+        .from_err();
+        Box::new(res)
+    }
+}
+
+impl Handler<RejectPayout<InitializedPayout>> for Fsm {
+    type Result = ResponseFuture<RejectedPayout, Error>;
+
+    fn handle(
+        &mut self,
+        msg: RejectPayout<InitializedPayout>,
+        _: &mut Self::Context,
+    ) -> Self::Result {
+        let res = self
+            .wallet
+            .cancel_tx(&msg.payout.wallet_tx_slate_id.clone().unwrap())
+            .and_then({
+                let pool = self.pool.clone();
+                move |_| {
+                    blocking::run({
+                        move || {
+                            use crate::schema::merchants;
+                            use crate::schema::transactions;
+                            let conn: &PgConnection = &pool.get().unwrap();
+                            let tx: Transaction =
+                                conn.transaction(|| -> Result<Transaction, Error> {
+                                    warn!("Reject payout {:?}", msg.payout);
+                                    diesel::update(merchants::table.filter(
+                                        merchants::columns::id.eq(msg.payout.merchant_id.clone()),
+                                    ))
+                                    .set(
+                                        merchants::columns::balance
+                                            .eq(merchants::columns::balance
+                                                + msg.payout.grin_amount),
+                                    )
+                                    .get_result::<Merchant>(conn)?;
+                                    //.map_err::<Error, _>(|e| e.into())?;
+
+                                    let tx = diesel::update(transactions::table.filter(
+                                        transactions::columns::id.eq(msg.payout.id.clone()),
+                                    ))
+                                    .set((
+                                        transactions::columns::status
+                                            .eq(TransactionStatus::Rejected),
+                                        transactions::columns::updated_at
+                                            .eq(Utc::now().naive_utc()),
+                                    ))
+                                    .get_result(conn)?;
+                                    //.map_err::<Error, _>(|e| e.into())?;
+                                    Ok(tx)
+                                })?;
+
+                            Ok(RejectedPayout(tx))
+                        }
+                    })
+                    .from_err()
+                }
+            });
+
+        Box::new(res)
     }
 }
 

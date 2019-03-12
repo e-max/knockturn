@@ -1,8 +1,9 @@
 use crate::db::DbExecutor;
 use crate::errors::Error;
 use crate::fsm::{
-    ConfirmPayment, ConfirmPayout, Fsm, GetPendingPayments, GetPendingPayouts,
-    GetUnreportedPayments, RejectPayment, RejectPayout, ReportPayment,
+    ConfirmPayment, ConfirmPayout, Fsm, GetExpiredInitializedPayouts, GetExpiredNewPayouts,
+    GetPendingPayments, GetPendingPayouts, GetUnreportedPayments, RejectPayment, RejectPayout,
+    ReportPayment,
 };
 use crate::rates::RatesFetcher;
 use crate::wallet::Wallet;
@@ -30,6 +31,12 @@ impl Actor for Cron {
         );
         ctx.run_interval(std::time::Duration::new(5, 0), process_pending_payments);
         ctx.run_interval(std::time::Duration::new(5, 0), process_unreported_payments);
+        ctx.run_interval(std::time::Duration::new(5, 0), process_expired_new_payouts);
+        ctx.run_interval(
+            std::time::Duration::new(5, 0),
+            process_expired_initialized_payouts,
+        );
+        ctx.run_interval(std::time::Duration::new(5, 0), process_pending_payouts);
     }
 
     fn stopping(&mut self, _ctx: &mut Self::Context) -> Running {
@@ -156,8 +163,91 @@ fn process_unreported_payments(cron: &mut Cron, _: &mut Context<Cron>) {
     }));
 }
 
-fn process_outdated_payouts(cron: &mut Cron, _: &mut Context<Cron>) {
-    debug!("run process_outdated_payouts");
+fn process_expired_new_payouts(cron: &mut Cron, _: &mut Context<Cron>) {
+    debug!("run process_expired_new_payouts");
+    let res = cron
+        .fsm
+        .send(GetExpiredNewPayouts)
+        .map_err(|e| Error::General(s!(e)))
+        .and_then(|db_response| {
+            let payouts = db_response?;
+            Ok(payouts)
+        })
+        .and_then({
+            let fsm = cron.fsm.clone();
+            move |payouts| {
+                let mut futures = vec![];
+                debug!("Found {} expired new payouts", payouts.len());
+                for payout in payouts {
+                    let payout_id = payout.id.clone();
+                    futures.push(
+                        fsm.send(RejectPayout { payout })
+                            .map_err(|e| Error::General(s!(e)))
+                            .and_then(|db_response| {
+                                db_response?;
+                                Ok(())
+                            })
+                            .or_else({
+                                move |e| {
+                                    error!("Couldn't reject payout {}: {}", payout_id, e);
+                                    Ok(())
+                                }
+                            }),
+                    );
+                }
+                join_all(futures).map(|_| ()).map_err(|e| {
+                    error!("got an error {}", e);
+                    e
+                })
+            }
+        });
+    actix::spawn(res.map_err(|e| error!("Got an error in processing expired new payouts {}", e)));
+}
+
+fn process_expired_initialized_payouts(cron: &mut Cron, _: &mut Context<Cron>) {
+    debug!("run process_expired_initialized_payouts");
+    let res = cron
+        .fsm
+        .send(GetExpiredInitializedPayouts)
+        .map_err(|e| Error::General(s!(e)))
+        .and_then(|db_response| {
+            let payouts = db_response?;
+            Ok(payouts)
+        })
+        .and_then({
+            let fsm = cron.fsm.clone();
+            move |payouts| {
+                let mut futures = vec![];
+                debug!("Found {} expired initialized payouts", payouts.len());
+                for payout in payouts {
+                    let payout_id = payout.id.clone();
+                    futures.push(
+                        fsm.send(RejectPayout { payout })
+                            .map_err(|e| Error::General(s!(e)))
+                            .and_then(|db_response| {
+                                db_response?;
+                                Ok(())
+                            })
+                            .or_else({
+                                move |e| {
+                                    error!("Couldn't reject payout {}: {}", payout_id, e);
+                                    Ok(())
+                                }
+                            }),
+                    );
+                }
+                join_all(futures).map(|_| ()).map_err(|e| {
+                    error!("got an error {}", e);
+                    e
+                })
+            }
+        });
+    actix::spawn(res.map_err(|e| {
+        error!(
+            "Got an error in processing expired initialized payouts {}",
+            e
+        )
+    }));
 }
 
 fn process_pending_payouts(cron: &mut Cron, _: &mut Context<Cron>) {

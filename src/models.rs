@@ -13,12 +13,12 @@ use std::io;
 use strum_macros::{Display, EnumString};
 use uuid::Uuid;
 
-const NEW_PAYMENT_TTL_SECONDS: i64 = 15 * 60; //15 minutes since creation time
-const PENDING_PAYMENT_TTL_SECONDS: i64 = 7 * 60; //7  minutes since became pending
+pub const NEW_PAYMENT_TTL_SECONDS: i64 = 15 * 60; //15 minutes since creation time
+pub const PENDING_PAYMENT_TTL_SECONDS: i64 = 7 * 60; //7  minutes since became pending
 
-const NEW_PAYOUT_TTL_SECONDS: i64 = 5 * 60; //5  minutes since creation time
-const INITIALIZED_PAYOUT_TTL_SECONDS: i64 = 5 * 60; //5  minutes since creation time
-const PENDING_PAYOUT_TTL_SECONDS: i64 = 15 * 60; //15 minutes since became pending
+pub const NEW_PAYOUT_TTL_SECONDS: i64 = 5 * 60; //5  minutes since creation time
+pub const INITIALIZED_PAYOUT_TTL_SECONDS: i64 = 5 * 60; //5  minutes since creation time
+pub const PENDING_PAYOUT_TTL_SECONDS: i64 = 15 * 60; //15 minutes since became pending
 
 #[derive(Debug, Serialize, Deserialize, Queryable, Insertable, Identifiable, Clone)]
 #[table_name = "merchants"]
