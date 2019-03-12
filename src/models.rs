@@ -52,19 +52,7 @@ pub struct Merchant {
  * Confirmed - we got required number of confimations
  */
 
-#[derive(
-    Clone,
-    EnumString,
-    Display,
-    Debug,
-    PartialEq,
-    AsExpression,
-    Serialize,
-    Deserialize,
-    FromSqlRow,
-    Copy,
-)]
-#[sql_type = "SmallInt"]
+#[derive(Debug, PartialEq, DbEnum, Serialize, Deserialize, Clone, Copy, EnumString, Display)]
 pub enum TransactionStatus {
     New,
     Pending,
@@ -74,45 +62,7 @@ pub enum TransactionStatus {
     Initialized,
 }
 
-impl<DB: Backend> ToSql<SmallInt, DB> for TransactionStatus
-where
-    i16: ToSql<SmallInt, DB>,
-{
-    fn to_sql<W>(&self, out: &mut Output<W, DB>) -> serialize::Result
-    where
-        W: io::Write,
-    {
-        let v = match *self {
-            TransactionStatus::New => 1,
-            TransactionStatus::Pending => 2,
-            TransactionStatus::Rejected => 3,
-            TransactionStatus::Finalized => 4,
-            TransactionStatus::Confirmed => 5,
-            TransactionStatus::Initialized => 6,
-        };
-        v.to_sql(out)
-    }
-}
-
-impl<DB: Backend> FromSql<SmallInt, DB> for TransactionStatus
-where
-    i16: FromSql<SmallInt, DB>,
-{
-    fn from_sql(bytes: Option<&DB::RawValue>) -> deserialize::Result<Self> {
-        let v = i16::from_sql(bytes)?;
-        Ok(match v {
-            1 => TransactionStatus::New,
-            2 => TransactionStatus::Pending,
-            3 => TransactionStatus::Rejected,
-            4 => TransactionStatus::Finalized,
-            5 => TransactionStatus::Confirmed,
-            6 => TransactionStatus::Initialized,
-            _ => return Err("replace me with a real error".into()),
-        })
-    }
-}
-
-#[derive(Debug, PartialEq, DbEnum, Serialize, Deserialize, Clone, Copy)]
+#[derive(Debug, PartialEq, DbEnum, Serialize, Deserialize, Clone, Copy, EnumString, Display)]
 pub enum TransactionType {
     Received,
     Sent,

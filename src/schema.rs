@@ -28,7 +28,7 @@ table! {
         merchant_id -> Text,
         grin_amount -> Int8,
         amount -> Jsonb,
-        status -> Int2,
+        status -> crate::models::TransactionStatusMapping,
         confirmations -> Int4,
         email -> Nullable<Text>,
         created_at -> Timestamp,
