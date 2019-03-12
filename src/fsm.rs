@@ -653,9 +653,10 @@ impl Handler<CreatePayout> for Fsm {
                     }
 
                     let amount = Money::from_grin(msg.amount);
+                    let new_id = uuid::Uuid::new_v4();
                     let new_transaction = Transaction {
-                        id: uuid::Uuid::new_v4(),
-                        external_id: s!(""),
+                        id: new_id,
+                        external_id: new_id.to_string(),
                         merchant_id: merchant_id.clone(),
                         email: Some(merchant.email.clone()),
                         amount: amount,

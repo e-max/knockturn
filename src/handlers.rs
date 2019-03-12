@@ -8,7 +8,7 @@ use crate::fsm::{
 };
 use crate::fsm::{KNOCKTURN_SHARE, MINIMAL_WITHDRAW, TRANSFER_FEE};
 use crate::middleware::WithMerchant;
-use crate::models::{Currency, Money, Transaction, TransactionStatus};
+use crate::models::{Currency, Merchant, Money, Transaction, TransactionStatus};
 use crate::totp::Totp;
 use crate::wallet::Slate;
 use actix_web::http::Method;
@@ -503,33 +503,56 @@ pub fn withdraw(req: HttpRequest<AppState>) -> FutureResponse<HttpResponse, Erro
     )
 }
 
+fn check_2fa_code(merchant: &Merchant, code: &str) -> Result<bool, Error> {
+    let token_2fa = merchant
+        .token_2fa
+        .clone()
+        .ok_or(Error::General(s!("No 2fa token")))?;
+    let totp = Totp::new(merchant.id.clone(), token_2fa);
+    Ok(totp.check(code)?)
+}
+
 #[derive(Debug, Deserialize)]
 pub struct CreatePayoutForm {
     pub amount: i64,
+    pub code: String,
 }
 
 pub fn create_payout(
     (req, form): (HttpRequest<AppState>, Form<CreatePayoutForm>),
 ) -> FutureResponse<HttpResponse, Error> {
-    let merchant_id = match req.identity() {
-        Some(v) => v,
-        None => return ok(HttpResponse::Found().header("location", "/login").finish()).responder(),
-    };
-    req.state()
-        .fsm
-        .send(CreatePayout {
-            amount: form.amount,
-            merchant_id: merchant_id,
-            confirmations: 10,
-        })
-        .from_err()
-        .and_then(|resp| {
-            let payout = resp?;
-            Ok(HttpResponse::Found()
-                .header("location", format!("/payouts/{}", payout.id))
-                .finish())
-        })
-        .responder()
+    let merchant = req.get_merchant().unwrap();
+    Box::new(
+        ok(())
+            .and_then({
+                let code = form.code.clone();
+                move |_| {
+                    let validated = check_2fa_code(&merchant, &code)?;
+                    Ok((merchant, validated))
+                }
+            })
+            .and_then(move |(merchant, validated)| {
+                if !validated {
+                    withdraw(req)
+                } else {
+                    req.state()
+                        .fsm
+                        .send(CreatePayout {
+                            amount: form.amount,
+                            merchant_id: merchant.id,
+                            confirmations: 10,
+                        })
+                        .from_err()
+                        .and_then(|resp| {
+                            let payout = resp?;
+                            Ok(HttpResponse::Found()
+                                .header("location", format!("/payouts/{}", payout.id))
+                                .finish())
+                        })
+                        .responder()
+                }
+            }),
+    )
 }
 
 #[derive(Template)]

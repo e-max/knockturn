@@ -23,6 +23,8 @@ Total: {{total}} </br>
 {% if error.is_none() -%}
 <form method="POST">
 	<input type="hidden" name="amount" value="{{balance.amount}}">
+
+	2FA code: <input type="input" name="code" value=""><br/>
 	<button type="submit">Withdraw</button></br>
 </form>
 {%- endif %}
