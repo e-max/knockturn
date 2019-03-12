@@ -194,7 +194,7 @@ impl Handler<CreateMerchant> for DbExecutor {
         let conn: &PgConnection = &self.0.get().unwrap();
         const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ\
     abcdefghijklmnopqrstuvwxyz\
-    0123456789-._~+/";
+    0123456789";
 
         let mut rng = thread_rng();
         let new_token: Option<String> = (0..64)

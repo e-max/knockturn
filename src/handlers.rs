@@ -2,9 +2,10 @@ use crate::app::AppState;
 use crate::blocking;
 use crate::db::{Confirm2FA, CreateMerchant, GetMerchant, GetTransaction, GetTransactions};
 use crate::errors::*;
+use crate::extractor::BasicAuth;
 use crate::fsm::{CreatePayment, GetUnpaidPayment, MakePayment};
 use crate::middleware::WithMerchant;
-use crate::models::{Currency, Money, Transaction};
+use crate::models::{Currency, Merchant, Money, Transaction};
 use crate::totp::Totp;
 use crate::wallet::Slate;
 use actix_web::http::Method;
@@ -189,10 +190,19 @@ pub struct CreatePaymentRequest {
 }
 
 pub fn create_payment(
-    (merchant_id, payment_req, state): (Path<String>, Json<CreatePaymentRequest>, State<AppState>),
+    (merchant, merchant_id, payment_req, state): (
+        BasicAuth<Merchant>,
+        Path<String>,
+        Json<CreatePaymentRequest>,
+        State<AppState>,
+    ),
 ) -> FutureResponse<HttpResponse> {
+    let merchant_id = merchant_id.into_inner();
+    if merchant.id != merchant_id {
+        return Box::new(ok(HttpResponse::BadRequest().finish()));
+    }
     let create_transaction = CreatePayment {
-        merchant_id: merchant_id.into_inner(),
+        merchant_id: merchant_id,
         external_id: payment_req.order_id.clone(),
         amount: payment_req.amount,
         confirmations: payment_req.confirmations,
