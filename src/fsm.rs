@@ -17,7 +17,7 @@ use diesel::pg::PgConnection;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::{self, prelude::*};
 use futures::future::{Either, Future};
-use log::{debug, error};
+use log::{debug, error, warn};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -167,6 +167,12 @@ pub struct InitializedPayout(Transaction);
 #[derive(Debug, Serialize, Deserialize, Clone, Deref)]
 pub struct PendingPayout(Transaction);
 
+#[derive(Debug, Serialize, Deserialize, Clone, Deref)]
+pub struct ConfirmedPayout(Transaction);
+
+#[derive(Debug, Serialize, Deserialize, Clone, Deref)]
+pub struct RejectedPayout(Transaction);
+
 #[derive(Debug, Deserialize)]
 pub struct CreatePayout {
     pub merchant_id: String,
@@ -195,6 +201,25 @@ pub struct FinalizePayout {
 
 impl Message for FinalizePayout {
     type Result = Result<PendingPayout, Error>;
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ConfirmPayout {
+    pub pending_payout: PendingPayout,
+    pub wallet_tx: TxLogEntry,
+}
+
+impl Message for ConfirmPayout {
+    type Result = Result<ConfirmedPayout, Error>;
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RejectPayout<T> {
+    pub payout: T,
+}
+
+impl Message for RejectPayout<PendingPayout> {
+    type Result = Result<RejectedPayout, Error>;
 }
 
 #[derive(Debug, Deserialize)]
@@ -227,6 +252,13 @@ pub struct GetInitializedPayout {
 
 impl Message for GetInitializedPayout {
     type Result = Result<InitializedPayout, Error>;
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetPendingPayouts;
+
+impl Message for GetPendingPayouts {
+    type Result = Result<Vec<PendingPayout>, Error>;
 }
 
 impl Handler<CreatePayment> for Fsm {
@@ -774,5 +806,81 @@ impl Handler<FinalizePayout> for Fsm {
                     Ok(PendingPayout(tx))
                 }),
         )
+    }
+}
+
+impl Handler<ConfirmPayout> for Fsm {
+    type Result = ResponseFuture<ConfirmedPayout, Error>;
+
+    fn handle(&mut self, msg: ConfirmPayout, _: &mut Self::Context) -> Self::Result {
+        let tx_msg = db::ConfirmTransaction {
+            transaction: msg.pending_payout.0,
+            confirmed_at: msg.wallet_tx.confirmation_ts.map(|dt| dt.naive_utc()),
+        };
+        Box::new(self.db.send(tx_msg).from_err().and_then(|res| {
+            let tx = res?;
+            Ok(ConfirmedPayout(tx))
+        }))
+    }
+}
+
+impl Handler<GetPendingPayouts> for Fsm {
+    type Result = ResponseFuture<Vec<PendingPayout>, Error>;
+
+    fn handle(&mut self, _: GetPendingPayouts, _: &mut Self::Context) -> Self::Result {
+        Box::new(
+            self.db
+                .send(db::GetPayoutsByStatus(TransactionStatus::Pending))
+                .from_err()
+                .and_then(|db_response| {
+                    let data = db_response?;
+                    Ok(data.into_iter().map(PendingPayout).collect())
+                }),
+        )
+    }
+}
+
+impl Handler<RejectPayout<PendingPayout>> for Fsm {
+    type Result = ResponseFuture<RejectedPayout, Error>;
+
+    fn handle(&mut self, msg: RejectPayout<PendingPayout>, _: &mut Self::Context) -> Self::Result {
+        let res = blocking::run({
+            let pool = self.pool.clone();
+            move || {
+                use crate::schema::merchants;
+                use crate::schema::transactions;
+                let conn: &PgConnection = &pool.get().unwrap();
+                let tx: Transaction = conn.transaction(|| -> Result<Transaction, Error> {
+                    warn!("Reject payout {:?}", msg.payout);
+                    diesel::update(
+                        merchants::table
+                            .filter(merchants::columns::id.eq(msg.payout.merchant_id.clone())),
+                    )
+                    .set(
+                        merchants::columns::balance
+                            .eq(merchants::columns::balance + msg.payout.grin_amount),
+                    )
+                    .get_result::<Merchant>(conn)?;
+                    //.map_err::<Error, _>(|e| e.into())?;
+
+                    let tx = diesel::update(
+                        transactions::table
+                            .filter(transactions::columns::id.eq(msg.payout.id.clone())),
+                    )
+                    .set((
+                        transactions::columns::status.eq(TransactionStatus::Rejected),
+                        transactions::columns::updated_at.eq(Utc::now().naive_utc()),
+                    ))
+                    .get_result(conn)?;
+                    //.map_err::<Error, _>(|e| e.into())?;
+                    Ok(tx)
+                })?;
+
+                Ok(RejectedPayout(tx))
+            }
+        })
+        .from_err();
+
+        Box::new(res)
     }
 }

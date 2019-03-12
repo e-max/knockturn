@@ -87,6 +87,9 @@ pub struct GetPayment {
 #[derive(Debug, Deserialize)]
 pub struct GetPaymentsByStatus(pub TransactionStatus);
 
+#[derive(Debug, Deserialize)]
+pub struct GetPayoutsByStatus(pub TransactionStatus);
+
 pub struct ConfirmTransaction {
     pub transaction: Transaction,
     pub confirmed_at: Option<NaiveDateTime>,
@@ -142,6 +145,10 @@ impl Message for GetPayment {
 }
 
 impl Message for GetPaymentsByStatus {
+    type Result = Result<Vec<Transaction>, Error>;
+}
+
+impl Message for GetPayoutsByStatus {
     type Result = Result<Vec<Transaction>, Error>;
 }
 
@@ -275,6 +282,20 @@ impl Handler<GetPaymentsByStatus> for DbExecutor {
         let conn: &PgConnection = &self.0.get().unwrap();
         transactions
             .filter(transaction_type.eq(TransactionType::Received))
+            .filter(status.eq(msg.0))
+            .load::<Transaction>(conn)
+            .map_err(|e| e.into())
+    }
+}
+
+impl Handler<GetPayoutsByStatus> for DbExecutor {
+    type Result = Result<Vec<Transaction>, Error>;
+
+    fn handle(&mut self, msg: GetPayoutsByStatus, _: &mut Self::Context) -> Self::Result {
+        use crate::schema::transactions::dsl::*;
+        let conn: &PgConnection = &self.0.get().unwrap();
+        transactions
+            .filter(transaction_type.eq(TransactionType::Sent))
             .filter(status.eq(msg.0))
             .load::<Transaction>(conn)
             .map_err(|e| e.into())

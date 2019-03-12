@@ -1,7 +1,8 @@
 use crate::db::DbExecutor;
 use crate::errors::Error;
 use crate::fsm::{
-    ConfirmPayment, Fsm, GetPendingPayments, GetUnreportedPayments, RejectPayment, ReportPayment,
+    ConfirmPayment, ConfirmPayout, Fsm, GetPendingPayments, GetPendingPayouts,
+    GetUnreportedPayments, RejectPayment, RejectPayout, ReportPayment,
 };
 use crate::rates::RatesFetcher;
 use crate::wallet::Wallet;
@@ -157,4 +158,77 @@ fn process_unreported_payments(cron: &mut Cron, _: &mut Context<Cron>) {
 
 fn process_outdated_payouts(cron: &mut Cron, _: &mut Context<Cron>) {
     debug!("run process_outdated_payouts");
+}
+
+fn process_pending_payouts(cron: &mut Cron, _: &mut Context<Cron>) {
+    debug!("run process_pending_payouts");
+    let wallet = cron.wallet.clone();
+    let fsm = cron.fsm.clone();
+    let res = cron
+        .fsm
+        .send(GetPendingPayouts)
+        .map_err(|e| Error::General(s!(e)))
+        .and_then(move |db_response| {
+            let payouts = db_response?;
+            Ok(payouts)
+        })
+        .and_then(move |payouts| {
+            let mut futures = vec![];
+            debug!("Found {} pending payouts", payouts.len());
+            for payout in payouts {
+                if payout.is_expired() {
+                    debug!("payout {} expired: try to reject it", payout.id);
+                    futures.push(Either::A(
+                        fsm.send(RejectPayout {
+                            payout: payout.clone(),
+                        })
+                        .map_err(|e| Error::General(s!(e)))
+                        .and_then(|db_response| {
+                            db_response?;
+                            Ok(())
+                        })
+                        .or_else(move |e| {
+                            error!("Cannot reject payout {}: {}", payout.id, e);
+                            Ok(())
+                        }),
+                    ));
+                    continue;
+                }
+                let res = wallet
+                    .get_tx(&payout.wallet_tx_slate_id.clone().unwrap()) //we should have this field up to this moment
+                    .and_then({
+                        let fsm = fsm.clone();
+                        let pending_payout = payout.clone();
+                        let payout_id = payout.id.clone();
+                        move |wallet_tx| {
+                            if wallet_tx.confirmed {
+                                info!("payout {} confirmed", payout_id);
+                                let res = fsm
+                                    .send(ConfirmPayout {
+                                        pending_payout,
+                                        wallet_tx,
+                                    })
+                                    .from_err()
+                                    .and_then(|msg_response| {
+                                        msg_response?;
+                                        Ok(())
+                                    });
+                                Either::A(res)
+                            } else {
+                                Either::B(ok(()))
+                            }
+                        }
+                    })
+                    .or_else({
+                        let payout_id = payout.id.clone();
+                        move |e| {
+                            warn!("Couldn't confirm payout {}: {}", payout_id, e);
+                            Ok(())
+                        }
+                    });
+                futures.push(Either::B(res));
+            }
+            join_all(futures).map(|_| ())
+        });
+    actix::spawn(res.map_err(|e| error!("Got an error in processing penging payouts {}", e)));
 }
