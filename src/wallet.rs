@@ -24,6 +24,7 @@ const RETRIEVE_TXS_URL: &'static str = "v1/wallet/owner/retrieve_txs";
 const RECEIVE_URL: &'static str = "v1/wallet/foreign/receive_tx";
 const SEND_URL: &'static str = "/v1/wallet/owner/issue_send_tx";
 const FINALIZE_URL: &'static str = "/v1/wallet/owner/finalize_tx";
+const CANCEL_TX_URL: &'static str = "/v1/wallet/owner/cancel_tx";
 
 impl Wallet {
     pub fn new(url: &str, username: &str, password: &str) -> Self {
@@ -153,6 +154,23 @@ impl Wallet {
                         })?;
                         Ok(slate_resp)
                     })
+            })
+    }
+    pub fn cancel_tx(&self, tx_slate_id: &str) -> impl Future<Item = (), Error = Error> {
+        let url = format!("{}/{}?tx_id={}", self.url, CANCEL_TX_URL, tx_slate_id);
+        debug!("Finalize as {} {}: {}", self.username, self.password, url);
+        client::post(&url) // <- Create request builder
+            .auth(&self.username, &self.password)
+            .finish()
+            .unwrap()
+            .send() // <- Send http request
+            .map_err(|e| Error::WalletAPIError(s!(e)))
+            .and_then(|resp| {
+                if !resp.status().is_success() {
+                    Err(Error::WalletAPIError(format!("Error status: {:?}", resp)))
+                } else {
+                    Ok(())
+                }
             })
     }
 

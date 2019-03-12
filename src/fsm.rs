@@ -844,42 +844,51 @@ impl Handler<RejectPayout<PendingPayout>> for Fsm {
     type Result = ResponseFuture<RejectedPayout, Error>;
 
     fn handle(&mut self, msg: RejectPayout<PendingPayout>, _: &mut Self::Context) -> Self::Result {
-        let res = blocking::run({
-            let pool = self.pool.clone();
-            move || {
-                use crate::schema::merchants;
-                use crate::schema::transactions;
-                let conn: &PgConnection = &pool.get().unwrap();
-                let tx: Transaction = conn.transaction(|| -> Result<Transaction, Error> {
-                    warn!("Reject payout {:?}", msg.payout);
-                    diesel::update(
-                        merchants::table
-                            .filter(merchants::columns::id.eq(msg.payout.merchant_id.clone())),
-                    )
-                    .set(
-                        merchants::columns::balance
-                            .eq(merchants::columns::balance + msg.payout.grin_amount),
-                    )
-                    .get_result::<Merchant>(conn)?;
-                    //.map_err::<Error, _>(|e| e.into())?;
+        let res = self
+            .wallet
+            .cancel_tx(&msg.payout.wallet_tx_slate_id.clone().unwrap())
+            .and_then({
+                let pool = self.pool.clone();
+                move |_| {
+                    blocking::run({
+                        move || {
+                            use crate::schema::merchants;
+                            use crate::schema::transactions;
+                            let conn: &PgConnection = &pool.get().unwrap();
+                            let tx: Transaction =
+                                conn.transaction(|| -> Result<Transaction, Error> {
+                                    warn!("Reject payout {:?}", msg.payout);
+                                    diesel::update(merchants::table.filter(
+                                        merchants::columns::id.eq(msg.payout.merchant_id.clone()),
+                                    ))
+                                    .set(
+                                        merchants::columns::balance
+                                            .eq(merchants::columns::balance
+                                                + msg.payout.grin_amount),
+                                    )
+                                    .get_result::<Merchant>(conn)?;
+                                    //.map_err::<Error, _>(|e| e.into())?;
 
-                    let tx = diesel::update(
-                        transactions::table
-                            .filter(transactions::columns::id.eq(msg.payout.id.clone())),
-                    )
-                    .set((
-                        transactions::columns::status.eq(TransactionStatus::Rejected),
-                        transactions::columns::updated_at.eq(Utc::now().naive_utc()),
-                    ))
-                    .get_result(conn)?;
-                    //.map_err::<Error, _>(|e| e.into())?;
-                    Ok(tx)
-                })?;
+                                    let tx = diesel::update(transactions::table.filter(
+                                        transactions::columns::id.eq(msg.payout.id.clone()),
+                                    ))
+                                    .set((
+                                        transactions::columns::status
+                                            .eq(TransactionStatus::Rejected),
+                                        transactions::columns::updated_at
+                                            .eq(Utc::now().naive_utc()),
+                                    ))
+                                    .get_result(conn)?;
+                                    //.map_err::<Error, _>(|e| e.into())?;
+                                    Ok(tx)
+                                })?;
 
-                Ok(RejectedPayout(tx))
-            }
-        })
-        .from_err();
+                            Ok(RejectedPayout(tx))
+                        }
+                    })
+                    .from_err()
+                }
+            });
 
         Box::new(res)
     }
