@@ -105,7 +105,7 @@ pub struct Transaction {
 impl Transaction {
     pub fn is_expired(&self) -> bool {
         match self.time_until_expired() {
-            Some(time) => time > Duration::zero(),
+            Some(time) => time < Duration::zero(),
             None => false,
         }
     }

@@ -303,7 +303,7 @@ impl Handler<GetPayoutsByStatus> for DbExecutor {
         use crate::schema::transactions::dsl::*;
         let conn: &PgConnection = &self.0.get().unwrap();
         transactions
-            .filter(transaction_type.eq(TransactionType::Payment))
+            .filter(transaction_type.eq(TransactionType::Payout))
             .filter(status.eq(msg.0))
             .load::<Transaction>(conn)
             .map_err(|e| e.into())
