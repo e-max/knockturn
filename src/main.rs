@@ -7,6 +7,7 @@ mod clients;
 mod cron;
 mod db;
 mod errors;
+mod extractor;
 mod fsm;
 mod handlers;
 mod middleware;
