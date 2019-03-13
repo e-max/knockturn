@@ -644,12 +644,8 @@ impl Handler<CreatePayout> for Fsm {
                         .get_result::<Merchant>(conn)
                         .map_err::<Error, _>(|e| e.into())?;
 
-                    let transfer_fee = TRANSFER_FEE;
-                    let knockturn_fee = (msg.amount as f64 * KNOCKTURN_SHARE) as i64;
-
-                    if msg.amount < transfer_fee + knockturn_fee {
-                        return Err(Error::General(s!("fees are higher than amount")));
-                    }
+                    //check if fees are not too high
+                    msg.amount.reminder()?;
 
                     let amount = Money::from_grin(msg.amount);
                     let new_id = uuid::Uuid::new_v4();
@@ -675,8 +671,8 @@ impl Handler<CreatePayout> for Fsm {
                             merchant_id.clone()
                         ),
                         slate_messages: None,
-                        transfer_fee: Some(transfer_fee),
-                        knockturn_fee: Some(knockturn_fee),
+                        transfer_fee: Some(msg.amount.transfer_fee()),
+                        knockturn_fee: Some(msg.amount.knockturn_fee()),
                         real_transfer_fee: None,
                         transaction_type: TransactionType::Payout,
                     };
@@ -1073,5 +1069,38 @@ impl Handler<RejectPayout<PendingPayout>> for Fsm {
             });
 
         Box::new(res)
+    }
+}
+pub trait PayoutFees {
+    fn transfer_fee(&self) -> i64;
+    fn knockturn_fee(&self) -> i64;
+    fn reminder(&self) -> Result<i64, Error>;
+}
+
+impl PayoutFees for i64 {
+    fn transfer_fee(&self) -> i64 {
+        TRANSFER_FEE
+    }
+    fn knockturn_fee(&self) -> i64 {
+        (*self as f64 * KNOCKTURN_SHARE) as i64
+    }
+    fn reminder(&self) -> Result<i64, Error> {
+        if *self < self.transfer_fee() + self.knockturn_fee() {
+            Err(Error::General(s!("fees are higher than amount")))
+        } else {
+            Ok(*self - self.transfer_fee() - self.knockturn_fee())
+        }
+    }
+}
+
+impl PayoutFees for Transaction {
+    fn transfer_fee(&self) -> i64 {
+        TRANSFER_FEE
+    }
+    fn knockturn_fee(&self) -> i64 {
+        self.grin_amount.knockturn_fee()
+    }
+    fn reminder(&self) -> Result<i64, Error> {
+        self.grin_amount.reminder()
     }
 }

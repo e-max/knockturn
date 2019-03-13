@@ -5,7 +5,7 @@ use crate::errors::*;
 use crate::extractor::{BasicAuth, Identity, Session};
 use crate::fsm::{
     CreatePayment, CreatePayout, FinalizePayout, GetInitializedPayout, GetNewPayment, GetNewPayout,
-    GetPayout, InitializePayout, MakePayment,
+    GetPayout, InitializePayout, MakePayment, PayoutFees,
 };
 use crate::fsm::{KNOCKTURN_SHARE, MINIMAL_WITHDRAW, TRANSFER_FEE};
 use crate::middleware::WithMerchant;
@@ -433,25 +433,17 @@ struct WithdrawTemplate<'a> {
 pub fn withdraw(
     (merchant, req): (Identity<Merchant>, HttpRequest<AppState>),
 ) -> FutureResponse<HttpResponse, Error> {
-    let balance = merchant.balance;
-    let transfer_fee = TRANSFER_FEE;
-    let knockturn_fee = (balance as f64 * KNOCKTURN_SHARE) as i64;
-    let mut total = 0;
-
-    if balance > transfer_fee + knockturn_fee {
-        total = balance - transfer_fee - knockturn_fee;
-    }
-
+    let reminder = merchant.balance.reminder().unwrap_or(0);
     let mut template = WithdrawTemplate {
         error: None,
-        balance: Money::from_grin(balance),
-        transfer_fee: Money::from_grin(transfer_fee),
-        knockturn_fee: Money::from_grin(knockturn_fee),
-        total: Money::from_grin(total),
+        balance: merchant.balance.into(),
+        transfer_fee: merchant.balance.transfer_fee().into(),
+        knockturn_fee: merchant.balance.knockturn_fee().into(),
+        total: reminder.into(),
         url: "http://localhost:6000/withdraw/confirm",
     };
 
-    if balance < MINIMAL_WITHDRAW {
+    if merchant.balance < MINIMAL_WITHDRAW {
         template.error = Some(format!(
             "You balance is too small. Minimal withdraw amount is {}",
             Money::from_grin(MINIMAL_WITHDRAW)
