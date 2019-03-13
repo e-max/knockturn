@@ -159,9 +159,9 @@ impl fmt::Display for Currency {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let s = match self {
             Currency::BTC => "BTC",
-            Currency::GRIN => "GRIN",
-            Currency::EUR => "EUR",
-            Currency::USD => "USD",
+            Currency::GRIN => "ツ",
+            Currency::EUR => "€",
+            Currency::USD => "$",
         };
         write!(f, "{}", s)
     }

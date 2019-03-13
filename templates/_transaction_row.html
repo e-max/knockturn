@@ -1,0 +1,14 @@
+			<tr>
+				<td>{{ transaction.external_id }}</td>
+				{% if transaction.transaction_type == TransactionType::Payout %}
+					<td class="text-nowrap">&ndash;&nbsp;{{ transaction.amount }}</td>
+					<td class="text-nowrap">&ndash;&nbsp;{{ transaction.grins() }}</td>
+				{% else %}
+					<td class="text-nowrap">{{ transaction.amount }}</td>
+					<td class="text-nowrap">{{ transaction.grins() }}</td>
+				{% endif %}
+				<td class="table-{{transaction.color()}}" >{{ transaction.status.to_string() }}</td>
+				<td>{{ transaction.confirmations }}</td>
+				<td>{{ transaction.created_at|pretty_date }}</td>
+				<td>{{ transaction.updated_at|pretty_date }}</td>
+			</tr>

@@ -4,35 +4,33 @@
 
 {% block content %}
 
-<h1>Merchant {{merchant_id}}</h1>
-	<p>Transactions: {{transactions.len()}}</p>
-	<table>
-	<tr>
-  		<th>ID</th>
-  		<th>Amount</th>
-		<th>Grins</th>
-  		<th>Status</th>
-		<th>Confirmations</th>
-		<th>Created</th>
-		<th>Updated</th>
-    </tr>
-{% for transaction in transactions %}
-	<tr>
-  		<td>{{ transaction.external_id }}</td>
-  		<td>{{ transaction.amount }}</td>
-  		<td>{{ transaction.grins() }}</td>
-		<td>{{ transaction.status.to_string() }}</td>
-		<td>{{ transaction.confirmations }}</td>
-		<td>{{ transaction.created_at }}</td>
-		<td>{{ transaction.updated_at }}</td>
-    </tr>
-  {% endfor %}
-  </table>
-	<form method="POST" action="/logout">
-		<input type="submit" value="Logout">
-	</form>
+<h1>Merchant {{merchant.id}}</h1>
+<dl class="row">
+  <dt class="col-sm-3">Amount: </dt>
+  <dd class="col-sm-9">{{merchant.balance|grin}} <a class="btn btn-primary" href="/withdraw" role="button">Withdraw now</a></dd>
+  <dt class="col-sm-3">Last withdrawal: </dt>
+  <dd class="col-sm-9">{{last_payout.created_at|pretty_date}}</dd>
+</dl>
 
-</body>
-</html>
+	<p>Recent transactions: </p>
+	<table class="table">
+		<thead>
+			<tr>
+				<th>ID</th>
+				<th>Amount</th>
+				<th>Grins</th>
+				<th>Status</th>
+				<th>Confirmations</th>
+				<th>Created</th>
+				<th>Updated</th>
+			</tr>
+		</thead>
+		<tbody>
+{% for transaction in transactions %}
+	{% include "_transaction_row.html" %}
+  {% endfor %}
+		</tbody>
+  </table>
+
 
 {% endblock %}

@@ -5,33 +5,23 @@
 {% block content %}
 
 	<p>Transactions: {{transactions.len()}}</p>
-	<table>
-	<tr>
-  		<th>ID</th>
-  		<th>Amount</th>
-		<th>Grins</th>
-  		<th>Status</th>
-		<th>Confirmations</th>
-		<th>Created</th>
-		<th>Updated</th>
-    </tr>
+	<table class="table">
+		<thead>
+			<tr>
+				<th>ID</th>
+				<th>Amount</th>
+				<th>Grins</th>
+				<th>Status</th>
+				<th>Confirmations</th>
+				<th>Created</th>
+				<th>Updated</th>
+			</tr>
+		</thead>
+		<tbody>
 {% for transaction in transactions %}
-	<tr>
-  		<td>{{ transaction.external_id }}</td>
-  		<td>{{ transaction.amount }}</td>
-  		<td>{{ transaction.grins() }}</td>
-		<td>{{ transaction.status.to_string() }}</td>
-		<td>{{ transaction.confirmations }}</td>
-		<td>{{ transaction.created_at }}</td>
-		<td>{{ transaction.updated_at }}</td>
-    </tr>
+	{% include "_transaction_row.html" %}
   {% endfor %}
+		</tbody>
   </table>
-	<form method="POST" action="/logout">
-		<input type="submit" value="Logout">
-	</form>
-
-</body>
-</html>
 
 {% endblock %}

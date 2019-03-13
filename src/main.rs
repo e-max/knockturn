@@ -8,6 +8,7 @@ mod cron;
 mod db;
 mod errors;
 mod extractor;
+mod filters;
 mod fsm;
 mod handlers;
 mod middleware;

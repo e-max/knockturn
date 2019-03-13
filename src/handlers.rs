@@ -3,13 +3,14 @@ use crate::blocking;
 use crate::db::{Confirm2FA, CreateMerchant, GetMerchant, GetTransaction, GetTransactions};
 use crate::errors::*;
 use crate::extractor::{BasicAuth, Identity, Session};
+use crate::filters;
 use crate::fsm::{
     CreatePayment, CreatePayout, FinalizePayout, GetInitializedPayout, GetNewPayment, GetNewPayout,
     GetPayout, InitializePayout, MakePayment, PayoutFees,
 };
 use crate::fsm::{KNOCKTURN_SHARE, MINIMAL_WITHDRAW, TRANSFER_FEE};
 use crate::middleware::WithMerchant;
-use crate::models::{Currency, Merchant, Money, Transaction, TransactionStatus};
+use crate::models::{Currency, Merchant, Money, Transaction, TransactionStatus, TransactionType};
 use crate::totp::Totp;
 use crate::wallet::Slate;
 use actix_web::http::Method;
@@ -33,33 +34,54 @@ use uuid::Uuid;
 #[derive(Template)]
 #[template(path = "index.html")]
 struct IndexTemplate<'a> {
-    merchant_id: &'a str,
+    merchant: &'a Merchant,
     transactions: Vec<Transaction>,
+    last_payout: &'a Transaction,
 }
 
 pub fn index(
     (merchant, req): (Identity<Merchant>, HttpRequest<AppState>),
 ) -> FutureResponse<HttpResponse> {
     let merchant = merchant.into_inner();
-    req.state()
-        .db
-        .send(GetTransactions {
-            merchant_id: merchant.id.clone(),
-            offset: 0,
-            limit: 100,
-        })
-        .from_err()
-        .and_then(move |db_response| {
-            let transactions = db_response?;
-            let html = IndexTemplate {
-                merchant_id: &merchant.id,
-                transactions,
-            }
-            .render()
-            .map_err(|e| Error::from(e))?;
-            Ok(HttpResponse::Ok().content_type("text/html").body(html))
-        })
-        .responder()
+    blocking::run({
+        let merch_id = merchant.id.clone();
+        let pool = req.state().pool.clone();
+        move || {
+            let txs = {
+                use crate::schema::transactions::dsl::*;
+                let conn: &PgConnection = &pool.get().unwrap();
+                transactions
+                    .filter(merchant_id.eq(merch_id.clone()))
+                    .offset(0)
+                    .limit(10)
+                    .load::<Transaction>(conn)
+                    .map_err::<Error, _>(|e| e.into())
+            }?;
+            let last_payout = {
+                use crate::schema::transactions::dsl::*;
+                let conn: &PgConnection = &pool.get().unwrap();
+                transactions
+                    .filter(merchant_id.eq(merch_id))
+                    .filter(transaction_type.eq(TransactionType::Payout))
+                    .order(created_at.desc())
+                    .first(conn)
+                    .map_err::<Error, _>(|e| e.into())
+            }?;
+            Ok((txs, last_payout))
+        }
+    })
+    .from_err()
+    .and_then(move |(transactions, last_payout)| {
+        let html = IndexTemplate {
+            merchant: &merchant,
+            transactions: transactions,
+            last_payout: &last_payout,
+        }
+        .render()
+        .map_err(|e| Error::from(e))?;
+        Ok(HttpResponse::Ok().content_type("text/html").body(html))
+    })
+    .responder()
 }
 
 #[derive(Template)]
@@ -511,15 +533,8 @@ pub fn create_payout(
 
 #[derive(Template)]
 #[template(path = "payout.html")]
-struct PayoutTemplate {
-    tx_id: String,
-    merchant_id: String,
-    status: String,
-    amount: Money,
-    transfer_fee: Money,
-    knockturn_fee: Money,
-    reminder: Money,
-    download_slate: bool,
+struct PayoutTemplate<'a> {
+    payout: &'a Transaction,
 }
 
 pub fn get_payout(
@@ -543,14 +558,7 @@ pub fn get_payout(
                 .transfer_fee
                 .ok_or(Error::General(s!("Transaction doesn't have transfer_fee")))?;
             let html = PayoutTemplate {
-                tx_id: transaction.id.to_string(),
-                merchant_id: transaction.merchant_id.clone(),
-                status: transaction.status.to_string(),
-                amount: transaction.amount.into(),
-                transfer_fee: transfer_fee.into(),
-                knockturn_fee: knockturn_fee.into(),
-                reminder: (transaction.grin_amount - knockturn_fee - transfer_fee).into(),
-                download_slate: transaction.status == TransactionStatus::New,
+                payout: &transaction,
             }
             .render()
             .map_err(|e| Error::from(e))?;
@@ -728,5 +736,19 @@ impl<T: Template> TemplateIntoResponse for T {
     }
     fn into_future(&self) -> FutureResponse<HttpResponse, Error> {
         Box::new(ok(self.into_response().into()))
+    }
+}
+
+pub trait BootstrapColor {
+    fn color(&self) -> &'static str;
+}
+impl BootstrapColor for Transaction {
+    fn color(&self) -> &'static str {
+        match (self.transaction_type, self.status) {
+            (TransactionType::Payout, TransactionStatus::Confirmed) => "success",
+            (TransactionType::Payout, TransactionStatus::Pending) => "info",
+            (TransactionType::Payment, TransactionStatus::Rejected) => "secondary",
+            (_, _) => "light",
+        }
     }
 }
