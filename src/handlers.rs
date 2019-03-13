@@ -533,15 +533,8 @@ pub fn create_payout(
 
 #[derive(Template)]
 #[template(path = "payout.html")]
-struct PayoutTemplate {
-    tx_id: String,
-    merchant_id: String,
-    status: String,
-    amount: Money,
-    transfer_fee: Money,
-    knockturn_fee: Money,
-    reminder: Money,
-    download_slate: bool,
+struct PayoutTemplate<'a> {
+    payout: &'a Transaction,
 }
 
 pub fn get_payout(
@@ -565,14 +558,7 @@ pub fn get_payout(
                 .transfer_fee
                 .ok_or(Error::General(s!("Transaction doesn't have transfer_fee")))?;
             let html = PayoutTemplate {
-                tx_id: transaction.id.to_string(),
-                merchant_id: transaction.merchant_id.clone(),
-                status: transaction.status.to_string(),
-                amount: transaction.amount.into(),
-                transfer_fee: transfer_fee.into(),
-                knockturn_fee: knockturn_fee.into(),
-                reminder: (transaction.grin_amount - knockturn_fee - transfer_fee).into(),
-                download_slate: transaction.status == TransactionStatus::New,
+                payout: &transaction,
             }
             .render()
             .map_err(|e| Error::from(e))?;
