@@ -4,8 +4,15 @@
 
 {% block content %}
 
-<h1>Merchant {{merchant_id}}</h1>
-	<p>Transactions: {{transactions.len()}}</p>
+<h1>Merchant {{merchant.id}}</h1>
+<dl class="row">
+  <dt class="col-sm-3">Amount: </dt>
+  <dd class="col-sm-9">{{merchant.balance|grin}} <button type="button" class="btn btn-primary">Withdraw now</button></dd>
+  <dt class="col-sm-3">Last withdrawal: </dt>
+  <dd class="col-sm-9">{{last_payout.created_at|pretty_date}}</dd>
+</dl>
+
+	<p>Recent transactions: </p>
 	<table class="table">
 		<thead>
 			<tr>
@@ -22,12 +29,12 @@
 {% for transaction in transactions %}
 			<tr>
 				<td>{{ transaction.external_id }}</td>
-				<td>{{ transaction.amount }}</td>
-				<td>{{ transaction.grins() }}</td>
+				<td class="text-nowrap">{{ transaction.amount }}</td>
+				<td class="text-nowrap">{{ transaction.grins() }}</td>
 				<td>{{ transaction.status.to_string() }}</td>
 				<td>{{ transaction.confirmations }}</td>
-				<td>{{ transaction.created_at }}</td>
-				<td>{{ transaction.updated_at }}</td>
+				<td>{{ transaction.created_at|pretty_date }}</td>
+				<td>{{ transaction.updated_at|pretty_date }}</td>
 			</tr>
   {% endfor %}
 		</tbody>
