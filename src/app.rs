@@ -48,7 +48,7 @@ pub fn create_app(
             r.method(Method::GET).with(get_merchant)
         })
         .resource("/transactions", |r| {
-            r.method(Method::POST).with(get_transactions)
+            r.method(Method::GET).with(get_transactions)
         })
         .resource("/merchants/{merchant_id}/payments", |r| {
             r.method(Method::POST).with(create_payment)
@@ -75,7 +75,7 @@ pub fn create_app(
             r.method(Method::POST).with(login);
             r.method(Method::GET).with(login_form);
         })
-        .resource("/logout", |r| r.method(Method::GET).with(logout))
+        .resource("/logout", |r| r.method(Method::POST).with(logout))
         .resource("/", |r| {
             r.method(Method::GET).with(index);
         })
