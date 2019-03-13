@@ -3,6 +3,7 @@ use crate::db::GetMerchant;
 use crate::errors::*;
 use crate::models::Merchant;
 use actix_web::middleware::identity::RequestIdentity;
+use actix_web::middleware::session::RequestSession;
 use actix_web::{FromRequest, HttpRequest};
 use actix_web_httpauth::extractors::basic;
 use derive_deref::Deref;
@@ -52,6 +53,47 @@ impl FromRequest<AppState> for BasicAuth<Merchant> {
                     } else {
                         ok(BasicAuth(merchant))
                     }
+                }),
+        ))
+    }
+}
+
+/// Session extractor
+#[derive(Debug, Deref, Clone)]
+pub struct Session<T>(pub T);
+
+impl<T> Session<T> {
+    pub fn into_inner(self) -> T {
+        self.0
+    }
+}
+
+pub struct SessionConfig(String);
+
+impl Default for SessionConfig {
+    fn default() -> Self {
+        SessionConfig("merchant".to_owned())
+    }
+}
+
+impl FromRequest<AppState> for Session<Merchant> {
+    type Config = SessionConfig;
+    type Result = Result<Box<dyn Future<Item = Self, Error = Error>>, Error>;
+
+    fn from_request(req: &HttpRequest<AppState>, cfg: &Self::Config) -> Self::Result {
+        let merchant_id = match req.session().get::<String>(&cfg.0) {
+            Ok(Some(v)) => v,
+            _ => return Err(Error::NotAuthorizedInUI),
+        };
+
+        Ok(Box::new(
+            req.state()
+                .db
+                .send(GetMerchant { id: merchant_id })
+                .from_err()
+                .and_then(move |db_response| match db_response {
+                    Ok(m) => ok(Session(m)),
+                    Err(e) => err(Error::NotAuthorizedInUI),
                 }),
         ))
     }

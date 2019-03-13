@@ -2,7 +2,7 @@ use crate::app::AppState;
 use crate::blocking;
 use crate::db::{Confirm2FA, CreateMerchant, GetMerchant, GetTransaction, GetTransactions};
 use crate::errors::*;
-use crate::extractor::{BasicAuth, Identity};
+use crate::extractor::{BasicAuth, Identity, Session};
 use crate::fsm::{
     CreatePayment, CreatePayout, FinalizePayout, GetInitializedPayout, GetNewPayment, GetNewPayout,
     GetPayout, InitializePayout, MakePayment,
@@ -20,13 +20,11 @@ use actix_web::{
 };
 use askama::Template;
 use bcrypt;
-use bytes::BytesMut;
 use chrono::Duration;
 use data_encoding::BASE64;
 use diesel::pg::PgConnection;
 use diesel::{self, prelude::*};
-use futures::future::{ok, result, Either, Future};
-use futures::stream::Stream;
+use futures::future::{err, ok, result, Either, Future};
 use mime_guess::get_mime_type;
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -292,8 +290,6 @@ struct PaymentTemplate {
     time_until_expired: Option<Duration>,
 }
 
-const MAX_SIZE: usize = 262_144; // max payload size is 256k
-
 #[derive(Template)]
 #[template(path = "totp.html")]
 struct TotpTemplate<'a> {
@@ -307,8 +303,10 @@ pub struct TotpRequest {
     pub code: String,
 }
 
-pub fn get_totp(req: HttpRequest<AppState>) -> Result<HttpResponse, Error> {
-    let merchant = req.get_merchant().ok_or(Error::MerchantNotFound)?;
+pub fn get_totp(
+    (merchant, req): (Identity<Merchant>, HttpRequest<AppState>),
+) -> Result<HttpResponse, Error> {
+    let merchant = merchant.into_inner();
     let token = merchant
         .token_2fa
         .ok_or(Error::General(s!("No 2fa token")))?;
@@ -325,78 +323,59 @@ pub fn get_totp(req: HttpRequest<AppState>) -> Result<HttpResponse, Error> {
 }
 
 pub fn post_totp(
-    (req, totp_form): (HttpRequest<AppState>, Form<TotpRequest>),
+    (merchant, req, totp_form): (Session<Merchant>, HttpRequest<AppState>, Form<TotpRequest>),
 ) -> FutureResponse<HttpResponse, Error> {
-    let merchant_id = match req.session().get::<String>("merchant") {
-        Ok(Some(v)) => v,
-        _ => {
-            return Box::new(ok(HttpResponse::Found()
-                .header("location", "/login")
-                .finish()));
-        }
+    let merchant = merchant.into_inner();
+    let mut msg = String::new();
+
+    let token = match merchant.token_2fa {
+        Some(t) => t,
+        None => return Box::new(err(Error::General(s!("No 2fa token")))),
     };
-    req.state()
-        .db
-        .send(GetMerchant {
-            id: merchant_id.clone(),
-        })
-        .from_err()
-        .and_then({
-            let request_method = req.method().clone();
-            move |db_response| {
-                let merchant = db_response?;
+    let totp = Totp::new(merchant.id.clone(), token.clone());
 
-                let mut msg = String::new();
-
-                let token = merchant
-                    .token_2fa
-                    .ok_or(Error::General(s!("No 2fa token")))?;
-                let totp = Totp::new(merchant.id.clone(), token.clone());
-
-                if request_method == Method::POST {
-                    if totp.check(&totp_form.code)? {
-                        let resp = HttpResponse::Found().header("location", "/").finish();
-                        return Ok((true, resp));
-                    }
-                    msg.push_str("Incorrect code, please try one more time");
-                }
-
-                let html = TotpTemplate {
-                    msg: &msg,
-                    token: &token,
-                    image: &BASE64.encode(&totp.get_png()?),
-                }
-                .render()
-                .map_err(|e| Error::from(e))?;
-                let resp = HttpResponse::Ok().content_type("text/html").body(html);
-                Ok((false, resp))
+    if req.method() == Method::POST {
+        match totp.check(&totp_form.code) {
+            Ok(true) => {
+                let resp = HttpResponse::Found().header("location", "/").finish();
+                return req
+                    .state()
+                    .db
+                    .send(Confirm2FA {
+                        merchant_id: merchant.id,
+                    })
+                    .from_err()
+                    .and_then(move |db_response| {
+                        db_response?;
+                        Ok(resp)
+                    })
+                    .responder();
             }
-        })
-        .and_then({
-            let db = req.state().db.clone();
-            move |(confirm, response)| {
-                if confirm {
-                    Either::A(db.send(Confirm2FA { merchant_id }).from_err().and_then(
-                        move |db_response| {
-                            db_response?;
-                            Ok(response)
-                        },
-                    ))
-                } else {
-                    Either::B(ok(response))
-                }
-            }
-        })
-        .responder()
+            _ => msg.push_str("Incorrect code, please try one more time"),
+        }
+    }
+
+    let image = match totp.get_png() {
+        Err(_) => return Box::new(err(Error::General(s!("can't generate an image")))),
+        Ok(v) => v,
+    };
+
+    let html = match (TotpTemplate {
+        msg: &msg,
+        token: &token,
+        image: &BASE64.encode(&image),
+    }
+    .render())
+    {
+        Err(e) => return Box::new(err(Error::from(e))),
+        Ok(v) => v,
+    };
+    let resp = HttpResponse::Ok().content_type("text/html").body(html);
+    ok(resp).responder()
 }
 
 pub fn make_payment(
-    (slate, payment, req, state): (
-        Json<Slate>,
-        Path<GetNewPayment>,
-        HttpRequest<AppState>,
-        State<AppState>,
-    ),
+    (slate, payment, state): (Json<Slate>, Path<GetNewPayment>, State<AppState>),
 ) -> FutureResponse<HttpResponse, Error> {
     let slate_amount = slate.amount;
     state
@@ -451,51 +430,35 @@ struct WithdrawTemplate<'a> {
     url: &'a str,
 }
 
-pub fn withdraw(req: HttpRequest<AppState>) -> FutureResponse<HttpResponse, Error> {
-    let merchant_id = match req.identity() {
-        Some(v) => v,
-        None => return ok(HttpResponse::Found().header("location", "/login").finish()).responder(),
+pub fn withdraw(
+    (merchant, req): (Identity<Merchant>, HttpRequest<AppState>),
+) -> FutureResponse<HttpResponse, Error> {
+    let balance = merchant.balance;
+    let transfer_fee = TRANSFER_FEE;
+    let knockturn_fee = (balance as f64 * KNOCKTURN_SHARE) as i64;
+    let mut total = 0;
+
+    if balance > transfer_fee + knockturn_fee {
+        total = balance - transfer_fee - knockturn_fee;
+    }
+
+    let mut template = WithdrawTemplate {
+        error: None,
+        balance: Money::from_grin(balance),
+        transfer_fee: Money::from_grin(transfer_fee),
+        knockturn_fee: Money::from_grin(knockturn_fee),
+        total: Money::from_grin(total),
+        url: "http://localhost:6000/withdraw/confirm",
     };
-    Box::new(
-        req.state()
-            .db
-            .send(GetMerchant {
-                id: merchant_id.clone(),
-            })
-            .from_err()
-            .and_then(move |db_response| {
-                let merchant = db_response?;
-                Ok(merchant)
-            })
-            .and_then(|merchant| {
-                let balance = merchant.balance;
-                let transfer_fee = TRANSFER_FEE;
-                let knockturn_fee = (balance as f64 * KNOCKTURN_SHARE) as i64;
-                let mut total = 0;
 
-                if balance > transfer_fee + knockturn_fee {
-                    total = balance - transfer_fee - knockturn_fee;
-                }
+    if balance < MINIMAL_WITHDRAW {
+        template.error = Some(format!(
+            "You balance is too small. Minimal withdraw amount is {}",
+            Money::from_grin(MINIMAL_WITHDRAW)
+        ));
+    }
 
-                let mut template = WithdrawTemplate {
-                    error: None,
-                    balance: Money::from_grin(balance),
-                    transfer_fee: Money::from_grin(transfer_fee),
-                    knockturn_fee: Money::from_grin(knockturn_fee),
-                    total: Money::from_grin(total),
-                    url: "http://localhost:6000/withdraw/confirm",
-                };
-
-                if balance < MINIMAL_WITHDRAW {
-                    template.error = Some(format!(
-                        "You balance is too small. Minimal withdraw amount is {}",
-                        Money::from_grin(MINIMAL_WITHDRAW)
-                    ));
-                }
-
-                template.into_response()
-            }),
-    )
+    template.into_future()
 }
 
 fn check_2fa_code(merchant: &Merchant, code: &str) -> Result<bool, Error> {
@@ -514,9 +477,13 @@ pub struct CreatePayoutForm {
 }
 
 pub fn create_payout(
-    (req, form): (HttpRequest<AppState>, Form<CreatePayoutForm>),
+    (req, form, identity_merchant): (
+        HttpRequest<AppState>,
+        Form<CreatePayoutForm>,
+        Identity<Merchant>,
+    ),
 ) -> FutureResponse<HttpResponse, Error> {
-    let merchant = req.get_merchant().unwrap();
+    let merchant = identity_merchant.clone().into_inner();
     Box::new(
         ok(())
             .and_then({
@@ -528,7 +495,7 @@ pub fn create_payout(
             })
             .and_then(move |(merchant, validated)| {
                 if !validated {
-                    withdraw(req)
+                    withdraw((identity_merchant, req))
                 } else {
                     req.state()
                         .fsm
@@ -663,82 +630,54 @@ pub fn generate_slate(
 }
 
 pub fn accept_slate(
-    (tx_id, req, state): (Path<Uuid>, HttpRequest<AppState>, State<AppState>),
+    (slate, tx_id, req, state): (
+        Json<Slate>,
+        Path<Uuid>,
+        HttpRequest<AppState>,
+        State<AppState>,
+    ),
 ) -> FutureResponse<HttpResponse, Error> {
-    req.payload()
-        .map_err(|e| Error::Internal(format!("Payload error: {:?}", e)))
-        //.from_err()
-        .fold(BytesMut::new(), move |mut body, chunk| {
-            if (body.len() + chunk.len()) > MAX_SIZE {
-                Err(Error::Internal("overflow".to_owned()))
-            } else {
-                body.extend_from_slice(&chunk);
-                Ok(body)
-            }
+    let slate_amount = slate.amount;
+    state
+        .fsm
+        .send(GetInitializedPayout {
+            transaction_id: tx_id.clone(),
         })
-        .and_then(|body| {
-            let slate = serde_json::from_slice::<Slate>(&body)?;
-            Ok(slate)
+        .from_err()
+        .and_then(move |db_response| {
+            let initialized_payout = db_response?;
+            Ok(initialized_payout)
         })
-        .and_then(move |slate| {
-            let slate_amount = slate.amount;
-            state
-                .fsm
-                .send(GetInitializedPayout {
-                    transaction_id: tx_id.clone(),
-                })
-                .from_err()
-                .and_then(move |db_response| {
-                    let initialized_payout = db_response?;
-                    Ok(initialized_payout)
-                })
-                .and_then({
-                    let wallet = state.wallet.clone();
-                    let fsm = state.fsm.clone();
-                    move |initialized_payout| {
-                        wallet.finalize(&slate).and_then({
-                            let wallet = wallet.clone();
-                            move |slate| {
-                                wallet
-                                    .post_tx()
-                                    .and_then(move |_| {
-                                        fsm.send(FinalizePayout { initialized_payout })
-                                            .from_err()
-                                            .and_then(|db_response| {
-                                                db_response?;
-                                                Ok(())
-                                            })
+        .and_then({
+            let wallet = state.wallet.clone();
+            let fsm = state.fsm.clone();
+            move |initialized_payout| {
+                wallet.finalize(&slate).and_then({
+                    let wallet = wallet.clone();
+                    move |slate| {
+                        wallet
+                            .post_tx()
+                            .and_then(move |_| {
+                                fsm.send(FinalizePayout { initialized_payout })
+                                    .from_err()
+                                    .and_then(|db_response| {
+                                        db_response?;
+                                        Ok(())
                                     })
-                                    .and_then(|_| ok(slate))
-                            }
-                        })
+                            })
+                            .and_then(|_| ok(slate))
                     }
                 })
-                .and_then(|slate| Ok(HttpResponse::Ok().json(slate)))
+            }
         })
+        .and_then(|slate| Ok(HttpResponse::Ok().json(slate)))
         .responder()
 }
 
 pub fn withdraw_confirmation(
-    (req, state): (HttpRequest<AppState>, State<AppState>),
-) -> FutureResponse<HttpResponse, Error> {
-    req.payload()
-        .map_err(|e| Error::Internal(format!("Payload error: {:?}", e)))
-        //.from_err()
-        .fold(BytesMut::new(), move |mut body, chunk| {
-            if (body.len() + chunk.len()) > MAX_SIZE {
-                Err(Error::Internal("overflow".to_owned()))
-            } else {
-                body.extend_from_slice(&chunk);
-                Ok(body)
-            }
-        })
-        .and_then(|body| {
-            let slate = serde_json::from_slice::<Slate>(&body)?;
-            Ok(slate)
-        })
-        .and_then(|_| Ok(HttpResponse::Ok().body("hello")))
-        .responder()
+    (slate, req, state): (Json<Slate>, HttpRequest<AppState>, State<AppState>),
+) -> Result<HttpResponse, Error> {
+    Ok(HttpResponse::Ok().body("hello"))
 }
 
 #[derive(Template)]
@@ -786,6 +725,7 @@ pub fn post_2fa(
 
 pub trait TemplateIntoResponse {
     fn into_response(&self) -> Result<HttpResponse, Error>;
+    fn into_future(&self) -> FutureResponse<HttpResponse, Error>;
 }
 
 impl<T: Template> TemplateIntoResponse for T {
@@ -793,5 +733,8 @@ impl<T: Template> TemplateIntoResponse for T {
         let rsp = self.render().map_err(|e| Error::Template(s!(e)))?;
         let ctype = get_mime_type(T::extension().unwrap_or("txt")).to_string();
         Ok(HttpResponse::Ok().content_type(ctype.as_str()).body(rsp))
+    }
+    fn into_future(&self) -> FutureResponse<HttpResponse, Error> {
+        Box::new(ok(self.into_response().into()))
     }
 }

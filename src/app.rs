@@ -2,7 +2,6 @@ use crate::db::DbExecutor;
 use crate::fsm::Fsm;
 use crate::handlers::*;
 use crate::middleware::MerchantMiddleware;
-use crate::middleware::SiteAuthMiddleware;
 use crate::wallet::Wallet;
 use actix::prelude::*;
 use actix_web::middleware::identity::{CookieIdentityPolicy, IdentityService};
@@ -78,7 +77,6 @@ pub fn create_app(
         })
         .resource("/logout", |r| r.method(Method::GET).with(logout))
         .resource("/", |r| {
-            r.middleware(SiteAuthMiddleware);
             r.method(Method::GET).with(index);
         })
         .resource("/set_2fa", |r| {
@@ -94,11 +92,16 @@ pub fn create_app(
             r.method(Method::POST).with(create_payout);
         })
         .resource("/withdraw/confirm", |r| {
-            r.method(Method::POST).with(withdraw_confirmation);
+            r.method(Method::POST)
+                .with_config(withdraw_confirmation, |cfg| {
+                    (cfg.0).0.content_type(|_| true);
+                });
         })
         .resource("/payouts/{id}", |r| {
             r.method(Method::GET).with(get_payout);
-            r.method(Method::POST).with(accept_slate);
+            r.method(Method::POST).with_config(accept_slate, |cfg| {
+                (cfg.0).0.content_type(|_| true);
+            })
         })
         .resource("/payouts/{id}/knockturn-payout.grinslate", |r| {
             r.method(Method::GET).with(generate_slate);

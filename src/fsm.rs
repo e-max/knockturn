@@ -646,10 +646,9 @@ impl Handler<CreatePayout> for Fsm {
 
                     let transfer_fee = TRANSFER_FEE;
                     let knockturn_fee = (msg.amount as f64 * KNOCKTURN_SHARE) as i64;
-                    let mut total = 0;
 
-                    if msg.amount > transfer_fee + knockturn_fee {
-                        total = msg.amount - transfer_fee - knockturn_fee;
+                    if msg.amount < transfer_fee + knockturn_fee {
+                        return Err(Error::General(s!("fees are higher than amount")));
                     }
 
                     let amount = Money::from_grin(msg.amount);
