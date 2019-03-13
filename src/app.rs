@@ -49,7 +49,7 @@ pub fn create_app(
             r.method(Method::GET).with(get_merchant)
         })
         .resource("/transactions", |r| {
-            r.method(Method::POST).f(get_transactions)
+            r.method(Method::POST).with(get_transactions)
         })
         .resource("/merchants/{merchant_id}/payments", |r| {
             r.method(Method::POST).with(create_payment)
@@ -79,7 +79,7 @@ pub fn create_app(
         .resource("/logout", |r| r.method(Method::GET).with(logout))
         .resource("/", |r| {
             r.middleware(SiteAuthMiddleware);
-            r.method(Method::GET).f(index);
+            r.method(Method::GET).with(index);
         })
         .resource("/set_2fa", |r| {
             r.method(Method::GET).with(get_totp);

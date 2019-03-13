@@ -47,6 +47,9 @@ pub enum Error {
     #[fail(display = "Not authorized")]
     NotAuthorized,
 
+    #[fail(display = "Not authorized")]
+    NotAuthorizedInUI,
+
     #[fail(display = "Merchant not found")]
     MerchantNotFound,
 
@@ -116,6 +119,7 @@ impl ResponseError for Error {
             | Error::UnsupportedCurrency(ref message) => HttpResponse::BadRequest().json(message),
             Error::AuthRequired => HttpResponse::Unauthorized().finish(),
             Error::NotAuthorized => HttpResponse::Forbidden().finish(),
+            Error::NotAuthorizedInUI => HttpResponse::Found().header("location", "/login").finish(),
             _ => HttpResponse::InternalServerError().json("general error".to_owned()),
         }
     }

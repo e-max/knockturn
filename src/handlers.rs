@@ -2,7 +2,7 @@ use crate::app::AppState;
 use crate::blocking;
 use crate::db::{Confirm2FA, CreateMerchant, GetMerchant, GetTransaction, GetTransactions};
 use crate::errors::*;
-use crate::extractor::BasicAuth;
+use crate::extractor::{BasicAuth, Identity};
 use crate::fsm::{
     CreatePayment, CreatePayout, FinalizePayout, GetInitializedPayout, GetNewPayment, GetNewPayout,
     GetPayout, InitializePayout, MakePayment,
@@ -39,15 +39,14 @@ struct IndexTemplate<'a> {
     transactions: Vec<Transaction>,
 }
 
-pub fn index(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse> {
-    let merchant_id = match req.identity() {
-        Some(v) => v,
-        None => return ok(HttpResponse::Found().header("location", "/login").finish()).responder(),
-    };
+pub fn index(
+    (merchant, req): (Identity<Merchant>, HttpRequest<AppState>),
+) -> FutureResponse<HttpResponse> {
+    let merchant = merchant.into_inner();
     req.state()
         .db
         .send(GetTransactions {
-            merchant_id: merchant_id.clone(),
+            merchant_id: merchant.id.clone(),
             offset: 0,
             limit: 100,
         })
@@ -55,7 +54,7 @@ pub fn index(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse> {
         .and_then(move |db_response| {
             let transactions = db_response?;
             let html = IndexTemplate {
-                merchant_id: &merchant_id,
+                merchant_id: &merchant.id,
                 transactions,
             }
             .render()
@@ -71,14 +70,12 @@ struct TransactionsTemplate {
     transactions: Vec<Transaction>,
 }
 
-pub fn get_transactions(req: &HttpRequest<AppState>) -> FutureResponse<HttpResponse> {
-    let merchant_id = match req.identity() {
-        Some(v) => v,
-        None => return ok(HttpResponse::Found().header("location", "/login").finish()).responder(),
-    };
-
+pub fn get_transactions(
+    (merchant, req): (Identity<Merchant>, HttpRequest<AppState>),
+) -> FutureResponse<HttpResponse> {
+    let merchant = merchant.into_inner();
     blocking::run({
-        let merch_id = merchant_id.clone();
+        let merch_id = merchant.id.clone();
         let pool = req.state().pool.clone();
         move || {
             use crate::schema::transactions::dsl::*;
