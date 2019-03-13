@@ -7,7 +7,7 @@
 <h1>Merchant {{merchant.id}}</h1>
 <dl class="row">
   <dt class="col-sm-3">Amount: </dt>
-  <dd class="col-sm-9">{{merchant.balance|grin}} <button type="button" class="btn btn-primary">Withdraw now</button></dd>
+  <dd class="col-sm-9">{{merchant.balance|grin}} <a class="btn btn-primary" href="/withdraw" role="button">Withdraw now</a></dd>
   <dt class="col-sm-3">Last withdrawal: </dt>
   <dd class="col-sm-9">{{last_payout.created_at|pretty_date}}</dd>
 </dl>
@@ -31,9 +31,6 @@
   {% endfor %}
 		</tbody>
   </table>
-	<form method="POST" action="/logout">
-		<input type="submit" value="Logout">
-	</form>
 
 </body>
 </html>

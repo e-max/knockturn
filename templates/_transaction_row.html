@@ -1,8 +1,8 @@
-			<tr class="table-{{transaction|transaction_color}}">
+			<tr>
 				<td>{{ transaction.external_id }}</td>
 				<td class="text-nowrap">{{ transaction.amount }}</td>
 				<td class="text-nowrap">{{ transaction.grins() }}</td>
-				<td>{{ transaction.status.to_string() }}</td>
+				<td class="table-{{transaction|transaction_color}}" >{{ transaction.status.to_string() }}</td>
 				<td>{{ transaction.confirmations }}</td>
 				<td>{{ transaction.created_at|pretty_date }}</td>
 				<td>{{ transaction.updated_at|pretty_date }}</td>
