@@ -752,3 +752,17 @@ impl<T: Template> TemplateIntoResponse for T {
         Box::new(ok(self.into_response().into()))
     }
 }
+
+pub trait BootstrapColor {
+    fn color(&self) -> &'static str;
+}
+impl BootstrapColor for Transaction {
+    fn color(&self) -> &'static str {
+        match (self.transaction_type, self.status) {
+            (TransactionType::Payout, TransactionStatus::Confirmed) => "success",
+            (TransactionType::Payout, TransactionStatus::Pending) => "info",
+            (TransactionType::Payment, TransactionStatus::Rejected) => "secondary",
+            (_, _) => "light",
+        }
+    }
+}
