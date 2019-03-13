@@ -394,64 +394,52 @@ pub fn post_totp(
 }
 
 pub fn make_payment(
-    (payment, req, state): (Path<GetNewPayment>, HttpRequest<AppState>, State<AppState>),
+    (slate, payment, req, state): (
+        Json<Slate>,
+        Path<GetNewPayment>,
+        HttpRequest<AppState>,
+        State<AppState>,
+    ),
 ) -> FutureResponse<HttpResponse, Error> {
-    req.payload()
-        .map_err(|e| Error::Internal(format!("Payload error: {:?}", e)))
-        //.from_err()
-        .fold(BytesMut::new(), move |mut body, chunk| {
-            if (body.len() + chunk.len()) > MAX_SIZE {
-                Err(Error::Internal("overflow".to_owned()))
-            } else {
-                body.extend_from_slice(&chunk);
-                Ok(body)
+    let slate_amount = slate.amount;
+    state
+        .fsm
+        .send(payment.into_inner())
+        .from_err()
+        .and_then(move |db_response| {
+            let new_payment = db_response?;
+            if new_payment.grin_amount != slate_amount as i64 {
+                return Err(Error::WrongAmount(
+                    new_payment.grin_amount as u64,
+                    slate_amount,
+                ));
+            }
+            Ok(new_payment)
+        })
+        .and_then({
+            let wallet = state.wallet.clone();
+            let fsm = state.fsm.clone();
+            move |new_payment| {
+                let slate = wallet.receive(&slate);
+                slate.and_then(move |slate| {
+                    wallet
+                        .get_tx(&slate.id.hyphenated().to_string())
+                        .and_then(move |wallet_tx| {
+                            fsm.send(MakePayment {
+                                new_payment,
+                                wallet_tx,
+                            })
+                            .from_err()
+                            .and_then(|db_response| {
+                                db_response?;
+                                Ok(())
+                            })
+                        })
+                        .and_then(|_| ok(slate))
+                })
             }
         })
-        .and_then(|body| {
-            let slate = serde_json::from_slice::<Slate>(&body)?;
-            Ok(slate)
-        })
-        .and_then(move |slate| {
-            let slate_amount = slate.amount;
-            state
-                .fsm
-                .send(payment.into_inner())
-                .from_err()
-                .and_then(move |db_response| {
-                    let new_payment = db_response?;
-                    if new_payment.grin_amount != slate_amount as i64 {
-                        return Err(Error::WrongAmount(
-                            new_payment.grin_amount as u64,
-                            slate_amount,
-                        ));
-                    }
-                    Ok(new_payment)
-                })
-                .and_then({
-                    let wallet = state.wallet.clone();
-                    let fsm = state.fsm.clone();
-                    move |new_payment| {
-                        let slate = wallet.receive(&slate);
-                        slate.and_then(move |slate| {
-                            wallet
-                                .get_tx(&slate.id.hyphenated().to_string())
-                                .and_then(move |wallet_tx| {
-                                    fsm.send(MakePayment {
-                                        new_payment,
-                                        wallet_tx,
-                                    })
-                                    .from_err()
-                                    .and_then(|db_response| {
-                                        db_response?;
-                                        Ok(())
-                                    })
-                                })
-                                .and_then(|_| ok(slate))
-                        })
-                    }
-                })
-                .and_then(|slate| Ok(HttpResponse::Ok().json(slate)))
-        })
+        .and_then(|slate| Ok(HttpResponse::Ok().json(slate)))
         .responder()
 }
 
