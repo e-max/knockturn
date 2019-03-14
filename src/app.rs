@@ -68,7 +68,9 @@ pub fn create_app(
         .resource(
             "/merchants/{merchant_id}/payments/{transaction_id}/{grin_path:.*}",
             |r| {
-                r.method(Method::POST).with(make_payment);
+                r.method(Method::POST).with_config(make_payment, |cfg| {
+                    (cfg.0).0.content_type(|_| true);
+                });
             },
         )
         .resource("/login", |r| {
