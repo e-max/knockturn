@@ -2,7 +2,7 @@ use crate::app::AppState;
 use crate::blocking;
 use crate::db::{Confirm2FA, CreateMerchant, GetMerchant, GetTransaction, GetTransactions};
 use crate::errors::*;
-use crate::extractor::{BasicAuth, Identity, Session};
+use crate::extractor::{BasicAuth, Identity, Session, SimpleJson};
 use crate::filters;
 use crate::fsm::{
     CreatePayment, CreatePayout, FinalizePayout, GetInitializedPayout, GetNewPayment, GetNewPayout,
@@ -17,7 +17,7 @@ use actix_web::http::Method;
 use actix_web::middleware::identity::RequestIdentity;
 use actix_web::middleware::session::RequestSession;
 use actix_web::{
-    AsyncResponder, Form, FutureResponse, HttpMessage, HttpRequest, HttpResponse, Json, Path, State,
+    AsyncResponder, Form, FutureResponse, HttpMessage, HttpRequest, HttpResponse, Path, State,
 };
 use askama::Template;
 use bcrypt;
@@ -170,15 +170,16 @@ pub fn logout(req: HttpRequest<AppState>) -> Result<HttpResponse, Error> {
 }
 
 pub fn create_merchant(
-    (mut create_merchant, state): (Json<CreateMerchant>, State<AppState>),
+    (create_merchant, state): (SimpleJson<CreateMerchant>, State<AppState>),
 ) -> FutureResponse<HttpResponse> {
+    let mut create_merchant = create_merchant.into_inner();
     create_merchant.password = match bcrypt::hash(&create_merchant.password, bcrypt::DEFAULT_COST) {
         Ok(v) => v,
         Err(_) => return result(Ok(HttpResponse::InternalServerError().finish())).responder(),
     };
     state
         .db
-        .send(create_merchant.into_inner())
+        .send(create_merchant)
         .from_err()
         .and_then(|db_response| {
             let merchant = db_response?;
@@ -216,7 +217,7 @@ pub fn create_payment(
     (merchant, merchant_id, payment_req, state): (
         BasicAuth<Merchant>,
         Path<String>,
-        Json<CreatePaymentRequest>,
+        SimpleJson<CreatePaymentRequest>,
         State<AppState>,
     ),
 ) -> FutureResponse<HttpResponse> {
@@ -387,7 +388,7 @@ pub fn post_totp(
 }
 
 pub fn make_payment(
-    (slate, payment, state): (Json<Slate>, Path<GetNewPayment>, State<AppState>),
+    (slate, payment, state): (SimpleJson<Slate>, Path<GetNewPayment>, State<AppState>),
 ) -> FutureResponse<HttpResponse, Error> {
     let slate_amount = slate.amount;
     state
@@ -621,7 +622,7 @@ pub fn generate_slate(
 
 pub fn accept_slate(
     (slate, tx_id, req, state): (
-        Json<Slate>,
+        SimpleJson<Slate>,
         Path<Uuid>,
         HttpRequest<AppState>,
         State<AppState>,
@@ -665,7 +666,7 @@ pub fn accept_slate(
 }
 
 pub fn withdraw_confirmation(
-    (slate, req, state): (Json<Slate>, HttpRequest<AppState>, State<AppState>),
+    (slate, req, state): (SimpleJson<Slate>, HttpRequest<AppState>, State<AppState>),
 ) -> Result<HttpResponse, Error> {
     Ok(HttpResponse::Ok().body("hello"))
 }

@@ -55,9 +55,7 @@ pub fn create_app(
         })
         .resource("/merchants/{merchant_id}/payments/{transaction_id}", |r| {
             r.method(Method::GET).with(get_payment);
-            r.method(Method::POST).with_config(make_payment, |cfg| {
-                (cfg.0).0.content_type(|_| true);
-            });
+            r.method(Method::POST).with(make_payment);
         })
         .resource(
             "/merchants/{merchant_id}/payments/{transaction_id}/status",
@@ -68,9 +66,7 @@ pub fn create_app(
         .resource(
             "/merchants/{merchant_id}/payments/{transaction_id}/{grin_path:.*}",
             |r| {
-                r.method(Method::POST).with_config(make_payment, |cfg| {
-                    (cfg.0).0.content_type(|_| true);
-                });
+                r.method(Method::POST).with(make_payment);
             },
         )
         .resource("/login", |r| {
@@ -94,16 +90,11 @@ pub fn create_app(
             r.method(Method::POST).with(create_payout);
         })
         .resource("/withdraw/confirm", |r| {
-            r.method(Method::POST)
-                .with_config(withdraw_confirmation, |cfg| {
-                    (cfg.0).0.content_type(|_| true);
-                });
+            r.method(Method::POST).with(withdraw_confirmation);
         })
         .resource("/payouts/{id}", |r| {
             r.method(Method::GET).with(get_payout);
-            r.method(Method::POST).with_config(accept_slate, |cfg| {
-                (cfg.0).0.content_type(|_| true);
-            })
+            r.method(Method::POST).with(accept_slate)
         })
         .resource("/payouts/{id}/knockturn-payout.grinslate", |r| {
             r.method(Method::GET).with(generate_slate);
