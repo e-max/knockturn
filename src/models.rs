@@ -122,7 +122,7 @@ impl Transaction {
                 Some(self.created_at + Duration::seconds(NEW_PAYOUT_TTL_SECONDS))
             }
             (TransactionType::Payout, TransactionStatus::Initialized) => {
-                Some(self.created_at + Duration::seconds(PENDING_PAYOUT_TTL_SECONDS))
+                Some(self.created_at + Duration::seconds(INITIALIZED_PAYOUT_TTL_SECONDS))
             }
             (TransactionType::Payout, TransactionStatus::Pending) => {
                 Some(self.updated_at + Duration::seconds(PENDING_PAYOUT_TTL_SECONDS))
@@ -267,4 +267,77 @@ pub struct Rate {
     pub id: String,
     pub rate: f64,
     pub updated_at: NaiveDateTime,
+}
+
+#[cfg(test)]
+mod tests {
+
+    use crate::filters::duration;
+    use crate::models::*;
+    fn create_tx() -> Transaction {
+        Transaction {
+            id: Uuid::new_v4(),
+            external_id: s!(""),
+            merchant_id: s!(""),
+            grin_amount: 1000000,
+            amount: Money::from_grin(1000000),
+            status: TransactionStatus::New,
+            confirmations: 3,
+            email: None,
+            created_at: Utc::now().naive_utc(),
+            updated_at: Utc::now().naive_utc(),
+            reported: false,
+            report_attempts: 0,
+            next_report_attempt: None,
+            wallet_tx_id: None,
+            wallet_tx_slate_id: None,
+            message: s!("msg"),
+            slate_messages: None,
+            knockturn_fee: None,
+            transfer_fee: None,
+            real_transfer_fee: None,
+            transaction_type: TransactionType::Payment,
+        }
+    }
+
+    fn approximately(expect: i64, real: i64) -> bool {
+        let ratio = expect as f64 / real as f64;
+        ratio > 0.99 && ratio < 1.01
+    }
+    #[test]
+    fn test_expiration_date() {
+        let mut tx = create_tx();
+        tx.status = TransactionStatus::New;
+        assert!(approximately(
+            tx.time_until_expired().unwrap().num_seconds(),
+            NEW_PAYMENT_TTL_SECONDS
+        ));
+        tx.status = TransactionStatus::Pending;
+        assert!(approximately(
+            tx.time_until_expired().unwrap().num_seconds(),
+            PENDING_PAYMENT_TTL_SECONDS
+        ));
+
+        tx.status = TransactionStatus::Confirmed;
+        assert!(tx.time_until_expired() == None);
+
+        tx.transaction_type = TransactionType::Payout;
+        tx.status = TransactionStatus::New;
+        assert!(approximately(
+            tx.time_until_expired().unwrap().num_seconds(),
+            NEW_PAYOUT_TTL_SECONDS
+        ));
+        tx.status = TransactionStatus::Initialized;
+        assert!(approximately(
+            tx.time_until_expired().unwrap().num_seconds(),
+            INITIALIZED_PAYOUT_TTL_SECONDS
+        ));
+        tx.status = TransactionStatus::Pending;
+        assert!(approximately(
+            tx.time_until_expired().unwrap().num_seconds(),
+            PENDING_PAYOUT_TTL_SECONDS
+        ));
+        tx.status = TransactionStatus::Confirmed;
+        assert!(tx.time_until_expired() == None);
+    }
 }

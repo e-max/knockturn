@@ -506,13 +506,8 @@ mod tests {
 
     #[test]
     fn wallet_get_tx_test() {
-        get_tx();
         assert!(true);
     }
     #[test]
-    fn txs_read_test() {
-        TxListResp = from_slice(s.as_bytes()).map_err(|e| {
-            error!("Cannot decode json {:?}:\n with error {} ", s, e);
-        })?;
-    }
+    fn txs_read_test() {}
 }
