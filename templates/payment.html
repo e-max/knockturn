@@ -9,15 +9,16 @@
 
 {% block content %}
 
-<h1>Payment {{transaction_id}} to a merchant {{merchant_id}}</h1>
-	<table>
-		<tr><td colspan=2>Send {{grin_amount}} to:</td></tr>
-		<tr><td colspan=2><pre>grin --floonet wallet send -s smallest -d {{payment_url}} {{grin_amount.amount()}}</pre></td></tr>
-		<tr><td>Status: </td> <td>{{status}}</td></tr>
-		{% if time_until_expired.is_some() -%}
-		<tr><td>Time until expired </td> <td>{{time_until_expired.unwrap()}}</td></tr>
-		{%- endif -%}
-		<tr><td>Amount: </td><td>{{amount}}</td></tr>
+<h1>Payment {{payment.external_id}} to a merchant {{payment.merchant_id}}</h1>
+	<table class="table">
+		<tr><td colspan=2>Send {{payment.grin_amount|grin}} to:</td></tr>
+		<tr><td colspan=2><pre>grin --floonet wallet send -s smallest -d {{payment_url}} {{payment.grin_amount}}</pre></td></tr>
+		<tr><td >Status:</td><td class="table-{{payment.color()}}">{{payment.status}}</td></tr>
+		{% if payment.time_until_expired().is_some() -%}
+		<tr><td >Expired in:</td><td >{{payment.time_until_expired().unwrap()|duration}}</td></tr>
+		{%- endif %}
+		<tr><td>Amount: </td><td>{{payment.amount}}</td></tr>
+		<tr><td>Message: </td><td>{{payment.message}}</td></tr>
 	</table>
 
 {% endblock %}

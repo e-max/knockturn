@@ -153,33 +153,42 @@ impl Currency {
             Currency::EUR | Currency::USD => 100,
         }
     }
+
+    fn symbol(&self) -> &'static str {
+        match self {
+            Currency::BTC => "BTC",
+            Currency::GRIN => "ツ",
+            Currency::EUR => "€",
+            Currency::USD => "$",
+        }
+    }
 }
 
 impl fmt::Display for Currency {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let s = match self {
-            Currency::BTC => "BTC",
-            Currency::GRIN => "ツ",
-            Currency::EUR => "€",
-            Currency::USD => "$",
+            Currency::BTC => s!("BTC"),
+            Currency::GRIN => s!("GRIN"),
+            Currency::EUR => s!("EUR"),
+            Currency::USD => s!("USD"),
         };
         write!(f, "{}", s)
     }
 }
 
-impl std::str::FromStr for Currency {
-    type Err = Error;
+//impl std::str::FromStr for Currency {
+//type Err = Error;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_uppercase().as_str() {
-            "GRIN" => Ok(Currency::GRIN),
-            "BTC" => Ok(Currency::BTC),
-            "USD" => Ok(Currency::USD),
-            "EUR" => Ok(Currency::EUR),
-            _ => Err(Error::UnsupportedCurrency(s!(s))),
-        }
-    }
-}
+//fn from_str(s: &str) -> Result<Self, Self::Err> {
+//match s.to_uppercase().as_str() {
+//"GRIN" => Ok(Currency::GRIN),
+//"BTC" => Ok(Currency::BTC),
+//"USD" => Ok(Currency::USD),
+//"EUR" => Ok(Currency::EUR),
+//_ => Err(Error::UnsupportedCurrency(s!(s))),
+//}
+//}
+//}
 
 #[derive(Debug, Serialize, Deserialize, AsExpression, FromSqlRow, Clone, Copy)]
 #[sql_type = "Jsonb"]
@@ -248,7 +257,7 @@ impl FromSql<Jsonb, Pg> for Money {
 
 impl fmt::Display for Money {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} {}", self.amount(), self.currency)
+        write!(f, "{} {}", self.amount(), self.currency.symbol())
     }
 }
 

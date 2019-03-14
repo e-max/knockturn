@@ -280,18 +280,13 @@ pub fn get_payment(
         .and_then(|db_response| {
             let transaction = db_response?;
             let html = PaymentTemplate {
-                transaction_id: transaction.id.to_string(),
-                merchant_id: transaction.merchant_id.clone(),
-                amount: transaction.amount,
-                grin_amount: Money::new(transaction.grin_amount, Currency::GRIN),
-                status: transaction.status.to_string(),
+                payment: &transaction,
                 payment_url: format!(
                     "{}/merchants/{}/payments/{}",
                     env::var("DOMAIN").unwrap().trim_end_matches('/'),
                     transaction.merchant_id,
                     transaction.id.to_string()
                 ),
-                time_until_expired: transaction.time_until_expired(),
             }
             .render()
             .map_err(|e| Error::from(e))?;
@@ -302,14 +297,9 @@ pub fn get_payment(
 
 #[derive(Template)]
 #[template(path = "payment.html")]
-struct PaymentTemplate {
-    transaction_id: String,
-    merchant_id: String,
-    status: String,
-    amount: Money,
-    grin_amount: Money,
+struct PaymentTemplate<'a> {
+    payment: &'a Transaction,
     payment_url: String,
-    time_until_expired: Option<Duration>,
 }
 
 #[derive(Template)]

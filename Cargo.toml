@@ -42,6 +42,7 @@ parking_lot = "0.7.1"
 http = "0.1.16"
 openssl = { version = "0.10", features = ["v110"] }
 diesel-derive-enum = {version="0.4.4", features = ["postgres"]}
+chrono-humanize = "0.0.11"
 
 [build-dependencies]
 askama = "0.6"
