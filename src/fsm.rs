@@ -23,6 +23,7 @@ use diesel::{self, prelude::*};
 use futures::future::{Either, Future};
 use log::{debug, error, warn};
 use serde::{Deserialize, Serialize};
+use std::fmt::Write;
 use uuid::Uuid;
 
 pub const MINIMAL_WITHDRAW: i64 = 1_000_000_000;
@@ -77,6 +78,7 @@ impl Message for CreatePayment {
 pub struct MakePayment {
     pub new_payment: NewPayment,
     pub wallet_tx: TxLogEntry,
+    pub commit: Vec<u8>,
 }
 
 impl Message for MakePayment {
@@ -192,6 +194,7 @@ impl Message for CreatePayout {
 pub struct InitializePayout {
     pub new_payout: NewPayout,
     pub wallet_tx: TxLogEntry,
+    pub commit: Vec<u8>,
 }
 
 impl Message for InitializePayout {
@@ -334,6 +337,14 @@ impl Handler<GetNewPayment> for Fsm {
     }
 }
 
+pub fn to_hex(bytes: Vec<u8>) -> String {
+    let mut s = String::new();
+    for byte in bytes {
+        write!(&mut s, "{:02x}", byte).expect("Unable to write");
+    }
+    s
+}
+
 impl Handler<MakePayment> for Fsm {
     type Result = ResponseFuture<PendingPayment, Error>;
 
@@ -361,6 +372,7 @@ impl Handler<MakePayment> for Fsm {
                     slate_messages.eq(messages),
                     real_transfer_fee.eq(msg.wallet_tx.fee.map(|fee| fee as i64)),
                     status.eq(TransactionStatus::Pending),
+                    commit.eq(to_hex(msg.commit)),
                 ))
                 .get_result(conn)
                 .map_err::<Error, _>(|e| e.into())?;
@@ -665,6 +677,8 @@ impl Handler<CreatePayout> for Fsm {
                         knockturn_fee: Some(msg.amount.knockturn_fee()),
                         real_transfer_fee: None,
                         transaction_type: TransactionType::Payout,
+                        height: None,
+                        commit: None,
                     };
 
                     use crate::schema::transactions;
@@ -734,6 +748,7 @@ impl Handler<InitializePayout> for Fsm {
                     slate_messages.eq(messages),
                     real_transfer_fee.eq(msg.wallet_tx.fee.map(|fee| fee as i64)),
                     status.eq(TransactionStatus::Initialized),
+                    commit.eq(to_hex(msg.commit)),
                 ))
                 .get_result(conn)
                 .map_err::<Error, _>(|e| e.into())?;

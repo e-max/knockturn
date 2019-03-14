@@ -411,12 +411,14 @@ pub fn make_payment(
             move |new_payment| {
                 let slate = wallet.receive(&slate);
                 slate.and_then(move |slate| {
+                    let commit = slate.tx.output_commitments()[0].clone();
                     wallet
                         .get_tx(&slate.id.hyphenated().to_string())
                         .and_then(move |wallet_tx| {
                             fsm.send(MakePayment {
                                 new_payment,
                                 wallet_tx,
+                                commit,
                             })
                             .from_err()
                             .and_then(|db_response| {
@@ -599,9 +601,11 @@ pub fn generate_slate(
         .and_then({
             let fsm = state.fsm.clone();
             move |(new_payout, slate, wallet_tx)| {
+                let commit = slate.tx.output_commitments()[0].clone();
                 fsm.send(InitializePayout {
                     new_payout,
                     wallet_tx,
+                    commit,
                 })
                 .from_err()
                 .and_then(|db_response| {

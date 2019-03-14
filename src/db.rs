@@ -363,6 +363,8 @@ impl Handler<CreateTransaction> for DbExecutor {
             knockturn_fee: None,
             real_transfer_fee: None,
             transaction_type: msg.transaction_type,
+            height: None,
+            commit: None,
         };
 
         diesel::insert_into(transactions)

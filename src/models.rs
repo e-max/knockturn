@@ -100,6 +100,10 @@ pub struct Transaction {
     #[serde(skip_serializing)]
     pub real_transfer_fee: Option<i64>,
     pub transaction_type: TransactionType,
+    #[serde(skip_serializing)]
+    pub height: Option<i64>,
+    #[serde(skip_serializing)]
+    pub commit: Option<String>,
 }
 
 impl Transaction {
@@ -297,6 +301,8 @@ mod tests {
             transfer_fee: None,
             real_transfer_fee: None,
             transaction_type: TransactionType::Payment,
+            height: None,
+            output: None,
         }
     }
 
