@@ -2,7 +2,7 @@ use crate::blocking;
 use crate::clients::BearerTokenAuth;
 use crate::db::{
     self, CreateTransaction, DbExecutor, GetMerchant, GetPayment, GetTransaction, MarkAsReported,
-    ReportAttempt, UpdateTransactionStatus, UpdateTransactionWithTxLog,
+    ReportAttempt, UpdateTransactionStatus,
 };
 use crate::errors::Error;
 use crate::models::Merchant;
@@ -348,36 +348,26 @@ impl Handler<MakePayment> for Fsm {
                 .collect()
         });
 
-        let msg = UpdateTransactionWithTxLog {
-            transaction_id: transaction_id.clone(),
-            wallet_tx_id: wallet_tx.id as i64,
-            wallet_tx_slate_id: wallet_tx.tx_slate_id.unwrap(),
-            messages: messages,
-            fee: wallet_tx.fee,
-        };
-        let res = self
-            .db
-            .send(msg)
-            .from_err()
-            .and_then(|db_response| {
-                db_response?;
-                Ok(())
-            })
-            .and_then({
-                let db = self.db.clone();
-                let transaction_id = transaction_id.clone();
-                move |_| {
-                    db.send(UpdateTransactionStatus {
-                        id: transaction_id,
-                        status: TransactionStatus::Pending,
-                    })
-                    .from_err()
-                }
-            })
-            .and_then(|db_response| {
-                let transaction = db_response?;
-                Ok(PendingPayment(transaction))
-            });
+        let pool = self.pool.clone();
+
+        let res = blocking::run(move || {
+            use crate::schema::transactions::dsl::*;
+            let conn: &PgConnection = &pool.get().unwrap();
+
+            let transaction = diesel::update(transactions.filter(id.eq(transaction_id.clone())))
+                .set((
+                    wallet_tx_id.eq(msg.wallet_tx.id as i64),
+                    wallet_tx_slate_id.eq(msg.wallet_tx.tx_slate_id.unwrap()),
+                    slate_messages.eq(messages),
+                    real_transfer_fee.eq(msg.wallet_tx.fee.map(|fee| fee as i64)),
+                    status.eq(TransactionStatus::Pending),
+                ))
+                .get_result(conn)
+                .map_err::<Error, _>(|e| e.into())?;
+            Ok(PendingPayment(transaction))
+        })
+        .from_err();
+
         Box::new(res)
     }
 }
@@ -731,36 +721,26 @@ impl Handler<InitializePayout> for Fsm {
                 .collect()
         });
 
-        let msg = UpdateTransactionWithTxLog {
-            transaction_id: transaction_id.clone(),
-            wallet_tx_id: wallet_tx.id as i64,
-            wallet_tx_slate_id: wallet_tx.tx_slate_id.unwrap(),
-            messages: messages,
-            fee: wallet_tx.fee,
-        };
-        let res = self
-            .db
-            .send(msg)
-            .from_err()
-            .and_then(|db_response| {
-                db_response?;
-                Ok(())
-            })
-            .and_then({
-                let db = self.db.clone();
-                let transaction_id = transaction_id.clone();
-                move |_| {
-                    db.send(UpdateTransactionStatus {
-                        id: transaction_id,
-                        status: TransactionStatus::Initialized,
-                    })
-                    .from_err()
-                }
-            })
-            .and_then(|db_response| {
-                let transaction = db_response?;
-                Ok(InitializedPayout(transaction))
-            });
+        let pool = self.pool.clone();
+
+        let res = blocking::run(move || {
+            use crate::schema::transactions::dsl::*;
+            let conn: &PgConnection = &pool.get().unwrap();
+
+            let transaction = diesel::update(transactions.filter(id.eq(transaction_id.clone())))
+                .set((
+                    wallet_tx_id.eq(msg.wallet_tx.id as i64),
+                    wallet_tx_slate_id.eq(msg.wallet_tx.tx_slate_id.unwrap()),
+                    slate_messages.eq(messages),
+                    real_transfer_fee.eq(msg.wallet_tx.fee.map(|fee| fee as i64)),
+                    status.eq(TransactionStatus::Initialized),
+                ))
+                .get_result(conn)
+                .map_err::<Error, _>(|e| e.into())?;
+            Ok(InitializedPayout(transaction))
+        })
+        .from_err();
+
         Box::new(res)
     }
 }

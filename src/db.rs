@@ -121,15 +121,6 @@ pub struct Reset2FA {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct UpdateTransactionWithTxLog {
-    pub transaction_id: Uuid,
-    pub wallet_tx_id: i64,
-    pub wallet_tx_slate_id: String,
-    pub messages: Option<Vec<String>>,
-    pub fee: Option<u64>,
-}
-
-#[derive(Debug, Deserialize)]
 pub struct RejectExpiredPayments;
 
 impl Message for CreateMerchant {
@@ -196,10 +187,6 @@ impl Message for Confirm2FA {
 }
 
 impl Message for Reset2FA {
-    type Result = Result<(), Error>;
-}
-
-impl Message for UpdateTransactionWithTxLog {
     type Result = Result<(), Error>;
 }
 
@@ -396,26 +383,6 @@ impl Handler<UpdateTransactionStatus> for DbExecutor {
             .set((status.eq(msg.status), updated_at.eq(Utc::now().naive_utc())))
             .get_result(conn)
             .map_err(|e| e.into())
-    }
-}
-
-impl Handler<UpdateTransactionWithTxLog> for DbExecutor {
-    type Result = Result<(), Error>;
-
-    fn handle(&mut self, msg: UpdateTransactionWithTxLog, _: &mut Self::Context) -> Self::Result {
-        use crate::schema::transactions::dsl::*;
-        let conn: &PgConnection = &self.0.get().unwrap();
-
-        diesel::update(transactions.filter(id.eq(msg.transaction_id)))
-            .set((
-                wallet_tx_id.eq(msg.wallet_tx_id),
-                wallet_tx_slate_id.eq(msg.wallet_tx_slate_id),
-                slate_messages.eq(msg.messages),
-                real_transfer_fee.eq(msg.fee.map(|fee| fee as i64)),
-            ))
-            .get_result(conn)
-            .map_err(|e| e.into())
-            .map(|_: Transaction| ())
     }
 }
 
