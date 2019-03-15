@@ -403,25 +403,35 @@ fn sync_with_node(cron: &mut Cron, _: &mut Context<Cron>) {
                     move || {
                         use crate::schema::transactions::dsl::*;
                         let conn: &PgConnection = &pool.get().unwrap();
-                        let txs = transactions
-                            .filter(commit.eq_any(commits.keys()))
-                            .load::<Transaction>(conn)?;
+                        conn.transaction(move || {
+                            let txs = transactions
+                                .filter(commit.eq_any(commits.keys()))
+                                .load::<Transaction>(conn)?;
 
-                        if txs.len() > 0 {
-                            debug!("Found {} transactions which got into chain", txs.len());
-                        }
-                        for tx in txs {
-                            diesel::update(transactions.filter(id.eq(tx.id.clone())))
-                                .set((
-                                    height.eq(commits.get(&tx.commit.unwrap()).unwrap()),
-                                    status.eq(TransactionStatus::InChain),
-                                ))
-                                .get_result(conn)
-                                .map(|_: Transaction| ())
-                                .map_err::<Error, _>(|e| e.into())?;
-                        }
-                        println!("\x1B[31;1m last_height\x1B[0m = {:?}", last_height);
-                        Ok(())
+                            if txs.len() > 0 {
+                                debug!("Found {} transactions which got into chain", txs.len());
+                            }
+                            for tx in txs {
+                                diesel::update(transactions.filter(id.eq(tx.id.clone())))
+                                    .set((
+                                        height.eq(commits.get(&tx.commit.unwrap()).unwrap()),
+                                        status.eq(TransactionStatus::InChain),
+                                    ))
+                                    .get_result(conn)
+                                    .map(|_: Transaction| ())
+                                    .map_err::<Error, _>(|e| e.into())?;
+                            }
+                            {
+                                debug!("Set new last_height = {}", new_height);
+                                use crate::schema::current_height::dsl::*;
+                                diesel::update(current_height)
+                                    .set(height.eq(new_height as i64))
+                                    .execute(conn)
+                                    .map(|_| ())
+                                    .map_err::<Error, _>(|e| e.into())?;
+                            }
+                            Ok(())
+                        })
                     }
                 })
                 .from_err()
