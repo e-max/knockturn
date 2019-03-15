@@ -331,7 +331,8 @@ fn sync_with_node(cron: &mut Cron, _: &mut Context<Cron>) {
                     .iter()
                     .flat_map(|block| block.outputs.iter())
                     .filter(|o| !o.is_coinbase())
-                    .map(|o| (o.commit.clone(), o.block_height as i64))
+                    .filter(|o| o.block_height.is_some())
+                    .map(|o| (o.commit.clone(), o.block_height.unwrap() as i64))
                     .collect();
                 println!("\x1B[33;1m commits\x1B[0m = {:?}", commits);
                 debug!("Found {} non coinbase outputs", commits.len());
