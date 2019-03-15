@@ -24,6 +24,7 @@ use actix_web::{
 use askama::Template;
 use bcrypt;
 use chrono::Duration;
+use chrono_humanize::{Accuracy, HumanTime, Tense};
 use data_encoding::BASE64;
 use diesel::pg::PgConnection;
 use diesel::{self, prelude::*};
@@ -272,7 +273,9 @@ pub fn create_payment(
 struct PaymentStatus {
     pub transaction_id: String,
     pub status: String,
+    pub reported: bool,
     pub seconds_until_expired: Option<i64>,
+    pub expired_in: Option<String>,
     pub current_confirmations: i64,
     pub required_confirmations: i64,
 }
@@ -299,8 +302,13 @@ pub fn get_payment_status(
                             transaction_id: tx.id.to_string(),
                             status: tx.status.to_string(),
                             seconds_until_expired: tx.time_until_expired().map(|d| d.num_seconds()),
+
+                            expired_in: tx.time_until_expired().map(|d| {
+                                HumanTime::from(d).to_text_en(Accuracy::Precise, Tense::Present)
+                            }),
                             current_confirmations: tx.current_confirmations(current_height),
                             required_confirmations: tx.confirmations,
+                            reported: tx.reported,
                         };
                         Ok(HttpResponse::Ok().json(payment_status))
                     })
