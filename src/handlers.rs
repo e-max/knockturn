@@ -39,6 +39,7 @@ struct IndexTemplate<'a> {
     merchant: &'a Merchant,
     transactions: Vec<Transaction>,
     last_payout: &'a Transaction,
+    current_height: i64,
 }
 
 pub fn index(
@@ -49,9 +50,9 @@ pub fn index(
         let merch_id = merchant.id.clone();
         let pool = req.state().pool.clone();
         move || {
+            let conn: &PgConnection = &pool.get().unwrap();
             let txs = {
                 use crate::schema::transactions::dsl::*;
-                let conn: &PgConnection = &pool.get().unwrap();
                 transactions
                     .filter(merchant_id.eq(merch_id.clone()))
                     .offset(0)
@@ -61,7 +62,6 @@ pub fn index(
             }?;
             let last_payout = {
                 use crate::schema::transactions::dsl::*;
-                let conn: &PgConnection = &pool.get().unwrap();
                 transactions
                     .filter(merchant_id.eq(merch_id))
                     .filter(transaction_type.eq(TransactionType::Payout))
@@ -69,15 +69,23 @@ pub fn index(
                     .first(conn)
                     .map_err::<Error, _>(|e| e.into())
             }?;
-            Ok((txs, last_payout))
+            let current_height = {
+                use crate::schema::current_height::dsl::*;
+                current_height
+                    .select(height)
+                    .first(conn)
+                    .map_err::<Error, _>(|e| e.into())
+            }?;
+            Ok((txs, last_payout, current_height))
         }
     })
     .from_err()
-    .and_then(move |(transactions, last_payout)| {
+    .and_then(move |(transactions, last_payout, current_height)| {
         let html = IndexTemplate {
             merchant: &merchant,
             transactions: transactions,
             last_payout: &last_payout,
+            current_height: current_height,
         }
         .render()
         .map_err(|e| Error::from(e))?;
@@ -90,6 +98,7 @@ pub fn index(
 #[template(path = "transactions.html")]
 struct TransactionsTemplate {
     transactions: Vec<Transaction>,
+    current_height: i64,
 }
 
 pub fn get_transactions(
@@ -102,19 +111,31 @@ pub fn get_transactions(
         move || {
             use crate::schema::transactions::dsl::*;
             let conn: &PgConnection = &pool.get().unwrap();
-            transactions
+            let txs = transactions
                 .filter(merchant_id.eq(merch_id))
                 .offset(0)
                 .limit(10)
                 .load::<Transaction>(conn)
-                .map_err(|e| e.into())
+                .map_err::<Error, _>(|e| e.into())?;
+
+            let current_height = {
+                use crate::schema::current_height::dsl::*;
+                current_height
+                    .select(height)
+                    .first(conn)
+                    .map_err::<Error, _>(|e| e.into())
+            }?;
+            Ok((txs, current_height))
         }
     })
     .from_err()
-    .and_then(|transactions| {
-        let html = TransactionsTemplate { transactions }
-            .render()
-            .map_err(|e| Error::from(e))?;
+    .and_then(|(transactions, current_height)| {
+        let html = TransactionsTemplate {
+            transactions,
+            current_height,
+        }
+        .render()
+        .map_err(|e| Error::from(e))?;
         Ok(HttpResponse::Ok().content_type("text/html").body(html))
     })
     .responder()
