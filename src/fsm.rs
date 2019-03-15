@@ -51,6 +51,9 @@ pub struct NewPayment(Transaction);
 #[derive(Debug, Deserialize, Clone, Deref)]
 pub struct PendingPayment(Transaction);
 
+#[derive(Debug, Deserialize, Clone, Deref)]
+pub struct InChainPayment(Transaction);
+
 #[derive(Debug, Deserialize, Clone, Deref, Serialize)]
 pub struct ConfirmedPayment(Transaction);
 
@@ -87,8 +90,7 @@ impl Message for MakePayment {
 
 #[derive(Debug, Deserialize)]
 pub struct ConfirmPayment {
-    pub payment: PendingPayment,
-    pub wallet_tx: TxLogEntry,
+    pub payment: InChainPayment,
 }
 
 impl Message for ConfirmPayment {
@@ -174,6 +176,9 @@ pub struct InitializedPayout(Transaction);
 pub struct PendingPayout(Transaction);
 
 #[derive(Debug, Serialize, Deserialize, Clone, Deref)]
+pub struct InChainPayout(Transaction);
+
+#[derive(Debug, Serialize, Deserialize, Clone, Deref)]
 pub struct ConfirmedPayout(Transaction);
 
 #[derive(Debug, Serialize, Deserialize, Clone, Deref)]
@@ -212,8 +217,7 @@ impl Message for FinalizePayout {
 
 #[derive(Debug, Deserialize)]
 pub struct ConfirmPayout {
-    pub pending_payout: PendingPayout,
-    pub wallet_tx: TxLogEntry,
+    pub payout: InChainPayout,
 }
 
 impl Message for ConfirmPayout {
@@ -406,7 +410,7 @@ impl Handler<ConfirmPayment> for Fsm {
     fn handle(&mut self, msg: ConfirmPayment, _: &mut Self::Context) -> Self::Result {
         let tx_msg = db::ConfirmTransaction {
             transaction: msg.payment.0,
-            confirmed_at: msg.wallet_tx.confirmation_ts.map(|dt| dt.naive_utc()),
+            confirmed_at: Some(Utc::now().naive_utc()),
         };
         Box::new(self.db.send(tx_msg).from_err().and_then(|res| {
             let tx = res?;
@@ -831,8 +835,8 @@ impl Handler<ConfirmPayout> for Fsm {
 
     fn handle(&mut self, msg: ConfirmPayout, _: &mut Self::Context) -> Self::Result {
         let tx_msg = db::ConfirmTransaction {
-            transaction: msg.pending_payout.0,
-            confirmed_at: msg.wallet_tx.confirmation_ts.map(|dt| dt.naive_utc()),
+            transaction: msg.payout.0,
+            confirmed_at: Some(Utc::now().naive_utc()),
         };
         Box::new(self.db.send(tx_msg).from_err().and_then(|res| {
             let tx = res?;
