@@ -20,6 +20,8 @@ pub const NEW_PAYOUT_TTL_SECONDS: i64 = 5 * 60; //5  minutes since creation time
 pub const INITIALIZED_PAYOUT_TTL_SECONDS: i64 = 5 * 60; //5  minutes since creation time
 pub const PENDING_PAYOUT_TTL_SECONDS: i64 = 15 * 60; //15 minutes since became pending
 
+pub const WAIT_PER_CONFIRMATION_SECONDS: i64 = 5 * 60; // How long we wait per confirmation. E.g. if payment requires 5 confirmations we will wail 5 * WAIT_PER_CONFIRMATION_SECONDS
+
 #[derive(Debug, Serialize, Deserialize, Queryable, Insertable, Identifiable, Clone)]
 #[table_name = "merchants"]
 pub struct Merchant {
@@ -131,6 +133,10 @@ impl Transaction {
             (TransactionType::Payout, TransactionStatus::Pending) => {
                 Some(self.updated_at + Duration::seconds(PENDING_PAYOUT_TTL_SECONDS))
             }
+            (_, TransactionStatus::InChain) => Some(
+                self.updated_at
+                    + Duration::seconds(self.confirmations * WAIT_PER_CONFIRMATION_SECONDS),
+            ),
             (_, _) => None,
         };
         expiration_time.map(|exp_time| exp_time - Utc::now().naive_utc())
