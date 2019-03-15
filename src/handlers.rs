@@ -273,6 +273,8 @@ struct PaymentStatus {
     pub transaction_id: String,
     pub status: String,
     pub seconds_until_expired: Option<i64>,
+    pub current_confirmations: i64,
+    pub required_confirmations: i64,
 }
 
 pub fn get_payment_status(
@@ -280,16 +282,29 @@ pub fn get_payment_status(
 ) -> FutureResponse<HttpResponse> {
     state
         .db
-        .send(get_transaction.into_inner())
+        .send(GetCurrentHeight)
         .from_err()
         .and_then(|db_response| {
-            let tx = db_response?;
-            let payment_status = PaymentStatus {
-                transaction_id: tx.id.to_string(),
-                status: tx.status.to_string(),
-                seconds_until_expired: tx.time_until_expired().map(|d| d.num_seconds()),
-            };
-            Ok(HttpResponse::Ok().json(payment_status))
+            let height = db_response?;
+            Ok(height)
+        })
+        .and_then({
+            let db = state.db.clone();
+            move |current_height| {
+                db.send(get_transaction.into_inner())
+                    .from_err()
+                    .and_then(move |db_response| {
+                        let tx = db_response?;
+                        let payment_status = PaymentStatus {
+                            transaction_id: tx.id.to_string(),
+                            status: tx.status.to_string(),
+                            seconds_until_expired: tx.time_until_expired().map(|d| d.num_seconds()),
+                            current_confirmations: tx.current_confirmations(current_height),
+                            required_confirmations: tx.confirmations,
+                        };
+                        Ok(HttpResponse::Ok().json(payment_status))
+                    })
+            }
         })
         .responder()
 }
