@@ -1,3 +1,4 @@
+use crate::blocking;
 use crate::db::{DbExecutor, RejectExpiredPayments};
 use crate::errors::Error;
 use crate::fsm::{
@@ -5,16 +6,27 @@ use crate::fsm::{
     GetPendingPayments, GetPendingPayouts, GetUnreportedPayments, RejectPayment, RejectPayout,
     ReportPayment,
 };
+use crate::models::{Transaction, TransactionStatus};
+use crate::node::Node;
+use crate::node::Output;
 use crate::rates::RatesFetcher;
 use crate::wallet::Wallet;
 use actix::prelude::*;
+use diesel::pg::PgConnection;
+use diesel::r2d2::{ConnectionManager, Pool};
+use diesel::{self, prelude::*};
 use futures::future::{join_all, ok, Either, Future};
 use log::*;
+use std::collections::HashMap;
+
+const REQUST_BLOCKS_FROM_NODE: i64 = 10;
 
 pub struct Cron {
     db: Addr<DbExecutor>,
     wallet: Wallet,
+    node: Node,
     fsm: Addr<Fsm>,
+    pool: Pool<ConnectionManager<PgConnection>>,
 }
 
 impl Actor for Cron {
@@ -38,6 +50,7 @@ impl Actor for Cron {
             process_expired_initialized_payouts,
         );
         ctx.run_interval(std::time::Duration::new(5, 0), process_pending_payouts);
+        ctx.run_interval(std::time::Duration::new(5, 0), sync_with_node);
     }
 
     fn stopping(&mut self, _ctx: &mut Self::Context) -> Running {
@@ -46,8 +59,20 @@ impl Actor for Cron {
 }
 
 impl Cron {
-    pub fn new(db: Addr<DbExecutor>, wallet: Wallet, fsm: Addr<Fsm>) -> Self {
-        Cron { db, wallet, fsm }
+    pub fn new(
+        db: Addr<DbExecutor>,
+        wallet: Wallet,
+        fsm: Addr<Fsm>,
+        node: Node,
+        pool: Pool<ConnectionManager<PgConnection>>,
+    ) -> Self {
+        Cron {
+            db,
+            wallet,
+            fsm,
+            node,
+            pool,
+        }
     }
 }
 fn reject_expired_payments(cron: &mut Cron, _: &mut Context<Cron>) {
@@ -334,4 +359,73 @@ fn process_pending_payouts(cron: &mut Cron, _: &mut Context<Cron>) {
             join_all(futures).map(|_| ())
         });
     actix::spawn(res.map_err(|e| error!("Got an error in processing penging payouts {}", e)));
+}
+
+fn sync_with_node(cron: &mut Cron, _: &mut Context<Cron>) {
+    debug!("run sync_with_node");
+    let pool = cron.pool.clone();
+    let node = cron.node.clone();
+    let res = blocking::run({
+        let pool = pool.clone();
+        move || {
+            use crate::schema::current_height::dsl::*;
+            let conn: &PgConnection = &pool.get().unwrap();
+            let last_height: i64 = current_height.select(height).first(conn)?;
+            println!("\x1B[31;1m last_height\x1B[0m = {:?}", last_height);
+            Ok(last_height)
+        }
+    })
+    .map_err(|e| e.into())
+    .and_then(move |last_height| {
+        node.blocks(last_height, last_height + REQUST_BLOCKS_FROM_NODE)
+            .and_then(move |blocks| {
+                //println!("\x1B[31;1m blocks\x1B[0m = {:?}", blocks);
+                let new_height = blocks
+                    .iter()
+                    .fold(last_height as u64, |current_height, block| {
+                        if block.header.height > current_height {
+                            block.header.height
+                        } else {
+                            current_height
+                        }
+                    });
+                println!("\x1B[32;1m new_height\x1B[0m = {:?}", new_height);
+                let commits: HashMap<String, i64> = blocks
+                    .iter()
+                    .flat_map(|block| block.outputs.iter())
+                    .filter(|o| !o.is_coinbase())
+                    .map(|o| (o.commit.clone(), o.block_height as i64))
+                    .collect();
+                println!("\x1B[33;1m commits\x1B[0m = {:?}", commits);
+                debug!("Found {} non coinbase outputs", commits.len());
+                blocking::run({
+                    let pool = pool.clone();
+                    move || {
+                        use crate::schema::transactions::dsl::*;
+                        let conn: &PgConnection = &pool.get().unwrap();
+                        let txs = transactions
+                            .filter(commit.eq_any(commits.keys()))
+                            .load::<Transaction>(conn)?;
+
+                        if txs.len() > 0 {
+                            debug!("Found {} transactions which got into chain", txs.len());
+                        }
+                        for tx in txs {
+                            diesel::update(transactions.filter(id.eq(tx.id.clone())))
+                                .set((
+                                    height.eq(commits.get(&tx.commit.unwrap()).unwrap()),
+                                    status.eq(TransactionStatus::InChain),
+                                ))
+                                .get_result(conn)
+                                .map(|_: Transaction| ())
+                                .map_err::<Error, _>(|e| e.into())?;
+                        }
+                        println!("\x1B[31;1m last_height\x1B[0m = {:?}", last_height);
+                        Ok(())
+                    }
+                })
+                .from_err()
+            })
+    });
+    actix::spawn(res.map_err(|e: Error| error!("Got an error trying to sync with node: {}", e)));
 }

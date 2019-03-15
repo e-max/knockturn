@@ -13,6 +13,7 @@ mod fsm;
 mod handlers;
 mod middleware;
 mod models;
+mod node;
 mod rates;
 mod schema;
 mod totp;
@@ -26,6 +27,7 @@ use actix_web::server;
 //use actix_web::{http, server, App, HttpRequest, Path};
 use crate::db::DbExecutor;
 use crate::fsm::Fsm;
+use crate::node::Node;
 use crate::wallet::Wallet;
 use diesel::{r2d2::ConnectionManager, PgConnection};
 use dotenv::dotenv;
@@ -59,6 +61,11 @@ fn main() {
 
     let wallet = Wallet::new(&wallet_url, &wallet_user, &wallet_pass);
 
+    let node_url = env::var("NODE_URL").expect("NODE_URL must be set");
+    let node_user = env::var("NODE_USER").expect("NODE_USER must be set");
+    let node_pass = env::var("NODE_PASS").expect("NODE_PASS must be set");
+    let node = Node::new(&node_url, &node_user, &node_pass);
+
     info!("Starting");
     let cron_db = address.clone();
 
@@ -71,7 +78,8 @@ fn main() {
     let _cron = Arbiter::start({
         let wallet = wallet.clone();
         let fsm = fsm.clone();
-        move |_| cron::Cron::new(cron_db, wallet, fsm)
+        let pool = pool.clone();
+        move |_| cron::Cron::new(cron_db, wallet, fsm, node, pool)
     });
 
     let mut srv = server::new(move || {

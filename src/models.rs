@@ -1,5 +1,5 @@
 use crate::errors::*;
-use crate::schema::{merchants, rates, transactions};
+use crate::schema::{current_height, merchants, rates, transactions};
 use chrono::{Duration, NaiveDateTime, Utc};
 use diesel::backend::Backend;
 use diesel::deserialize::{self, FromSql};
@@ -271,6 +271,11 @@ pub struct Rate {
     pub id: String,
     pub rate: f64,
     pub updated_at: NaiveDateTime,
+}
+#[derive(Debug, Serialize, Deserialize, Queryable, Insertable)]
+#[table_name = "current_height"]
+pub struct CurrentHeight {
+    pub height: i64,
 }
 
 #[cfg(test)]
