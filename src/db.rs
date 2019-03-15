@@ -121,6 +121,9 @@ pub struct Reset2FA {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct GetCurrentHeight;
+
+#[derive(Debug, Deserialize)]
 pub struct RejectExpiredPayments;
 
 impl Message for CreateMerchant {
@@ -192,6 +195,10 @@ impl Message for Reset2FA {
 
 impl Message for RejectExpiredPayments {
     type Result = Result<(), Error>;
+}
+
+impl Message for GetCurrentHeight {
+    type Result = Result<i64, Error>;
 }
 
 impl Handler<CreateMerchant> for DbExecutor {
@@ -564,5 +571,17 @@ impl Handler<RejectExpiredPayments> for DbExecutor {
             }
             ()
         })
+    }
+}
+impl Handler<GetCurrentHeight> for DbExecutor {
+    type Result = Result<i64, Error>;
+
+    fn handle(&mut self, msg: GetCurrentHeight, _: &mut Self::Context) -> Self::Result {
+        use crate::schema::current_height::dsl::*;
+        let conn: &PgConnection = &self.0.get().unwrap();
+        current_height
+            .select(height)
+            .first(conn)
+            .map_err(|e| e.into())
     }
 }

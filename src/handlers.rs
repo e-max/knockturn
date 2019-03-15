@@ -1,6 +1,8 @@
 use crate::app::AppState;
 use crate::blocking;
-use crate::db::{Confirm2FA, CreateMerchant, GetMerchant, GetTransaction, GetTransactions};
+use crate::db::{
+    Confirm2FA, CreateMerchant, GetCurrentHeight, GetMerchant, GetTransaction, GetTransactions,
+};
 use crate::errors::*;
 use crate::extractor::{BasicAuth, Identity, Session, SimpleJson};
 use crate::filters;
@@ -276,22 +278,34 @@ pub fn get_payment(
 ) -> FutureResponse<HttpResponse> {
     state
         .db
-        .send(get_transaction.into_inner())
+        .send(GetCurrentHeight)
         .from_err()
         .and_then(|db_response| {
-            let transaction = db_response?;
-            let html = PaymentTemplate {
-                payment: &transaction,
-                payment_url: format!(
-                    "{}/merchants/{}/payments/{}",
-                    env::var("DOMAIN").unwrap().trim_end_matches('/'),
-                    transaction.merchant_id,
-                    transaction.id.to_string()
-                ),
+            let height = db_response?;
+            Ok(height)
+        })
+        .and_then({
+            let db = state.db.clone();
+            move |current_height| {
+                db.send(get_transaction.into_inner())
+                    .from_err()
+                    .and_then(move |db_response| {
+                        let transaction = db_response?;
+                        let html = PaymentTemplate {
+                            payment: &transaction,
+                            payment_url: format!(
+                                "{}/merchants/{}/payments/{}",
+                                env::var("DOMAIN").unwrap().trim_end_matches('/'),
+                                transaction.merchant_id,
+                                transaction.id.to_string()
+                            ),
+                            current_height: current_height,
+                        }
+                        .render()
+                        .map_err(|e| Error::from(e))?;
+                        Ok(HttpResponse::Ok().content_type("text/html").body(html))
+                    })
             }
-            .render()
-            .map_err(|e| Error::from(e))?;
-            Ok(HttpResponse::Ok().content_type("text/html").body(html))
         })
         .responder()
 }
@@ -301,6 +315,7 @@ pub fn get_payment(
 struct PaymentTemplate<'a> {
     payment: &'a Transaction,
     payment_url: String,
+    current_height: i64,
 }
 
 #[derive(Template)]

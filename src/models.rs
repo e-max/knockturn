@@ -139,6 +139,13 @@ impl Transaction {
     pub fn grins(&self) -> Money {
         Money::new(self.grin_amount, Currency::GRIN)
     }
+
+    pub fn current_confirmations(&self, current_height: i64) -> i64 {
+        match self.height {
+            Some(height) => current_height - height,
+            None => 0,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]

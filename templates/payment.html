@@ -19,6 +19,9 @@
 		{%- endif %}
 		<tr><td>Amount: </td><td>{{payment.amount}}</td></tr>
 		<tr><td>Message: </td><td>{{payment.message}}</td></tr>
+		{% if payment.status == TransactionStatus::InChain -%}
+		<tr><td >Confirmations:</td><td >{{payment.current_confirmations(current_height)}}/{{payment.confirmations}}</td></tr>
+		{%- endif %}
 	</table>
 
 {% endblock %}
