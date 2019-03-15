@@ -41,7 +41,7 @@ pub struct Merchant {
  * The status of payment changes flow is as follows:
  * New - transaction was created but no attempts were maid to pay
  * Pending - user sent a slate and we succesfully sent it to wallet
- * Finalized - transaction was accepted to chain (Not used yet)
+ * InChain - transaction was accepted to chain
  * Confirmed - we got required number of confirmation for this transaction
  * Rejected - transaction spent too much time in New or Pending state
  *
@@ -57,7 +57,7 @@ pub enum TransactionStatus {
     New,
     Pending,
     Rejected,
-    Finalized,
+    InChain,
     Confirmed,
     Initialized,
 }
