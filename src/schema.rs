@@ -1,4 +1,10 @@
 table! {
+    current_height (height) {
+        height -> Int8,
+    }
+}
+
+table! {
     merchants (id) {
         id -> Text,
         email -> Varchar,
@@ -29,7 +35,7 @@ table! {
         grin_amount -> Int8,
         amount -> Jsonb,
         status -> crate::models::TransactionStatusMapping,
-        confirmations -> Int4,
+        confirmations -> Int8,
         email -> Nullable<Text>,
         created_at -> Timestamp,
         updated_at -> Timestamp,
@@ -44,6 +50,8 @@ table! {
         transfer_fee -> Nullable<Int8>,
         real_transfer_fee -> Nullable<Int8>,
         transaction_type -> crate::models::TransactionTypeMapping,
+        height -> Nullable<Int8>,
+        commit -> Nullable<Text>,
     }
 }
 
@@ -66,4 +74,4 @@ table! {
 joinable!(transactions -> merchants (merchant_id));
 joinable!(txs -> transactions (order_id));
 
-allow_tables_to_appear_in_same_query!(merchants, rates, transactions, txs,);
+allow_tables_to_appear_in_same_query!(current_height, merchants, rates, transactions, txs,);

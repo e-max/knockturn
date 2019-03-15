@@ -2,7 +2,7 @@ use crate::blocking;
 use crate::clients::BearerTokenAuth;
 use crate::db::{
     self, CreateTransaction, DbExecutor, GetMerchant, GetPayment, GetTransaction, MarkAsReported,
-    ReportAttempt, UpdateTransactionStatus, UpdateTransactionWithTxLog,
+    ReportAttempt, UpdateTransactionStatus,
 };
 use crate::errors::Error;
 use crate::models::Merchant;
@@ -23,6 +23,7 @@ use diesel::{self, prelude::*};
 use futures::future::{Either, Future};
 use log::{debug, error, warn};
 use serde::{Deserialize, Serialize};
+use std::fmt::Write;
 use uuid::Uuid;
 
 pub const MINIMAL_WITHDRAW: i64 = 1_000_000_000;
@@ -50,6 +51,9 @@ pub struct NewPayment(Transaction);
 #[derive(Debug, Deserialize, Clone, Deref)]
 pub struct PendingPayment(Transaction);
 
+#[derive(Debug, Deserialize, Clone, Deref)]
+pub struct InChainPayment(Transaction);
+
 #[derive(Debug, Deserialize, Clone, Deref, Serialize)]
 pub struct ConfirmedPayment(Transaction);
 
@@ -64,7 +68,7 @@ pub struct CreatePayment {
     pub merchant_id: String,
     pub external_id: String,
     pub amount: Money,
-    pub confirmations: i32,
+    pub confirmations: i64,
     pub email: Option<String>,
     pub message: String,
 }
@@ -77,6 +81,7 @@ impl Message for CreatePayment {
 pub struct MakePayment {
     pub new_payment: NewPayment,
     pub wallet_tx: TxLogEntry,
+    pub commit: Vec<u8>,
 }
 
 impl Message for MakePayment {
@@ -85,8 +90,7 @@ impl Message for MakePayment {
 
 #[derive(Debug, Deserialize)]
 pub struct ConfirmPayment {
-    pub payment: PendingPayment,
-    pub wallet_tx: TxLogEntry,
+    pub payment: InChainPayment,
 }
 
 impl Message for ConfirmPayment {
@@ -172,6 +176,9 @@ pub struct InitializedPayout(Transaction);
 pub struct PendingPayout(Transaction);
 
 #[derive(Debug, Serialize, Deserialize, Clone, Deref)]
+pub struct InChainPayout(Transaction);
+
+#[derive(Debug, Serialize, Deserialize, Clone, Deref)]
 pub struct ConfirmedPayout(Transaction);
 
 #[derive(Debug, Serialize, Deserialize, Clone, Deref)]
@@ -181,7 +188,7 @@ pub struct RejectedPayout(Transaction);
 pub struct CreatePayout {
     pub merchant_id: String,
     pub amount: i64,
-    pub confirmations: i32,
+    pub confirmations: i64,
 }
 
 impl Message for CreatePayout {
@@ -192,6 +199,7 @@ impl Message for CreatePayout {
 pub struct InitializePayout {
     pub new_payout: NewPayout,
     pub wallet_tx: TxLogEntry,
+    pub commit: Vec<u8>,
 }
 
 impl Message for InitializePayout {
@@ -209,8 +217,7 @@ impl Message for FinalizePayout {
 
 #[derive(Debug, Deserialize)]
 pub struct ConfirmPayout {
-    pub pending_payout: PendingPayout,
-    pub wallet_tx: TxLogEntry,
+    pub payout: InChainPayout,
 }
 
 impl Message for ConfirmPayout {
@@ -334,6 +341,14 @@ impl Handler<GetNewPayment> for Fsm {
     }
 }
 
+pub fn to_hex(bytes: Vec<u8>) -> String {
+    let mut s = String::new();
+    for byte in bytes {
+        write!(&mut s, "{:02x}", byte).expect("Unable to write");
+    }
+    s
+}
+
 impl Handler<MakePayment> for Fsm {
     type Result = ResponseFuture<PendingPayment, Error>;
 
@@ -348,36 +363,27 @@ impl Handler<MakePayment> for Fsm {
                 .collect()
         });
 
-        let msg = UpdateTransactionWithTxLog {
-            transaction_id: transaction_id.clone(),
-            wallet_tx_id: wallet_tx.id as i64,
-            wallet_tx_slate_id: wallet_tx.tx_slate_id.unwrap(),
-            messages: messages,
-            fee: wallet_tx.fee,
-        };
-        let res = self
-            .db
-            .send(msg)
-            .from_err()
-            .and_then(|db_response| {
-                db_response?;
-                Ok(())
-            })
-            .and_then({
-                let db = self.db.clone();
-                let transaction_id = transaction_id.clone();
-                move |_| {
-                    db.send(UpdateTransactionStatus {
-                        id: transaction_id,
-                        status: TransactionStatus::Pending,
-                    })
-                    .from_err()
-                }
-            })
-            .and_then(|db_response| {
-                let transaction = db_response?;
-                Ok(PendingPayment(transaction))
-            });
+        let pool = self.pool.clone();
+
+        let res = blocking::run(move || {
+            use crate::schema::transactions::dsl::*;
+            let conn: &PgConnection = &pool.get().unwrap();
+
+            let transaction = diesel::update(transactions.filter(id.eq(transaction_id.clone())))
+                .set((
+                    wallet_tx_id.eq(msg.wallet_tx.id as i64),
+                    wallet_tx_slate_id.eq(msg.wallet_tx.tx_slate_id.unwrap()),
+                    slate_messages.eq(messages),
+                    real_transfer_fee.eq(msg.wallet_tx.fee.map(|fee| fee as i64)),
+                    status.eq(TransactionStatus::Pending),
+                    commit.eq(to_hex(msg.commit)),
+                ))
+                .get_result(conn)
+                .map_err::<Error, _>(|e| e.into())?;
+            Ok(PendingPayment(transaction))
+        })
+        .from_err();
+
         Box::new(res)
     }
 }
@@ -404,7 +410,7 @@ impl Handler<ConfirmPayment> for Fsm {
     fn handle(&mut self, msg: ConfirmPayment, _: &mut Self::Context) -> Self::Result {
         let tx_msg = db::ConfirmTransaction {
             transaction: msg.payment.0,
-            confirmed_at: msg.wallet_tx.confirmation_ts.map(|dt| dt.naive_utc()),
+            confirmed_at: Some(Utc::now().naive_utc()),
         };
         Box::new(self.db.send(tx_msg).from_err().and_then(|res| {
             let tx = res?;
@@ -675,6 +681,8 @@ impl Handler<CreatePayout> for Fsm {
                         knockturn_fee: Some(msg.amount.knockturn_fee()),
                         real_transfer_fee: None,
                         transaction_type: TransactionType::Payout,
+                        height: None,
+                        commit: None,
                     };
 
                     use crate::schema::transactions;
@@ -731,36 +739,27 @@ impl Handler<InitializePayout> for Fsm {
                 .collect()
         });
 
-        let msg = UpdateTransactionWithTxLog {
-            transaction_id: transaction_id.clone(),
-            wallet_tx_id: wallet_tx.id as i64,
-            wallet_tx_slate_id: wallet_tx.tx_slate_id.unwrap(),
-            messages: messages,
-            fee: wallet_tx.fee,
-        };
-        let res = self
-            .db
-            .send(msg)
-            .from_err()
-            .and_then(|db_response| {
-                db_response?;
-                Ok(())
-            })
-            .and_then({
-                let db = self.db.clone();
-                let transaction_id = transaction_id.clone();
-                move |_| {
-                    db.send(UpdateTransactionStatus {
-                        id: transaction_id,
-                        status: TransactionStatus::Initialized,
-                    })
-                    .from_err()
-                }
-            })
-            .and_then(|db_response| {
-                let transaction = db_response?;
-                Ok(InitializedPayout(transaction))
-            });
+        let pool = self.pool.clone();
+
+        let res = blocking::run(move || {
+            use crate::schema::transactions::dsl::*;
+            let conn: &PgConnection = &pool.get().unwrap();
+
+            let transaction = diesel::update(transactions.filter(id.eq(transaction_id.clone())))
+                .set((
+                    wallet_tx_id.eq(msg.wallet_tx.id as i64),
+                    wallet_tx_slate_id.eq(msg.wallet_tx.tx_slate_id.unwrap()),
+                    slate_messages.eq(messages),
+                    real_transfer_fee.eq(msg.wallet_tx.fee.map(|fee| fee as i64)),
+                    status.eq(TransactionStatus::Initialized),
+                    commit.eq(to_hex(msg.commit)),
+                ))
+                .get_result(conn)
+                .map_err::<Error, _>(|e| e.into())?;
+            Ok(InitializedPayout(transaction))
+        })
+        .from_err();
+
         Box::new(res)
     }
 }
@@ -836,8 +835,8 @@ impl Handler<ConfirmPayout> for Fsm {
 
     fn handle(&mut self, msg: ConfirmPayout, _: &mut Self::Context) -> Self::Result {
         let tx_msg = db::ConfirmTransaction {
-            transaction: msg.pending_payout.0,
-            confirmed_at: msg.wallet_tx.confirmation_ts.map(|dt| dt.naive_utc()),
+            transaction: msg.payout.0,
+            confirmed_at: Some(Utc::now().naive_utc()),
         };
         Box::new(self.db.send(tx_msg).from_err().and_then(|res| {
             let tx = res?;

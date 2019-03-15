@@ -1,6 +1,8 @@
 use crate::app::AppState;
 use crate::blocking;
-use crate::db::{Confirm2FA, CreateMerchant, GetMerchant, GetTransaction, GetTransactions};
+use crate::db::{
+    Confirm2FA, CreateMerchant, GetCurrentHeight, GetMerchant, GetTransaction, GetTransactions,
+};
 use crate::errors::*;
 use crate::extractor::{BasicAuth, Identity, Session, SimpleJson};
 use crate::filters;
@@ -37,6 +39,7 @@ struct IndexTemplate<'a> {
     merchant: &'a Merchant,
     transactions: Vec<Transaction>,
     last_payout: &'a Transaction,
+    current_height: i64,
 }
 
 pub fn index(
@@ -47,9 +50,9 @@ pub fn index(
         let merch_id = merchant.id.clone();
         let pool = req.state().pool.clone();
         move || {
+            let conn: &PgConnection = &pool.get().unwrap();
             let txs = {
                 use crate::schema::transactions::dsl::*;
-                let conn: &PgConnection = &pool.get().unwrap();
                 transactions
                     .filter(merchant_id.eq(merch_id.clone()))
                     .offset(0)
@@ -59,7 +62,6 @@ pub fn index(
             }?;
             let last_payout = {
                 use crate::schema::transactions::dsl::*;
-                let conn: &PgConnection = &pool.get().unwrap();
                 transactions
                     .filter(merchant_id.eq(merch_id))
                     .filter(transaction_type.eq(TransactionType::Payout))
@@ -67,15 +69,23 @@ pub fn index(
                     .first(conn)
                     .map_err::<Error, _>(|e| e.into())
             }?;
-            Ok((txs, last_payout))
+            let current_height = {
+                use crate::schema::current_height::dsl::*;
+                current_height
+                    .select(height)
+                    .first(conn)
+                    .map_err::<Error, _>(|e| e.into())
+            }?;
+            Ok((txs, last_payout, current_height))
         }
     })
     .from_err()
-    .and_then(move |(transactions, last_payout)| {
+    .and_then(move |(transactions, last_payout, current_height)| {
         let html = IndexTemplate {
             merchant: &merchant,
             transactions: transactions,
             last_payout: &last_payout,
+            current_height: current_height,
         }
         .render()
         .map_err(|e| Error::from(e))?;
@@ -88,6 +98,7 @@ pub fn index(
 #[template(path = "transactions.html")]
 struct TransactionsTemplate {
     transactions: Vec<Transaction>,
+    current_height: i64,
 }
 
 pub fn get_transactions(
@@ -100,19 +111,31 @@ pub fn get_transactions(
         move || {
             use crate::schema::transactions::dsl::*;
             let conn: &PgConnection = &pool.get().unwrap();
-            transactions
+            let txs = transactions
                 .filter(merchant_id.eq(merch_id))
                 .offset(0)
                 .limit(10)
                 .load::<Transaction>(conn)
-                .map_err(|e| e.into())
+                .map_err::<Error, _>(|e| e.into())?;
+
+            let current_height = {
+                use crate::schema::current_height::dsl::*;
+                current_height
+                    .select(height)
+                    .first(conn)
+                    .map_err::<Error, _>(|e| e.into())
+            }?;
+            Ok((txs, current_height))
         }
     })
     .from_err()
-    .and_then(|transactions| {
-        let html = TransactionsTemplate { transactions }
-            .render()
-            .map_err(|e| Error::from(e))?;
+    .and_then(|(transactions, current_height)| {
+        let html = TransactionsTemplate {
+            transactions,
+            current_height,
+        }
+        .render()
+        .map_err(|e| Error::from(e))?;
         Ok(HttpResponse::Ok().content_type("text/html").body(html))
     })
     .responder()
@@ -208,7 +231,7 @@ pub fn get_merchant(
 pub struct CreatePaymentRequest {
     pub order_id: String,
     pub amount: Money,
-    pub confirmations: i32,
+    pub confirmations: i64,
     pub email: Option<String>,
     pub message: String,
 }
@@ -250,6 +273,8 @@ struct PaymentStatus {
     pub transaction_id: String,
     pub status: String,
     pub seconds_until_expired: Option<i64>,
+    pub current_confirmations: i64,
+    pub required_confirmations: i64,
 }
 
 pub fn get_payment_status(
@@ -257,16 +282,29 @@ pub fn get_payment_status(
 ) -> FutureResponse<HttpResponse> {
     state
         .db
-        .send(get_transaction.into_inner())
+        .send(GetCurrentHeight)
         .from_err()
         .and_then(|db_response| {
-            let tx = db_response?;
-            let payment_status = PaymentStatus {
-                transaction_id: tx.id.to_string(),
-                status: tx.status.to_string(),
-                seconds_until_expired: tx.time_until_expired().map(|d| d.num_seconds()),
-            };
-            Ok(HttpResponse::Ok().json(payment_status))
+            let height = db_response?;
+            Ok(height)
+        })
+        .and_then({
+            let db = state.db.clone();
+            move |current_height| {
+                db.send(get_transaction.into_inner())
+                    .from_err()
+                    .and_then(move |db_response| {
+                        let tx = db_response?;
+                        let payment_status = PaymentStatus {
+                            transaction_id: tx.id.to_string(),
+                            status: tx.status.to_string(),
+                            seconds_until_expired: tx.time_until_expired().map(|d| d.num_seconds()),
+                            current_confirmations: tx.current_confirmations(current_height),
+                            required_confirmations: tx.confirmations,
+                        };
+                        Ok(HttpResponse::Ok().json(payment_status))
+                    })
+            }
         })
         .responder()
 }
@@ -276,22 +314,34 @@ pub fn get_payment(
 ) -> FutureResponse<HttpResponse> {
     state
         .db
-        .send(get_transaction.into_inner())
+        .send(GetCurrentHeight)
         .from_err()
         .and_then(|db_response| {
-            let transaction = db_response?;
-            let html = PaymentTemplate {
-                payment: &transaction,
-                payment_url: format!(
-                    "{}/merchants/{}/payments/{}",
-                    env::var("DOMAIN").unwrap().trim_end_matches('/'),
-                    transaction.merchant_id,
-                    transaction.id.to_string()
-                ),
+            let height = db_response?;
+            Ok(height)
+        })
+        .and_then({
+            let db = state.db.clone();
+            move |current_height| {
+                db.send(get_transaction.into_inner())
+                    .from_err()
+                    .and_then(move |db_response| {
+                        let transaction = db_response?;
+                        let html = PaymentTemplate {
+                            payment: &transaction,
+                            payment_url: format!(
+                                "{}/merchants/{}/payments/{}",
+                                env::var("DOMAIN").unwrap().trim_end_matches('/'),
+                                transaction.merchant_id,
+                                transaction.id.to_string()
+                            ),
+                            current_height: current_height,
+                        }
+                        .render()
+                        .map_err(|e| Error::from(e))?;
+                        Ok(HttpResponse::Ok().content_type("text/html").body(html))
+                    })
             }
-            .render()
-            .map_err(|e| Error::from(e))?;
-            Ok(HttpResponse::Ok().content_type("text/html").body(html))
         })
         .responder()
 }
@@ -301,6 +351,7 @@ pub fn get_payment(
 struct PaymentTemplate<'a> {
     payment: &'a Transaction,
     payment_url: String,
+    current_height: i64,
 }
 
 #[derive(Template)]
@@ -411,12 +462,14 @@ pub fn make_payment(
             move |new_payment| {
                 let slate = wallet.receive(&slate);
                 slate.and_then(move |slate| {
+                    let commit = slate.tx.output_commitments()[0].clone();
                     wallet
                         .get_tx(&slate.id.hyphenated().to_string())
                         .and_then(move |wallet_tx| {
                             fsm.send(MakePayment {
                                 new_payment,
                                 wallet_tx,
+                                commit,
                             })
                             .from_err()
                             .and_then(|db_response| {
@@ -599,9 +652,11 @@ pub fn generate_slate(
         .and_then({
             let fsm = state.fsm.clone();
             move |(new_payout, slate, wallet_tx)| {
+                let commit = slate.tx.output_commitments()[0].clone();
                 fsm.send(InitializePayout {
                     new_payout,
                     wallet_tx,
+                    commit,
                 })
                 .from_err()
                 .and_then(|db_response| {

@@ -1,5 +1,5 @@
 use crate::errors::*;
-use crate::schema::{merchants, rates, transactions};
+use crate::schema::{current_height, merchants, rates, transactions};
 use chrono::{Duration, NaiveDateTime, Utc};
 use diesel::backend::Backend;
 use diesel::deserialize::{self, FromSql};
@@ -19,6 +19,8 @@ pub const PENDING_PAYMENT_TTL_SECONDS: i64 = 7 * 60; //7  minutes since became p
 pub const NEW_PAYOUT_TTL_SECONDS: i64 = 5 * 60; //5  minutes since creation time
 pub const INITIALIZED_PAYOUT_TTL_SECONDS: i64 = 5 * 60; //5  minutes since creation time
 pub const PENDING_PAYOUT_TTL_SECONDS: i64 = 15 * 60; //15 minutes since became pending
+
+pub const WAIT_PER_CONFIRMATION_SECONDS: i64 = 5 * 60; // How long we wait per confirmation. E.g. if payment requires 5 confirmations we will wail 5 * WAIT_PER_CONFIRMATION_SECONDS
 
 #[derive(Debug, Serialize, Deserialize, Queryable, Insertable, Identifiable, Clone)]
 #[table_name = "merchants"]
@@ -41,7 +43,7 @@ pub struct Merchant {
  * The status of payment changes flow is as follows:
  * New - transaction was created but no attempts were maid to pay
  * Pending - user sent a slate and we succesfully sent it to wallet
- * Finalized - transaction was accepted to chain (Not used yet)
+ * InChain - transaction was accepted to chain
  * Confirmed - we got required number of confirmation for this transaction
  * Rejected - transaction spent too much time in New or Pending state
  *
@@ -57,7 +59,7 @@ pub enum TransactionStatus {
     New,
     Pending,
     Rejected,
-    Finalized,
+    InChain,
     Confirmed,
     Initialized,
 }
@@ -79,7 +81,7 @@ pub struct Transaction {
     pub grin_amount: i64,
     pub amount: Money,
     pub status: TransactionStatus,
-    pub confirmations: i32,
+    pub confirmations: i64,
     pub email: Option<String>,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
@@ -100,6 +102,10 @@ pub struct Transaction {
     #[serde(skip_serializing)]
     pub real_transfer_fee: Option<i64>,
     pub transaction_type: TransactionType,
+    #[serde(skip_serializing)]
+    pub height: Option<i64>,
+    #[serde(skip_serializing)]
+    pub commit: Option<String>,
 }
 
 impl Transaction {
@@ -127,6 +133,10 @@ impl Transaction {
             (TransactionType::Payout, TransactionStatus::Pending) => {
                 Some(self.updated_at + Duration::seconds(PENDING_PAYOUT_TTL_SECONDS))
             }
+            (_, TransactionStatus::InChain) => Some(
+                self.updated_at
+                    + Duration::seconds(self.confirmations * WAIT_PER_CONFIRMATION_SECONDS),
+            ),
             (_, _) => None,
         };
         expiration_time.map(|exp_time| exp_time - Utc::now().naive_utc())
@@ -134,6 +144,13 @@ impl Transaction {
 
     pub fn grins(&self) -> Money {
         Money::new(self.grin_amount, Currency::GRIN)
+    }
+
+    pub fn current_confirmations(&self, current_height: i64) -> i64 {
+        match self.height {
+            Some(height) => current_height - height,
+            None => 0,
+        }
     }
 }
 
@@ -268,6 +285,11 @@ pub struct Rate {
     pub rate: f64,
     pub updated_at: NaiveDateTime,
 }
+#[derive(Debug, Serialize, Deserialize, Queryable, Insertable)]
+#[table_name = "current_height"]
+pub struct CurrentHeight {
+    pub height: i64,
+}
 
 #[cfg(test)]
 mod tests {
@@ -297,6 +319,8 @@ mod tests {
             transfer_fee: None,
             real_transfer_fee: None,
             transaction_type: TransactionType::Payment,
+            height: None,
+            output: None,
         }
     }
 

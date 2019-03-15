@@ -57,7 +57,7 @@ pub struct CreateTransaction {
     pub merchant_id: String,
     pub external_id: String,
     pub amount: Money,
-    pub confirmations: i32,
+    pub confirmations: i64,
     pub email: Option<String>,
     pub message: String,
     pub transaction_type: TransactionType,
@@ -121,13 +121,7 @@ pub struct Reset2FA {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct UpdateTransactionWithTxLog {
-    pub transaction_id: Uuid,
-    pub wallet_tx_id: i64,
-    pub wallet_tx_slate_id: String,
-    pub messages: Option<Vec<String>>,
-    pub fee: Option<u64>,
-}
+pub struct GetCurrentHeight;
 
 #[derive(Debug, Deserialize)]
 pub struct RejectExpiredPayments;
@@ -199,12 +193,12 @@ impl Message for Reset2FA {
     type Result = Result<(), Error>;
 }
 
-impl Message for UpdateTransactionWithTxLog {
+impl Message for RejectExpiredPayments {
     type Result = Result<(), Error>;
 }
 
-impl Message for RejectExpiredPayments {
-    type Result = Result<(), Error>;
+impl Message for GetCurrentHeight {
+    type Result = Result<i64, Error>;
 }
 
 impl Handler<CreateMerchant> for DbExecutor {
@@ -376,6 +370,8 @@ impl Handler<CreateTransaction> for DbExecutor {
             knockturn_fee: None,
             real_transfer_fee: None,
             transaction_type: msg.transaction_type,
+            height: None,
+            commit: None,
         };
 
         diesel::insert_into(transactions)
@@ -396,26 +392,6 @@ impl Handler<UpdateTransactionStatus> for DbExecutor {
             .set((status.eq(msg.status), updated_at.eq(Utc::now().naive_utc())))
             .get_result(conn)
             .map_err(|e| e.into())
-    }
-}
-
-impl Handler<UpdateTransactionWithTxLog> for DbExecutor {
-    type Result = Result<(), Error>;
-
-    fn handle(&mut self, msg: UpdateTransactionWithTxLog, _: &mut Self::Context) -> Self::Result {
-        use crate::schema::transactions::dsl::*;
-        let conn: &PgConnection = &self.0.get().unwrap();
-
-        diesel::update(transactions.filter(id.eq(msg.transaction_id)))
-            .set((
-                wallet_tx_id.eq(msg.wallet_tx_id),
-                wallet_tx_slate_id.eq(msg.wallet_tx_slate_id),
-                slate_messages.eq(msg.messages),
-                real_transfer_fee.eq(msg.fee.map(|fee| fee as i64)),
-            ))
-            .get_result(conn)
-            .map_err(|e| e.into())
-            .map(|_: Transaction| ())
     }
 }
 
@@ -595,5 +571,17 @@ impl Handler<RejectExpiredPayments> for DbExecutor {
             }
             ()
         })
+    }
+}
+impl Handler<GetCurrentHeight> for DbExecutor {
+    type Result = Result<i64, Error>;
+
+    fn handle(&mut self, msg: GetCurrentHeight, _: &mut Self::Context) -> Self::Result {
+        use crate::schema::current_height::dsl::*;
+        let conn: &PgConnection = &self.0.get().unwrap();
+        current_height
+            .select(height)
+            .first(conn)
+            .map_err(|e| e.into())
     }
 }

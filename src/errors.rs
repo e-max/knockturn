@@ -29,6 +29,9 @@ pub enum Error {
     #[fail(display = "Got error when call wallet API {}", _0)]
     WalletAPIError(String),
 
+    #[fail(display = "Got error when call Node API {}", _0)]
+    NodeAPIError(String),
+
     #[fail(display = "Wrong amount. Required {} received {}", _0, _1)]
     WrongAmount(u64, u64),
 

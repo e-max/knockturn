@@ -8,6 +8,7 @@ use futures::Future;
 use log::{debug, error};
 use serde::{Deserialize, Serialize};
 use serde_json::from_slice;
+use std::iter::Iterator;
 use std::str::from_utf8;
 use std::time::Duration;
 use uuid::Uuid;
@@ -475,6 +476,12 @@ pub struct Transaction {
     pub offset: Vec<u8>,
     /// The transaction body - inputs/outputs/kernels
     body: TransactionBody,
+}
+
+impl Transaction {
+    pub fn output_commitments(&self) -> Vec<Vec<u8>> {
+        self.body.outputs.iter().map(|o| o.commit.clone()).collect()
+    }
 }
 
 /// Enum of various supported kernel "features".
