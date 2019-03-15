@@ -51,6 +51,7 @@ impl Actor for Cron {
         );
         ctx.run_interval(std::time::Duration::new(5, 0), process_pending_payouts);
         ctx.run_interval(std::time::Duration::new(5, 0), sync_with_node);
+        ctx.run_interval(std::time::Duration::new(5, 0), autoconfirmation);
     }
 
     fn stopping(&mut self, _ctx: &mut Self::Context) -> Running {
@@ -106,7 +107,7 @@ fn process_pending_payments(cron: &mut Cron, _: &mut Context<Cron>) {
             for payment in payments {
                 if payment.is_expired() {
                     debug!("payment {} expired: try to reject it", payment.id);
-                    futures.push(Either::A(
+                    futures.push(
                         fsm.send(RejectPayment {
                             payment: payment.clone(),
                         })
@@ -119,38 +120,8 @@ fn process_pending_payments(cron: &mut Cron, _: &mut Context<Cron>) {
                             error!("Cannot reject payment {}: {}", payment.id, e);
                             Ok(())
                         }),
-                    ));
-                    continue;
+                    );
                 }
-                let res = wallet
-                    .get_tx(&payment.wallet_tx_slate_id.clone().unwrap()) //we should have this field up to this moment
-                    .and_then({
-                        let fsm = fsm.clone();
-                        let payment = payment.clone();
-                        move |wallet_tx| {
-                            if wallet_tx.confirmed {
-                                info!("payment {} confirmed", payment.id);
-                                let res = fsm
-                                    .send(ConfirmPayment { payment, wallet_tx })
-                                    .from_err()
-                                    .and_then(|msg_response| {
-                                        msg_response?;
-                                        Ok(())
-                                    });
-                                Either::A(res)
-                            } else {
-                                Either::B(ok(()))
-                            }
-                        }
-                    })
-                    .or_else({
-                        let payment_id = payment.id.clone();
-                        move |e| {
-                            warn!("Couldn't confirm payment {}: {}", payment_id, e);
-                            Ok(())
-                        }
-                    });
-                futures.push(Either::B(res));
             }
             join_all(futures).map(|_| ())
         });
@@ -306,7 +277,7 @@ fn process_pending_payouts(cron: &mut Cron, _: &mut Context<Cron>) {
             for payout in payouts {
                 if payout.is_expired() {
                     debug!("payout {} expired: try to reject it", payout.id);
-                    futures.push(Either::A(
+                    futures.push(
                         fsm.send(RejectPayout {
                             payout: payout.clone(),
                         })
@@ -319,42 +290,8 @@ fn process_pending_payouts(cron: &mut Cron, _: &mut Context<Cron>) {
                             error!("Cannot reject payout {}: {}", payout.id, e);
                             Ok(())
                         }),
-                    ));
-                    continue;
+                    );
                 }
-                let res = wallet
-                    .get_tx(&payout.wallet_tx_slate_id.clone().unwrap()) //we should have this field up to this moment
-                    .and_then({
-                        let fsm = fsm.clone();
-                        let pending_payout = payout.clone();
-                        let payout_id = payout.id.clone();
-                        move |wallet_tx| {
-                            if wallet_tx.confirmed {
-                                info!("payout {} confirmed", payout_id);
-                                let res = fsm
-                                    .send(ConfirmPayout {
-                                        pending_payout,
-                                        wallet_tx,
-                                    })
-                                    .from_err()
-                                    .and_then(|msg_response| {
-                                        msg_response?;
-                                        Ok(())
-                                    });
-                                Either::A(res)
-                            } else {
-                                Either::B(ok(()))
-                            }
-                        }
-                    })
-                    .or_else({
-                        let payout_id = payout.id.clone();
-                        move |e| {
-                            warn!("Couldn't confirm payout {}: {}", payout_id, e);
-                            Ok(())
-                        }
-                    });
-                futures.push(Either::B(res));
             }
             join_all(futures).map(|_| ())
         });
@@ -437,5 +374,41 @@ fn sync_with_node(cron: &mut Cron, _: &mut Context<Cron>) {
                 .from_err()
             })
     });
+    actix::spawn(res.map_err(|e: Error| error!("Got an error trying to sync with node: {}", e)));
+}
+
+fn autoconfirmation(cron: &mut Cron, _: &mut Context<Cron>) {
+    debug!("run autoconfirmation");
+    let res = blocking::run({
+        let pool = cron.pool.clone();
+        move || {
+            let conn: &PgConnection = &pool.get().unwrap();
+            let last_height = {
+                use crate::schema::current_height::dsl::*;
+                let last_height: i64 = current_height.select(height).first(conn)?;
+                println!("\x1B[31;1m last_height\x1B[0m = {:?}", last_height);
+                last_height
+            };
+
+            use diesel::sql_query;
+            sql_query(format!(
+                "UPDATE transactions SET status = 'confirmed' WHERE
+            status = 'in_chain' and confirmations < {} - height",
+                last_height
+            ))
+            .execute(conn)?;
+            //use crate::schema::transactions::dsl::*;
+            //diesel::update(
+            //transactions
+            //.filter(status.eq(TransactionStatus::InChain))
+            //.filter(confirmations.lt(last_height - height)),
+            //)
+            //.set(status.eq(TransactionStatus::Confirmed))
+            //.execute(conn)?;
+
+            Ok(())
+        }
+    })
+    .from_err();
     actix::spawn(res.map_err(|e: Error| error!("Got an error trying to sync with node: {}", e)));
 }
