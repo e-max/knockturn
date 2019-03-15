@@ -65,7 +65,7 @@ pub struct CreatePayment {
     pub merchant_id: String,
     pub external_id: String,
     pub amount: Money,
-    pub confirmations: i32,
+    pub confirmations: i64,
     pub email: Option<String>,
     pub message: String,
 }
@@ -183,7 +183,7 @@ pub struct RejectedPayout(Transaction);
 pub struct CreatePayout {
     pub merchant_id: String,
     pub amount: i64,
-    pub confirmations: i32,
+    pub confirmations: i64,
 }
 
 impl Message for CreatePayout {

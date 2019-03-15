@@ -57,7 +57,7 @@ pub struct CreateTransaction {
     pub merchant_id: String,
     pub external_id: String,
     pub amount: Money,
-    pub confirmations: i32,
+    pub confirmations: i64,
     pub email: Option<String>,
     pub message: String,
     pub transaction_type: TransactionType,

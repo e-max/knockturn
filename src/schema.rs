@@ -35,7 +35,7 @@ table! {
         grin_amount -> Int8,
         amount -> Jsonb,
         status -> crate::models::TransactionStatusMapping,
-        confirmations -> Int4,
+        confirmations -> Int8,
         email -> Nullable<Text>,
         created_at -> Timestamp,
         updated_at -> Timestamp,

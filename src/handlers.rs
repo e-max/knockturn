@@ -208,7 +208,7 @@ pub fn get_merchant(
 pub struct CreatePaymentRequest {
     pub order_id: String,
     pub amount: Money,
-    pub confirmations: i32,
+    pub confirmations: i64,
     pub email: Option<String>,
     pub message: String,
 }

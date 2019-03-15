@@ -79,7 +79,7 @@ pub struct Transaction {
     pub grin_amount: i64,
     pub amount: Money,
     pub status: TransactionStatus,
-    pub confirmations: i32,
+    pub confirmations: i64,
     pub email: Option<String>,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
