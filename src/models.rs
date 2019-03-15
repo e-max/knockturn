@@ -320,7 +320,7 @@ mod tests {
             real_transfer_fee: None,
             transaction_type: TransactionType::Payment,
             height: None,
-            output: None,
+            commit: None,
         }
     }
 
