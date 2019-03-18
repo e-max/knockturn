@@ -13,6 +13,7 @@ use crate::fsm::{
 use crate::fsm::{KNOCKTURN_SHARE, MINIMAL_WITHDRAW, TRANSFER_FEE};
 use crate::middleware::WithMerchant;
 use crate::models::{Currency, Merchant, Money, Transaction, TransactionStatus, TransactionType};
+use crate::qrcode;
 use crate::totp::Totp;
 use crate::wallet::Slate;
 use actix_web::http::Method;
@@ -335,15 +336,25 @@ pub fn get_payment(
                     .from_err()
                     .and_then(move |db_response| {
                         let transaction = db_response?;
+
+                        let payment_url = format!(
+                            "{}/merchants/{}/payments/{}",
+                            env::var("DOMAIN").unwrap().trim_end_matches('/'),
+                            transaction.merchant_id,
+                            transaction.id.to_string()
+                        );
+                        let ironbelly_link = format!(
+                            "grin://send?amount={}&destination={}&message={}",
+                            transaction.grin_amount,
+                            payment_url,
+                            BASE64.encode(transaction.message.as_bytes())
+                        );
                         let html = PaymentTemplate {
                             payment: &transaction,
-                            payment_url: format!(
-                                "{}/merchants/{}/payments/{}",
-                                env::var("DOMAIN").unwrap().trim_end_matches('/'),
-                                transaction.merchant_id,
-                                transaction.id.to_string()
-                            ),
+                            payment_url: payment_url,
                             current_height: current_height,
+                            ironbelly_link: &ironbelly_link,
+                            ironbelly_qrcode: &BASE64.encode(&qrcode::as_png(&ironbelly_link)?),
                         }
                         .render()
                         .map_err(|e| Error::from(e))?;
@@ -360,6 +371,8 @@ struct PaymentTemplate<'a> {
     payment: &'a Transaction,
     payment_url: String,
     current_height: i64,
+    ironbelly_link: &'a str,
+    ironbelly_qrcode: &'a str,
 }
 
 #[derive(Template)]
