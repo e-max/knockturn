@@ -56,6 +56,7 @@ impl Node {
                 // <- server http response
                 debug!("Response: {:?}", resp);
                 resp.body()
+                    .limit(10 * 1024 * 1024)
                     .map_err(|e| Error::NodeAPIError(s!(e)))
                     .and_then(move |bytes| {
                         let blocks: Vec<Block> = from_slice(&bytes).map_err(|e| {
