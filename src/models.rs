@@ -154,6 +154,18 @@ impl Transaction {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Confirmation {
+    pub id: Uuid,
+    pub token: String,
+    pub external_id: String,
+    pub merchant_id: String,
+    pub grin_amount: i64,
+    pub amount: Money,
+    pub status: TransactionStatus,
+    pub confirmations: i64,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub enum Currency {
     GRIN = 0,

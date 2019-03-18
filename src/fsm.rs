@@ -1,12 +1,12 @@
 use crate::blocking;
 use crate::clients::BearerTokenAuth;
 use crate::db::{
-    self, CreateTransaction, DbExecutor, GetMerchant, GetPayment, GetTransaction, MarkAsReported,
-    ReportAttempt, UpdateTransactionStatus,
+    self, CreateTransaction, DbExecutor, GetMerchant, GetPayment, MarkAsReported, ReportAttempt,
+    UpdateTransactionStatus,
 };
 use crate::errors::Error;
 use crate::models::Merchant;
-use crate::models::{Money, Transaction, TransactionStatus, TransactionType};
+use crate::models::{Confirmation, Money, Transaction, TransactionStatus, TransactionType};
 use crate::models::{
     INITIALIZED_PAYOUT_TTL_SECONDS, NEW_PAYMENT_TTL_SECONDS, NEW_PAYOUT_TTL_SECONDS,
     PENDING_PAYMENT_TTL_SECONDS, PENDING_PAYOUT_TTL_SECONDS,
@@ -440,11 +440,19 @@ fn run_callback(
     token: &String,
     transaction: Transaction,
 ) -> impl Future<Item = (), Error = Error> {
-    client::post(callback_url) // <- Create request builder
-        .bearer_token(token)
-        .json(transaction)
+    client::post(callback_url)
+        .json(Confirmation {
+            id: transaction.id,
+            external_id: transaction.external_id,
+            merchant_id: transaction.merchant_id,
+            grin_amount: transaction.grin_amount,
+            amount: transaction.amount,
+            status: transaction.status,
+            confirmations: transaction.confirmations,
+            token: token.to_string(),
+        })
         .unwrap()
-        .send() // <- Send http request
+        .send()
         .map_err({
             let callback_url = callback_url.to_owned();
             move |e| Error::MerchantCallbackError {
@@ -455,9 +463,6 @@ fn run_callback(
         .and_then({
             let callback_url = callback_url.to_owned();
             |resp| {
-                // <- server http response
-
-                debug!("Response: {:?}", resp);
                 if resp.status().is_success() {
                     Ok(())
                 } else {
