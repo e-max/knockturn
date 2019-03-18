@@ -14,6 +14,7 @@ mod handlers;
 mod middleware;
 mod models;
 mod node;
+mod qrcode;
 mod rates;
 mod schema;
 mod totp;
