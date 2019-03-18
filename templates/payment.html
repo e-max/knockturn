@@ -26,16 +26,21 @@
 			{% if !payment.reported -%}
 		<tr><td colspan=2 id="unreported" class="table-info">Wait a second we will notify the merchant...</td></tr>
 		    {% else %}
-
+				{% if payment.redirect_url.is_some() -%}
+				<tr><td colspan=2 id="all_done" class="table-success">All done! Please click <a href="{{payment.redirect_url.clone().unwrap()}}">{{payment.redirect_url.clone().unwrap()}} </a> to return to the shop page</td></tr>
+		    	{% else %}
 		<tr><td colspan=2 id="all_done" class="table-success">All done! You can return to the shop page</td></tr>
+				{%- endif %}
 			{%- endif %}
 		{%- endif %}
 
+		{% if payment.status == TransactionStatus::New -%}
 		<tr><td colspan=2>Send {{payment.grin_amount|grin}} to:</td></tr>
 		<tr><td colspan=2><pre>grin --floonet wallet send -s smallest -d {{payment_url}} {{payment.grins().amount()}}</pre></td></tr>
 		<tr><td colspan=2>Or <a href="{{ironbelly_link}}" >pay with Irobelly </a> </br>
 			<img src="data:image/png;base64,{{ironbelly_qrcode}}">
 		</td></tr>
+		{%- endif %}
 	</table>
 	<script>
 

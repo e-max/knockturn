@@ -236,6 +236,7 @@ pub struct CreatePaymentRequest {
     pub confirmations: i64,
     pub email: Option<String>,
     pub message: String,
+    pub redirect_url: Option<String>,
 }
 
 pub fn create_payment(
@@ -257,6 +258,7 @@ pub fn create_payment(
         confirmations: payment_req.confirmations,
         email: payment_req.email.clone(),
         message: payment_req.message.clone(),
+        redirect_url: payment_req.redirect_url.clone(),
     };
     state
         .fsm
