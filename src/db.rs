@@ -61,6 +61,7 @@ pub struct CreateTransaction {
     pub email: Option<String>,
     pub message: String,
     pub transaction_type: TransactionType,
+    pub redirect_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -372,6 +373,7 @@ impl Handler<CreateTransaction> for DbExecutor {
             transaction_type: msg.transaction_type,
             height: None,
             commit: None,
+            redirect_url: msg.redirect_url,
         };
 
         diesel::insert_into(transactions)

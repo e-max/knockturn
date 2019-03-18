@@ -26,8 +26,11 @@
 			{% if !payment.reported -%}
 		<tr><td colspan=2 id="unreported" class="table-info">Wait a second we will notify the merchant...</td></tr>
 		    {% else %}
-
+				{% if payment.redirect_url.is_some() -%}
+		<tr><td colspan=2 id="all_done" class="table-success">All done! Please click {{payment.redirect_url.clone().unwrap()}} to return to the shop page</td></tr>
+		    	{% else %}
 		<tr><td colspan=2 id="all_done" class="table-success">All done! You can return to the shop page</td></tr>
+				{%- endif %}
 			{%- endif %}
 		{%- endif %}
 

@@ -71,6 +71,7 @@ pub struct CreatePayment {
     pub confirmations: i64,
     pub email: Option<String>,
     pub message: String,
+    pub redirect_url: Option<String>,
 }
 
 impl Message for CreatePayment {
@@ -306,6 +307,7 @@ impl Handler<CreatePayment> for Fsm {
             email: msg.email.clone(),
             message: msg.message.clone(),
             transaction_type: TransactionType::Payment,
+            redirect_url: msg.redirect_url,
         };
 
         let res = self
@@ -688,6 +690,7 @@ impl Handler<CreatePayout> for Fsm {
                         transaction_type: TransactionType::Payout,
                         height: None,
                         commit: None,
+                        redirect_url: None,
                     };
 
                     use crate::schema::transactions;

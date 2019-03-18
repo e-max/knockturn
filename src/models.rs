@@ -106,6 +106,7 @@ pub struct Transaction {
     pub height: Option<i64>,
     #[serde(skip_serializing)]
     pub commit: Option<String>,
+    pub redirect_url: Option<String>,
 }
 
 impl Transaction {

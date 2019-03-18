@@ -52,6 +52,7 @@ table! {
         transaction_type -> crate::models::TransactionTypeMapping,
         height -> Nullable<Int8>,
         commit -> Nullable<Text>,
+        redirect_url -> Nullable<Text>,
     }
 }
 
