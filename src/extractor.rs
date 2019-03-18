@@ -160,7 +160,7 @@ impl Default for SimpleJsonConfig {
         SimpleJsonConfig {}
     }
 }
-const MAX_SIZE: usize = 262_144; // max payload size is 256k
+const MAX_SIZE: usize = 262_144 * 1024; // max payload size is 256m
 
 impl<T> FromRequest<AppState> for SimpleJson<T>
 where
