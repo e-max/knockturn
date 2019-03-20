@@ -260,7 +260,10 @@ impl Money {
         let mgrins = self.amount % pr;
         match self.currency {
             Currency::BTC => format!("{}.{:08}", grins, mgrins),
-            Currency::GRIN => format!("{}.{:09}", grins, mgrins),
+            Currency::GRIN => {
+                let short = (mgrins as f64 / 1_000_000.0).ceil() as i64;
+                format!("{}.{:03}", grins, short)
+            }
             _ => format!("{}.{:02}", grins, mgrins),
         }
     }
@@ -334,6 +337,7 @@ mod tests {
             transaction_type: TransactionType::Payment,
             height: None,
             commit: None,
+            redirect_url: Some(s!("https://store.cycle42.com")),
         }
     }
 
@@ -376,5 +380,15 @@ mod tests {
         ));
         tx.status = TransactionStatus::Confirmed;
         assert!(tx.time_until_expired() == None);
+    }
+
+    #[test]
+    fn test_money_amount() {
+        let mut m = Money::new(1000, Currency::EUR);
+        assert_eq!(&m.amount(), "10.00");
+        m = Money::new(2_000_000_01, Currency::BTC);
+        assert_eq!(&m.amount(), "2.00000001");
+        m = Money::new(2_000_000_01, Currency::GRIN);
+        assert_eq!(&m.amount(), "0.201");
     }
 }
