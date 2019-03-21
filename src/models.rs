@@ -293,7 +293,6 @@ pub struct CurrentHeight {
 #[cfg(test)]
 mod tests {
 
-    use crate::filters::duration;
     use crate::models::*;
     fn create_tx() -> Transaction {
         Transaction {

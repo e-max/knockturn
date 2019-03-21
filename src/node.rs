@@ -100,7 +100,7 @@ impl Output {
 mod tests {
     use super::*;
 
-    const sample: &'static str = r#"
+    const _SAMPLE: &'static str = r#"
  {
     "header": {
       "hash": "077360fcf848b71c8c07bb35fd361ad8aa5b9608cd62130a1b5a50d8c071f091",
@@ -141,8 +141,7 @@ mod tests {
     ]
   }"#;
 
-    const sample2: &'static str = r#"
-
+    const SAMPLE2: &'static str = r#"
     [
   {
     "header": {
@@ -378,9 +377,9 @@ mod tests {
 
     #[test]
     fn blocks_load_test() {
-        match from_slice::<Vec<Block>>(sample2.as_bytes()) {
+        match from_slice::<Vec<Block>>(SAMPLE2.as_bytes()) {
             Ok(_) => (),
-            Err(e) => assert!(false),
+            Err(_) => assert!(false),
         }
     }
 }

@@ -506,7 +506,6 @@ struct SendTx {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
     #[test]
     fn wallet_get_tx_test() {
