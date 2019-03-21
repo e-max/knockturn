@@ -40,6 +40,7 @@ pub fn index(
                     .filter(merchant_id.eq(merch_id.clone()))
                     .offset(0)
                     .limit(10)
+                    .order(created_at.desc())
                     .load::<Transaction>(conn)
                     .map_err::<Error, _>(|e| e.into())
             }?;
