@@ -1,31 +1,22 @@
 use crate::app::AppState;
-use crate::blocking;
-use crate::db::{
-    Confirm2FA, CreateMerchant, GetCurrentHeight, GetMerchant, GetTransaction, GetTransactions,
-};
 use crate::errors::*;
-use crate::extractor::{BasicAuth, Identity, Session, SimpleJson};
+use crate::extractor::{Identity, SimpleJson};
 use crate::filters;
+use crate::fsm::MINIMAL_WITHDRAW;
 use crate::fsm::{
-    CreatePayment, CreatePayout, FinalizePayout, GetInitializedPayout, GetNewPayment, GetNewPayout,
-    GetPayout, InitializePayout, MakePayment, PayoutFees,
+    CreatePayout, FinalizePayout, GetInitializedPayout, GetNewPayout, GetPayout, InitializePayout,
+    PayoutFees,
 };
-use crate::fsm::{KNOCKTURN_SHARE, MINIMAL_WITHDRAW, TRANSFER_FEE};
 use crate::handlers::check_2fa_code;
 use crate::handlers::BootstrapColor;
 use crate::handlers::TemplateIntoResponse;
-use crate::models::{Currency, Merchant, Money, Transaction, TransactionStatus, TransactionType};
+use crate::models::{Merchant, Money, Transaction, TransactionStatus};
 use crate::wallet::Slate;
 use actix_web::middleware::identity::RequestIdentity;
-use actix_web::middleware::session::RequestSession;
-use actix_web::{
-    AsyncResponder, Form, FutureResponse, HttpMessage, HttpRequest, HttpResponse, Path, State,
-};
+use actix_web::{AsyncResponder, Form, FutureResponse, HttpRequest, HttpResponse, Path, State};
 use askama::Template;
-use diesel::pg::PgConnection;
-use diesel::{self, prelude::*};
-use futures::future::{err, ok, result, Either, Future};
-use serde::{Deserialize, Serialize};
+use futures::future::{ok, Future};
+use serde::Deserialize;
 use uuid::Uuid;
 
 #[derive(Template, Debug)]
@@ -39,9 +30,7 @@ struct WithdrawTemplate<'a> {
     url: &'a str,
 }
 
-pub fn withdraw(
-    (merchant, req): (Identity<Merchant>, HttpRequest<AppState>),
-) -> FutureResponse<HttpResponse, Error> {
+pub fn withdraw(merchant: Identity<Merchant>) -> FutureResponse<HttpResponse, Error> {
     let reminder = merchant.balance.reminder().unwrap_or(0);
     let mut template = WithdrawTemplate {
         error: None,
@@ -87,7 +76,7 @@ pub fn create_payout(
             })
             .and_then(move |(merchant, validated)| {
                 if !validated {
-                    withdraw((identity_merchant, req))
+                    withdraw(identity_merchant)
                 } else {
                     req.state()
                         .fsm
@@ -129,10 +118,10 @@ pub fn get_payout(
         .from_err()
         .and_then(|db_response| {
             let transaction = db_response?;
-            let knockturn_fee = transaction
+            let _knockturn_fee = transaction
                 .knockturn_fee
                 .ok_or(Error::General(s!("Transaction doesn't have knockturn_fee")))?;
-            let transfer_fee = transaction
+            let _transfer_fee = transaction
                 .transfer_fee
                 .ok_or(Error::General(s!("Transaction doesn't have transfer_fee")))?;
             let html = PayoutTemplate {
@@ -210,14 +199,8 @@ pub fn generate_slate(
 }
 
 pub fn accept_slate(
-    (slate, tx_id, req, state): (
-        SimpleJson<Slate>,
-        Path<Uuid>,
-        HttpRequest<AppState>,
-        State<AppState>,
-    ),
+    (slate, tx_id, state): (SimpleJson<Slate>, Path<Uuid>, State<AppState>),
 ) -> FutureResponse<HttpResponse, Error> {
-    let slate_amount = slate.amount;
     state
         .fsm
         .send(GetInitializedPayout {
@@ -254,8 +237,6 @@ pub fn accept_slate(
         .responder()
 }
 
-pub fn withdraw_confirmation(
-    (slate, req, state): (SimpleJson<Slate>, HttpRequest<AppState>, State<AppState>),
-) -> Result<HttpResponse, Error> {
+pub fn withdraw_confirmation(_req: HttpRequest<AppState>) -> Result<HttpResponse, Error> {
     Ok(HttpResponse::Ok().body("hello"))
 }

@@ -96,8 +96,11 @@ impl Output {
         self.output_type == "Coinbase"
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-const sample: &'static str = r#"
+    const sample: &'static str = r#"
  {
     "header": {
       "hash": "077360fcf848b71c8c07bb35fd361ad8aa5b9608cd62130a1b5a50d8c071f091",
@@ -138,7 +141,7 @@ const sample: &'static str = r#"
     ]
   }"#;
 
-const sample2: &'static str = r#"
+    const sample2: &'static str = r#"
 
     [
   {
@@ -371,21 +374,13 @@ const sample2: &'static str = r#"
     ]
   }
   ]
-
 "#;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
 
     #[test]
     fn blocks_load_test() {
         match from_slice::<Vec<Block>>(sample2.as_bytes()) {
             Ok(_) => (),
-            Err(e) => {
-                println!("\x1B[31;1m e\x1B[0m = {:?}", e);
-                assert!(false);
-            }
+            Err(e) => assert!(false),
         }
     }
 }

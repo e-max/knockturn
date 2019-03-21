@@ -1,7 +1,6 @@
 use crate::db::DbExecutor;
 use crate::fsm::Fsm;
 use crate::handlers::*;
-use crate::middleware::MerchantMiddleware;
 use crate::wallet::Wallet;
 use actix::prelude::*;
 use actix_web::middleware::identity::{CookieIdentityPolicy, IdentityService};
@@ -40,7 +39,6 @@ pub fn create_app(
         .middleware(SessionStorage::new(
             CookieSessionBackend::private(cookie_secret).secure(false),
         ))
-        .middleware(MerchantMiddleware)
         .resource("/merchants", |r| {
             r.method(Method::POST).with(create_merchant)
         })

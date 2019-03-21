@@ -578,7 +578,7 @@ impl Handler<RejectExpiredPayments> for DbExecutor {
 impl Handler<GetCurrentHeight> for DbExecutor {
     type Result = Result<i64, Error>;
 
-    fn handle(&mut self, msg: GetCurrentHeight, _: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, _: GetCurrentHeight, _: &mut Self::Context) -> Self::Result {
         use crate::schema::current_height::dsl::*;
         let conn: &PgConnection = &self.0.get().unwrap();
         current_height

@@ -1,15 +1,12 @@
-use crate::errors::*;
 use crate::schema::{current_height, merchants, rates, transactions};
 use chrono::{Duration, NaiveDateTime, Utc};
-use diesel::backend::Backend;
 use diesel::deserialize::{self, FromSql};
 use diesel::pg::Pg;
 use diesel::serialize::{self, Output, ToSql};
-use diesel::sql_types::{Jsonb, SmallInt};
+use diesel::sql_types::Jsonb;
 use diesel_derive_enum::DbEnum;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::io;
 use strum_macros::{Display, EnumString};
 use uuid::Uuid;
 
@@ -205,20 +202,6 @@ impl fmt::Display for Currency {
         write!(f, "{}", s)
     }
 }
-
-//impl std::str::FromStr for Currency {
-//type Err = Error;
-
-//fn from_str(s: &str) -> Result<Self, Self::Err> {
-//match s.to_uppercase().as_str() {
-//"GRIN" => Ok(Currency::GRIN),
-//"BTC" => Ok(Currency::BTC),
-//"USD" => Ok(Currency::USD),
-//"EUR" => Ok(Currency::EUR),
-//_ => Err(Error::UnsupportedCurrency(s!(s))),
-//}
-//}
-//}
 
 #[derive(Debug, Serialize, Deserialize, AsExpression, FromSqlRow, Clone, Copy)]
 #[sql_type = "Jsonb"]

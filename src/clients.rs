@@ -24,17 +24,3 @@ impl BearerTokenAuth for ClientRequestBuilder {
         self.header(header::AUTHORIZATION, auth_header)
     }
 }
-
-//pub trait BasicAuthUser {
-//    fn auth_user(&mut self) -> Box<Future<Item = Merchant, Error = Error>>;
-//}
-//
-//impl BasicAuthUser for HttpRequest<AppState> {
-//    fn auth_user(&mut self) -> Box<Future<Item = Merchant, Error = Error>> {
-//        let base = match self.headers().get("Authentication") {
-//            None => return Box::new(err(Error::AuthRequired)),
-//            Some(val) => decode(val).map_err(|| Box::new(err(Error::AuthRequired)))?,
-//        };
-//        let (user, password, _) = String::from_utf8_lossy(&base).split(':');
-//    }
-//}

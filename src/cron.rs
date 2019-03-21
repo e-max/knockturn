@@ -2,20 +2,17 @@ use crate::blocking;
 use crate::db::{DbExecutor, RejectExpiredPayments};
 use crate::errors::Error;
 use crate::fsm::{
-    ConfirmPayment, ConfirmPayout, Fsm, GetExpiredInitializedPayouts, GetExpiredNewPayouts,
-    GetPendingPayments, GetPendingPayouts, GetUnreportedPayments, RejectPayment, RejectPayout,
-    ReportPayment,
+    Fsm, GetExpiredInitializedPayouts, GetExpiredNewPayouts, GetPendingPayments, GetPendingPayouts,
+    GetUnreportedPayments, RejectPayment, RejectPayout, ReportPayment,
 };
 use crate::models::{Transaction, TransactionStatus};
 use crate::node::Node;
-use crate::node::Output;
 use crate::rates::RatesFetcher;
-use crate::wallet::Wallet;
 use actix::prelude::*;
 use diesel::pg::PgConnection;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::{self, prelude::*};
-use futures::future::{join_all, ok, Either, Future};
+use futures::future::{join_all, Future};
 use log::*;
 use std::collections::HashMap;
 
@@ -23,7 +20,6 @@ const REQUST_BLOCKS_FROM_NODE: i64 = 10;
 
 pub struct Cron {
     db: Addr<DbExecutor>,
-    wallet: Wallet,
     node: Node,
     fsm: Addr<Fsm>,
     pool: Pool<ConnectionManager<PgConnection>>,
@@ -62,14 +58,12 @@ impl Actor for Cron {
 impl Cron {
     pub fn new(
         db: Addr<DbExecutor>,
-        wallet: Wallet,
         fsm: Addr<Fsm>,
         node: Node,
         pool: Pool<ConnectionManager<PgConnection>>,
     ) -> Self {
         Cron {
             db,
-            wallet,
             fsm,
             node,
             pool,
@@ -91,7 +85,6 @@ fn reject_expired_payments(cron: &mut Cron, _: &mut Context<Cron>) {
 
 fn process_pending_payments(cron: &mut Cron, _: &mut Context<Cron>) {
     debug!("run process_pending_payments");
-    let wallet = cron.wallet.clone();
     let fsm = cron.fsm.clone();
     let res = cron
         .fsm
@@ -261,7 +254,6 @@ fn process_expired_initialized_payouts(cron: &mut Cron, _: &mut Context<Cron>) {
 
 fn process_pending_payouts(cron: &mut Cron, _: &mut Context<Cron>) {
     debug!("run process_pending_payouts");
-    let wallet = cron.wallet.clone();
     let fsm = cron.fsm.clone();
     let res = cron
         .fsm
@@ -308,7 +300,6 @@ fn sync_with_node(cron: &mut Cron, _: &mut Context<Cron>) {
             use crate::schema::current_height::dsl::*;
             let conn: &PgConnection = &pool.get().unwrap();
             let last_height: i64 = current_height.select(height).first(conn)?;
-            println!("\x1B[31;1m last_height\x1B[0m = {:?}", last_height);
             Ok(last_height)
         }
     })
@@ -316,7 +307,6 @@ fn sync_with_node(cron: &mut Cron, _: &mut Context<Cron>) {
     .and_then(move |last_height| {
         node.blocks(last_height, last_height + REQUST_BLOCKS_FROM_NODE)
             .and_then(move |blocks| {
-                //println!("\x1B[31;1m blocks\x1B[0m = {:?}", blocks);
                 let new_height = blocks
                     .iter()
                     .fold(last_height as u64, |current_height, block| {
@@ -326,7 +316,6 @@ fn sync_with_node(cron: &mut Cron, _: &mut Context<Cron>) {
                             current_height
                         }
                     });
-                println!("\x1B[32;1m new_height\x1B[0m = {:?}", new_height);
                 let commits: HashMap<String, i64> = blocks
                     .iter()
                     .flat_map(|block| block.outputs.iter())
@@ -334,7 +323,6 @@ fn sync_with_node(cron: &mut Cron, _: &mut Context<Cron>) {
                     .filter(|o| o.block_height.is_some())
                     .map(|o| (o.commit.clone(), o.block_height.unwrap() as i64))
                     .collect();
-                println!("\x1B[33;1m commits\x1B[0m = {:?}", commits);
                 debug!("Found {} non coinbase outputs", commits.len());
                 blocking::run({
                     let pool = pool.clone();
@@ -387,7 +375,6 @@ fn autoconfirmation(cron: &mut Cron, _: &mut Context<Cron>) {
             let last_height = {
                 use crate::schema::current_height::dsl::*;
                 let last_height: i64 = current_height.select(height).first(conn)?;
-                println!("\x1B[31;1m last_height\x1B[0m = {:?}", last_height);
                 last_height
             };
 

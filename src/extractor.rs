@@ -16,12 +16,6 @@ use std::default::Default;
 #[derive(Debug, Deref, Clone)]
 pub struct BasicAuth<T>(pub T);
 
-impl<T> BasicAuth<T> {
-    pub fn into_inner(self) -> T {
-        self.0
-    }
-}
-
 pub struct BasicAuthConfig(pub basic::Config);
 impl Default for BasicAuthConfig {
     fn default() -> Self {
@@ -48,7 +42,7 @@ impl FromRequest<AppState> for BasicAuth<Merchant> {
                 .and_then(move |db_response| {
                     let merchant = match db_response {
                         Ok(m) => m,
-                        Err(e) => return err(Error::NotAuthorized),
+                        Err(_) => return err(Error::NotAuthorized),
                     };
                     let password = bauth.password().unwrap_or("");
                     if merchant.token != password {
@@ -96,7 +90,7 @@ impl FromRequest<AppState> for Session<Merchant> {
                 .from_err()
                 .and_then(move |db_response| match db_response {
                     Ok(m) => ok(Session(m)),
-                    Err(e) => err(Error::NotAuthorizedInUI),
+                    Err(_) => err(Error::NotAuthorizedInUI),
                 }),
         ))
     }
@@ -124,7 +118,7 @@ impl FromRequest<AppState> for Identity<Merchant> {
     type Config = IdentityConfig;
     type Result = Result<Box<dyn Future<Item = Self, Error = Error>>, Error>;
 
-    fn from_request(req: &HttpRequest<AppState>, cfg: &Self::Config) -> Self::Result {
+    fn from_request(req: &HttpRequest<AppState>, _: &Self::Config) -> Self::Result {
         let merchant_id = match req.identity() {
             Some(v) => v,
             None => return Err(Error::NotAuthorizedInUI),
@@ -137,7 +131,7 @@ impl FromRequest<AppState> for Identity<Merchant> {
                 .from_err()
                 .and_then(move |db_response| match db_response {
                     Ok(m) => ok(Identity(m)),
-                    Err(e) => err(Error::NotAuthorizedInUI),
+                    Err(_) => err(Error::NotAuthorizedInUI),
                 }),
         ))
     }
@@ -173,7 +167,6 @@ where
         Ok(Box::new(
             req.payload()
                 .map_err(|e| Error::Internal(format!("Payload error: {:?}", e)))
-                //.from_err()
                 .fold(BytesMut::new(), move |mut body, chunk| {
                     if (body.len() + chunk.len()) > MAX_SIZE {
                         Err(Error::Internal("overflow".to_owned()))
