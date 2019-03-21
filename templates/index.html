@@ -8,8 +8,10 @@
 <dl class="row">
   <dt class="col-sm-3">Amount: </dt>
   <dd class="col-sm-9">{{merchant.balance|grin}} <a class="btn btn-primary" href="/withdraw" role="button">Withdraw now</a></dd>
+  {% if last_payout.is_some() %}
   <dt class="col-sm-3">Last withdrawal: </dt>
-  <dd class="col-sm-9">{{last_payout.created_at|pretty_date}}</dd>
+  <dd class="col-sm-9">{{last_payout.as_ref().unwrap().created_at|pretty_date}}</dd>
+  {% endif %}
 </dl>
 
 	<p>Recent transactions: </p>

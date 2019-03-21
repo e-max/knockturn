@@ -29,7 +29,7 @@ use serde::{Deserialize, Serialize};
 struct IndexTemplate<'a> {
     merchant: &'a Merchant,
     transactions: Vec<Transaction>,
-    last_payout: &'a Transaction,
+    last_payout: &'a Option<Transaction>,
     current_height: i64,
 }
 
@@ -58,6 +58,7 @@ pub fn index(
                     .filter(transaction_type.eq(TransactionType::Payout))
                     .order(created_at.desc())
                     .first(conn)
+                    .optional()
                     .map_err::<Error, _>(|e| e.into())
             }?;
             let current_height = {
