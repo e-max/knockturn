@@ -1,36 +1,19 @@
 use crate::app::AppState;
-use crate::blocking;
-use crate::db::{
-    Confirm2FA, CreateMerchant, GetCurrentHeight, GetMerchant, GetTransaction, GetTransactions,
-};
+use crate::db::{Confirm2FA, GetMerchant};
 use crate::errors::*;
-use crate::extractor::{BasicAuth, Identity, Session, SimpleJson};
-use crate::filters;
-use crate::fsm::{
-    CreatePayment, CreatePayout, FinalizePayout, GetInitializedPayout, GetNewPayment, GetNewPayout,
-    GetPayout, InitializePayout, MakePayment, PayoutFees,
-};
-use crate::handlers::BootstrapColor;
+use crate::extractor::{Identity, Session};
 use crate::handlers::TemplateIntoResponse;
-use crate::models::{Currency, Merchant, Money, Transaction, TransactionStatus, TransactionType};
-use crate::qrcode;
+use crate::models::Merchant;
 use crate::totp::Totp;
-use crate::wallet::Slate;
 use actix_web::http::Method;
 use actix_web::middleware::identity::RequestIdentity;
 use actix_web::middleware::session::RequestSession;
-use actix_web::{
-    AsyncResponder, Form, FutureResponse, HttpMessage, HttpRequest, HttpResponse, Path, State,
-};
+use actix_web::{AsyncResponder, Form, FutureResponse, HttpRequest, HttpResponse};
 use askama::Template;
-use chrono_humanize::{Accuracy, HumanTime, Tense};
 use data_encoding::BASE64;
-use diesel::pg::PgConnection;
-use diesel::{self, prelude::*};
 use futures::future::Future;
 use futures::future::{err, ok};
-use serde::{Deserialize, Serialize};
-use std::env;
+use serde::Deserialize;
 
 #[derive(Template)]
 #[template(path = "totp.html")]

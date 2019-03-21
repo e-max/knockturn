@@ -3,7 +3,7 @@ use crate::db::GetMerchant;
 use crate::models::Merchant;
 use actix_web::middleware::identity::RequestIdentity;
 use actix_web::middleware::{Middleware, Started};
-use actix_web::{http::header, HttpRequest, HttpResponse};
+use actix_web::HttpRequest;
 use futures::future::Future;
 
 pub struct MerchantMiddleware;

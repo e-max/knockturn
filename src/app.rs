@@ -83,18 +83,18 @@ pub fn create_app(
             r.method(Method::POST).with(mfa::post_2fa);
         })
         .resource("/withdraw", |r| {
-            r.method(Method::GET).with(withdraw);
-            r.method(Method::POST).with(create_payout);
+            r.method(Method::GET).with(payout::withdraw);
+            r.method(Method::POST).with(payout::create_payout);
         })
         .resource("/withdraw/confirm", |r| {
-            r.method(Method::POST).with(withdraw_confirmation);
+            r.method(Method::POST).with(payout::withdraw_confirmation);
         })
         .resource("/payouts/{id}", |r| {
-            r.method(Method::GET).with(get_payout);
-            r.method(Method::POST).with(accept_slate)
+            r.method(Method::GET).with(payout::get_payout);
+            r.method(Method::POST).with(payout::accept_slate)
         })
         .resource("/payouts/{id}/knockturn-payout.grinslate", |r| {
-            r.method(Method::GET).with(generate_slate);
+            r.method(Method::GET).with(payout::generate_slate);
         })
         .resource("/transactions", |r| {
             r.method(Method::GET).with(webui::get_transactions)
