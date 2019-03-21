@@ -175,11 +175,9 @@ pub fn make_payment(
         .from_err()
         .and_then(move |db_response| {
             let new_payment = db_response?;
-            if new_payment.grin_amount != slate_amount as i64 {
-                return Err(Error::WrongAmount(
-                    new_payment.grin_amount as u64,
-                    slate_amount,
-                ));
+            let payment_amount = new_payment.grin_amount as u64;
+            if new_payment.is_invalid_amount(slate_amount) {
+                return Err(Error::WrongAmount(payment_amount, slate_amount));
             }
             Ok(new_payment)
         })

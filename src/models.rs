@@ -150,6 +150,11 @@ impl Transaction {
             None => 0,
         }
     }
+
+    pub fn is_invalid_amount(&self, payment_amount: u64) -> bool {
+        let amount = self.grin_amount as u64;
+        (payment_amount < amount) || (payment_amount - amount > 1_000_000)
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -299,8 +304,8 @@ mod tests {
             id: Uuid::new_v4(),
             external_id: s!(""),
             merchant_id: s!(""),
-            grin_amount: 1000000,
-            amount: Money::from_grin(1000000),
+            grin_amount: 1_000_000_000,
+            amount: Money::from_grin(1_000_000),
             status: TransactionStatus::New,
             confirmations: 3,
             email: None,
@@ -372,5 +377,16 @@ mod tests {
         assert_eq!(&m.amount(), "2.00000001");
         m = Money::new(2_000_000_01, Currency::GRIN);
         assert_eq!(&m.amount(), "0.201");
+    }
+
+    #[test]
+    fn test_pay_invalid_amount() {
+        let tx = create_tx();
+        assert!(tx.is_invalid_amount(100));
+        assert!(!tx.is_invalid_amount(1_000_000_000));
+        assert!(tx.is_invalid_amount(999_999_999));
+        assert!(tx.is_invalid_amount(1_999_999_999));
+        assert!(tx.is_invalid_amount(1_002_000_000));
+        assert!(!tx.is_invalid_amount(1_000_100_000));
     }
 }
