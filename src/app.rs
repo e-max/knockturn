@@ -47,43 +47,40 @@ pub fn create_app(
         .resource("/merchants/{merchant_id}", |r| {
             r.method(Method::GET).with(get_merchant)
         })
-        .resource("/transactions", |r| {
-            r.method(Method::GET).with(get_transactions)
-        })
         .resource("/merchants/{merchant_id}/payments", |r| {
-            r.method(Method::POST).with(create_payment)
+            r.method(Method::POST).with(payment::create_payment)
         })
         .resource("/merchants/{merchant_id}/payments/{transaction_id}", |r| {
-            r.method(Method::GET).with(get_payment);
-            r.method(Method::POST).with(make_payment);
+            r.method(Method::GET).with(payment::get_payment);
+            r.method(Method::POST).with(payment::make_payment);
         })
         .resource(
             "/merchants/{merchant_id}/payments/{transaction_id}/status",
             |r| {
-                r.method(Method::GET).with(get_payment_status);
+                r.method(Method::GET).with(payment::get_payment_status);
             },
         )
         .resource(
             "/merchants/{merchant_id}/payments/{transaction_id}/{grin_path:.*}",
             |r| {
-                r.method(Method::POST).with(make_payment);
+                r.method(Method::POST).with(payment::make_payment);
             },
         )
         .resource("/login", |r| {
-            r.method(Method::POST).with(login);
-            r.method(Method::GET).with(login_form);
+            r.method(Method::POST).with(webui::login);
+            r.method(Method::GET).with(webui::login_form);
         })
-        .resource("/logout", |r| r.method(Method::POST).with(logout))
+        .resource("/logout", |r| r.method(Method::POST).with(webui::logout))
         .resource("/", |r| {
-            r.method(Method::GET).with(index);
+            r.method(Method::GET).with(webui::index);
         })
         .resource("/set_2fa", |r| {
-            r.method(Method::GET).with(get_totp);
-            r.method(Method::POST).with(post_totp);
+            r.method(Method::GET).with(mfa::get_totp);
+            r.method(Method::POST).with(mfa::post_totp);
         })
         .resource("/2fa", |r| {
-            r.method(Method::GET).with(form_2fa);
-            r.method(Method::POST).with(post_2fa);
+            r.method(Method::GET).with(mfa::form_2fa);
+            r.method(Method::POST).with(mfa::post_2fa);
         })
         .resource("/withdraw", |r| {
             r.method(Method::GET).with(withdraw);
@@ -98,5 +95,8 @@ pub fn create_app(
         })
         .resource("/payouts/{id}/knockturn-payout.grinslate", |r| {
             r.method(Method::GET).with(generate_slate);
+        })
+        .resource("/transactions", |r| {
+            r.method(Method::GET).with(webui::get_transactions)
         })
 }
