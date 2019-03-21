@@ -93,11 +93,11 @@ impl Wallet {
     pub fn receive(&self, slate: &Slate) -> impl Future<Item = Slate, Error = Error> {
         let url = format!("{}/{}", self.url, RECEIVE_URL);
         debug!("Receive slate by wallet  {}", url);
-        client::post(&url) // <- Create request builder
+        client::post(&url)
             .auth(&self.username, &self.password)
             .json(slate)
             .unwrap()
-            .send() // <- Send http request
+            .send()
             .map_err(|e| Error::WalletAPIError(s!(e)))
             .and_then(|resp| {
                 if !resp.status().is_success() {
@@ -107,7 +107,6 @@ impl Wallet {
                 }
             })
             .and_then(|resp| {
-                // <- server http response
                 debug!("Response: {:?}", resp);
                 resp.body()
                     .map_err(|e| Error::WalletAPIError(s!(e)))
@@ -128,11 +127,11 @@ impl Wallet {
     pub fn finalize(&self, slate: &Slate) -> impl Future<Item = Slate, Error = Error> {
         let url = format!("{}/{}", self.url, FINALIZE_URL);
         debug!("Finalize slate by wallet {}", url);
-        client::post(&url) // <- Create request builder
+        client::post(&url)
             .auth(&self.username, &self.password)
             .json(slate)
             .unwrap()
-            .send() // <- Send http request
+            .send()
             .map_err(|e| Error::WalletAPIError(s!(e)))
             .and_then(|resp| {
                 if !resp.status().is_success() {
@@ -142,7 +141,6 @@ impl Wallet {
                 }
             })
             .and_then(|resp| {
-                // <- server http response
                 debug!("Response: {:?}", resp);
                 resp.body()
                     .map_err(|e| Error::WalletAPIError(s!(e)))
@@ -162,11 +160,11 @@ impl Wallet {
     pub fn cancel_tx(&self, tx_slate_id: &str) -> impl Future<Item = (), Error = Error> {
         let url = format!("{}/{}?tx_id={}", self.url, CANCEL_TX_URL, tx_slate_id);
         debug!("Cancel transaction in wallet {}", url);
-        client::post(&url) // <- Create request builder
+        client::post(&url)
             .auth(&self.username, &self.password)
             .finish()
             .unwrap()
-            .send() // <- Send http request
+            .send()
             .map_err(|e| Error::WalletAPIError(s!(e)))
             .and_then(|resp| {
                 if !resp.status().is_success() {
@@ -180,11 +178,11 @@ impl Wallet {
     pub fn post_tx(&self) -> impl Future<Item = (), Error = Error> {
         let url = format!("{}/{}", self.url, POST_TX_URL);
         debug!("Post transaction in chain by wallet as {}", url);
-        client::post(&url) // <- Create request builder
+        client::post(&url)
             .auth(&self.username, &self.password)
             .finish()
             .unwrap()
-            .send() // <- Send http request
+            .send()
             .map_err(|e| Error::WalletAPIError(s!(e)))
             .and_then(|resp| {
                 if !resp.status().is_success() {
@@ -212,11 +210,11 @@ impl Wallet {
             selection_strategy_is_use_all: false,
             message: Some(message),
         };
-        client::post(&url) // <- Create request builder
+        client::post(&url)
             .auth(&self.username, &self.password)
             .json(&payment)
             .unwrap()
-            .send() // <- Send http request
+            .send()
             .map_err(|e| Error::WalletAPIError(s!(e)))
             .and_then(|resp| {
                 if !resp.status().is_success() {
@@ -226,7 +224,6 @@ impl Wallet {
                 }
             })
             .and_then(|resp| {
-                // <- server http response
                 debug!("Response: {:?}", resp);
                 resp.body()
                     .map_err(|e| Error::WalletAPIError(s!(e)))
@@ -509,7 +506,6 @@ struct SendTx {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
     #[test]
     fn wallet_get_tx_test() {

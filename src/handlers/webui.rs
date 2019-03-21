@@ -1,28 +1,20 @@
 use crate::app::AppState;
 use crate::blocking;
-use crate::db::{
-    Confirm2FA, CreateMerchant, GetCurrentHeight, GetMerchant, GetTransaction, GetTransactions,
-};
+use crate::db::GetMerchant;
 use crate::errors::*;
-use crate::extractor::{BasicAuth, Identity, Session, SimpleJson};
+use crate::extractor::Identity;
 use crate::filters;
-use crate::fsm::{
-    CreatePayment, CreatePayout, FinalizePayout, GetInitializedPayout, GetNewPayment, GetNewPayout,
-    GetPayout, InitializePayout, MakePayment, PayoutFees,
-};
 use crate::handlers::BootstrapColor;
 use crate::handlers::TemplateIntoResponse;
-use crate::models::{Currency, Merchant, Money, Transaction, TransactionStatus, TransactionType};
+use crate::models::{Merchant, Transaction, TransactionType};
 use actix_web::middleware::identity::RequestIdentity;
 use actix_web::middleware::session::RequestSession;
-use actix_web::{
-    AsyncResponder, Form, FutureResponse, HttpMessage, HttpRequest, HttpResponse, Path, State,
-};
+use actix_web::{AsyncResponder, Form, FutureResponse, HttpRequest, HttpResponse};
 use askama::Template;
 use diesel::pg::PgConnection;
 use diesel::{self, prelude::*};
 use futures::future::Future;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 #[derive(Template)]
 #[template(path = "index.html")]

@@ -1,40 +1,14 @@
 use crate::app::AppState;
-use crate::blocking;
-use crate::db::{
-    Confirm2FA, CreateMerchant, GetCurrentHeight, GetMerchant, GetTransaction, GetTransactions,
-};
+use crate::db::{CreateMerchant, GetMerchant};
 use crate::errors::*;
-use crate::extractor::{BasicAuth, Identity, Session, SimpleJson};
-use crate::filters;
-use crate::fsm::{
-    CreatePayment, CreatePayout, FinalizePayout, GetInitializedPayout, GetNewPayment, GetNewPayout,
-    GetPayout, InitializePayout, MakePayment, PayoutFees,
-};
-use crate::fsm::{KNOCKTURN_SHARE, MINIMAL_WITHDRAW, TRANSFER_FEE};
-use crate::middleware::WithMerchant;
-use crate::models::{Currency, Merchant, Money, Transaction, TransactionStatus, TransactionType};
-use crate::qrcode;
+use crate::extractor::SimpleJson;
+use crate::models::{Merchant, Transaction, TransactionStatus, TransactionType};
 use crate::totp::Totp;
-use crate::wallet::Slate;
-use actix_web::http::Method;
-use actix_web::middleware::identity::RequestIdentity;
-use actix_web::middleware::session::RequestSession;
-use actix_web::{
-    AsyncResponder, Form, FutureResponse, HttpMessage, HttpRequest, HttpResponse, Path, State,
-};
+use actix_web::{AsyncResponder, FutureResponse, HttpResponse, Path, State};
 use askama::Template;
 use bcrypt;
-use chrono::Duration;
-use chrono_humanize::{Accuracy, HumanTime, Tense};
-use data_encoding::BASE64;
-
-use diesel::pg::PgConnection;
-use diesel::{self, prelude::*};
-use futures::future::{err, ok, result, Either, Future};
+use futures::future::{ok, result, Future};
 use mime_guess::get_mime_type;
-use serde::{Deserialize, Serialize};
-use std::env;
-use uuid::Uuid;
 
 pub mod mfa;
 pub mod payment;

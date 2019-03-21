@@ -1,16 +1,12 @@
 use crate::blocking;
-use crate::clients::BearerTokenAuth;
 use crate::db::{
     self, CreateTransaction, DbExecutor, GetMerchant, GetPayment, MarkAsReported, ReportAttempt,
     UpdateTransactionStatus,
 };
 use crate::errors::Error;
 use crate::models::Merchant;
+use crate::models::PENDING_PAYOUT_TTL_SECONDS;
 use crate::models::{Confirmation, Money, Transaction, TransactionStatus, TransactionType};
-use crate::models::{
-    INITIALIZED_PAYOUT_TTL_SECONDS, NEW_PAYMENT_TTL_SECONDS, NEW_PAYOUT_TTL_SECONDS,
-    PENDING_PAYMENT_TTL_SECONDS, PENDING_PAYOUT_TTL_SECONDS,
-};
 use crate::wallet::TxLogEntry;
 use crate::wallet::Wallet;
 use actix::{Actor, Addr, Context, Handler, Message, ResponseFuture};
@@ -160,11 +156,6 @@ impl Message for GetUnreportedPayments {
 
 /*
  * These are messages to control Payout State Machine
- *
- *
- *
- *
- *
  */
 
 #[derive(Debug, Deserialize, Clone, Deref)]
@@ -944,7 +935,6 @@ impl Handler<RejectPayout<NewPayout>> for Fsm {
                             .eq(merchants::columns::balance + msg.payout.grin_amount),
                     )
                     .get_result::<Merchant>(conn)?;
-                    //.map_err::<Error, _>(|e| e.into())?;
 
                     let tx = diesel::update(
                         transactions::table
@@ -955,7 +945,6 @@ impl Handler<RejectPayout<NewPayout>> for Fsm {
                         transactions::columns::updated_at.eq(Utc::now().naive_utc()),
                     ))
                     .get_result(conn)?;
-                    //.map_err::<Error, _>(|e| e.into())?;
                     Ok(tx)
                 })?;
 
@@ -998,7 +987,6 @@ impl Handler<RejectPayout<InitializedPayout>> for Fsm {
                                                 + msg.payout.grin_amount),
                                     )
                                     .get_result::<Merchant>(conn)?;
-                                    //.map_err::<Error, _>(|e| e.into())?;
 
                                     let tx = diesel::update(transactions::table.filter(
                                         transactions::columns::id.eq(msg.payout.id.clone()),
@@ -1010,10 +998,8 @@ impl Handler<RejectPayout<InitializedPayout>> for Fsm {
                                             .eq(Utc::now().naive_utc()),
                                     ))
                                     .get_result(conn)?;
-                                    //.map_err::<Error, _>(|e| e.into())?;
                                     Ok(tx)
                                 })?;
-
                             Ok(RejectedPayout(tx))
                         }
                     })
@@ -1052,7 +1038,6 @@ impl Handler<RejectPayout<PendingPayout>> for Fsm {
                                                 + msg.payout.grin_amount),
                                     )
                                     .get_result::<Merchant>(conn)?;
-                                    //.map_err::<Error, _>(|e| e.into())?;
 
                                     let tx = diesel::update(transactions::table.filter(
                                         transactions::columns::id.eq(msg.payout.id.clone()),
@@ -1064,10 +1049,8 @@ impl Handler<RejectPayout<PendingPayout>> for Fsm {
                                             .eq(Utc::now().naive_utc()),
                                     ))
                                     .get_result(conn)?;
-                                    //.map_err::<Error, _>(|e| e.into())?;
                                     Ok(tx)
                                 })?;
-
                             Ok(RejectedPayout(tx))
                         }
                     })

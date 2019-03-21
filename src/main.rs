@@ -11,7 +11,6 @@ mod extractor;
 mod filters;
 mod fsm;
 mod handlers;
-mod middleware;
 mod models;
 mod node;
 mod qrcode;
@@ -23,13 +22,12 @@ mod wallet;
 #[macro_use]
 extern crate diesel;
 
-use actix::prelude::*;
-use actix_web::server;
-//use actix_web::{http, server, App, HttpRequest, Path};
 use crate::db::DbExecutor;
 use crate::fsm::Fsm;
 use crate::node::Node;
 use crate::wallet::Wallet;
+use actix::prelude::*;
+use actix_web::server;
 use diesel::{r2d2::ConnectionManager, PgConnection};
 use dotenv::dotenv;
 use env_logger;
@@ -77,10 +75,9 @@ fn main() {
         move |_| Fsm { db, wallet, pool }
     });
     let _cron = Arbiter::start({
-        let wallet = wallet.clone();
         let fsm = fsm.clone();
         let pool = pool.clone();
-        move |_| cron::Cron::new(cron_db, wallet, fsm, node, pool)
+        move |_| cron::Cron::new(cron_db, fsm, node, pool)
     });
 
     let mut srv = server::new(move || {
@@ -110,27 +107,3 @@ fn main() {
     srv.start();
     sys.run();
 }
-
-//#[derive(Deserialize)]
-//struct TxPath {
-//    merchant_id: String,
-//    order_id: String,
-//}
-//
-//fn tx_home(tx_path: Path<TxPath>) -> String {
-//    format!(
-//        "Tx home\n merchant {}\n order_id {}\n",
-//        tx_path.merchant_id, tx_path.order_id
-//    )
-//}
-//
-//fn main() {
-//    server::new(|| {
-//        App::new().resource("/orders/{merchant_id}/{order_id}", |r| {
-//            r.method(http::Method::GET).with(tx_home)
-//        })
-//    })
-//    .bind("127.0.0.1:8088")
-//    .unwrap()
-//    .run();
-//}
