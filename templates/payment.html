@@ -62,7 +62,7 @@
 					}
 				},
 				complete:function(data){
-					if (!data.reported) {
+					if (!data.reported && data.status != 'Rejected') {
 						setTimeout(update_status,5000);
 					}
 				}
@@ -70,7 +70,9 @@
 		}
 
 window.onload = function() {
- setTimeout(update_status,5000);
+	if (!data.reported && data.status != 'Rejected') {
+		setTimeout(update_status,5000);
+	}
 }
 
 	</script>
