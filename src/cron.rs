@@ -338,14 +338,29 @@ fn sync_with_node(cron: &mut Cron, _: &mut Context<Cron>) {
                                 debug!("Found {} transactions which got into chain", txs.len());
                             }
                             for tx in txs {
-                                diesel::update(transactions.filter(id.eq(tx.id.clone())))
-                                    .set((
-                                        height.eq(commits.get(&tx.commit.unwrap()).unwrap()),
+                                let query =
+                                    diesel::update(transactions.filter(id.eq(tx.id.clone())));
+
+                                match tx.status {
+                                    TransactionStatus::Pending => query.set((
                                         status.eq(TransactionStatus::InChain),
-                                    ))
-                                    .get_result(conn)
-                                    .map(|_: Transaction| ())
-                                    .map_err::<Error, _>(|e| e.into())?;
+                                        height.eq(commits.get(&tx.commit.unwrap()).unwrap()),
+                                    )),
+                                    TransactionStatus::Rejected => query.set((
+                                        status.eq(TransactionStatus::Refund),
+                                        height.eq(commits.get(&tx.commit.unwrap()).unwrap()),
+                                    )),
+                                    _ => {
+                                        return Err(Error::General(format!(
+                                            "Transaction {} in chain although it has status {}",
+                                            tx.id.clone(),
+                                            tx.status
+                                        )))
+                                    }
+                                }
+                                .get_result(conn)
+                                .map(|_: Transaction| ())
+                                .map_err::<Error, _>(|e| e.into())?;
                             }
                             {
                                 debug!("Set new last_height = {}", new_height);

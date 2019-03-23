@@ -60,6 +60,7 @@ pub enum TransactionStatus {
     InChain,
     Confirmed,
     Initialized,
+    Refund,
 }
 
 #[derive(Debug, PartialEq, DbEnum, Serialize, Deserialize, Clone, Copy, EnumString, Display)]

@@ -59,6 +59,9 @@ pub struct RejectedPayment(Transaction);
 #[derive(Debug, Deserialize, Clone, Deref)]
 pub struct UnreportedPayment(Transaction);
 
+#[derive(Debug, Deserialize, Clone, Deref)]
+pub struct RefundPayment(Transaction);
+
 #[derive(Debug, Deserialize)]
 pub struct CreatePayment {
     pub merchant_id: String,
@@ -83,6 +86,20 @@ pub struct MakePayment {
 
 impl Message for MakePayment {
     type Result = Result<PendingPayment, Error>;
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SeenInChainPayment<T> {
+    pub payment: T,
+    pub height: i64,
+}
+
+impl Message for SeenInChainPayment<PendingPayment> {
+    type Result = Result<InChainPayment, Error>;
+}
+
+impl Message for SeenInChainPayment<RejectedPayment> {
+    type Result = Result<RefundPayment, Error>;
 }
 
 #[derive(Debug, Deserialize)]
@@ -393,6 +410,62 @@ impl Handler<GetPendingPayments> for Fsm {
                     let data = db_response?;
                     Ok(data.into_iter().map(PendingPayment).collect())
                 }),
+        )
+    }
+}
+
+impl Handler<SeenInChainPayment<PendingPayment>> for Fsm {
+    type Result = ResponseFuture<InChainPayment, Error>;
+
+    fn handle(
+        &mut self,
+        msg: SeenInChainPayment<PendingPayment>,
+        _: &mut Self::Context,
+    ) -> Self::Result {
+        Box::new(
+            blocking::run({
+                let pool = self.pool.clone();
+                move || {
+                    use crate::schema::transactions::dsl::*;
+                    let conn: &PgConnection = &pool.get().unwrap();
+                    Ok(
+                        diesel::update(transactions.filter(id.eq(msg.payment.id.clone())))
+                            .set((height.eq(msg.height), status.eq(TransactionStatus::InChain)))
+                            .get_result(conn)
+                            .map(|tx: Transaction| InChainPayment(tx))
+                            .map_err::<Error, _>(|e| e.into())?,
+                    )
+                }
+            })
+            .from_err(),
+        )
+    }
+}
+
+impl Handler<SeenInChainPayment<RejectedPayment>> for Fsm {
+    type Result = ResponseFuture<RefundPayment, Error>;
+
+    fn handle(
+        &mut self,
+        msg: SeenInChainPayment<RejectedPayment>,
+        _: &mut Self::Context,
+    ) -> Self::Result {
+        Box::new(
+            blocking::run({
+                let pool = self.pool.clone();
+                move || {
+                    use crate::schema::transactions::dsl::*;
+                    let conn: &PgConnection = &pool.get().unwrap();
+                    Ok(
+                        diesel::update(transactions.filter(id.eq(msg.payment.id.clone())))
+                            .set((status.eq(TransactionStatus::Refund)))
+                            .get_result(conn)
+                            .map(|tx: Transaction| RefundPayment(tx))
+                            .map_err::<Error, _>(|e| e.into())?,
+                    )
+                }
+            })
+            .from_err(),
         )
     }
 }
