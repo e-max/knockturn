@@ -52,6 +52,7 @@ pub struct Merchant {
  */
 
 #[derive(Debug, PartialEq, DbEnum, Serialize, Deserialize, Clone, Copy, EnumString, Display)]
+#[DieselType = "Transaction_status"]
 pub enum TransactionStatus {
     New,
     Pending,
@@ -62,6 +63,7 @@ pub enum TransactionStatus {
 }
 
 #[derive(Debug, PartialEq, DbEnum, Serialize, Deserialize, Clone, Copy, EnumString, Display)]
+#[DieselType = "Transaction_type"]
 pub enum TransactionType {
     Payment,
     Payout,

@@ -15,6 +15,7 @@ mod models;
 mod node;
 mod qrcode;
 mod rates;
+#[allow(unused_imports)]
 mod schema;
 mod totp;
 mod wallet;
