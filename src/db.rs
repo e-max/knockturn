@@ -104,12 +104,7 @@ pub struct ReportAttempt {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct MarkAsReported {
-    pub transaction_id: Uuid,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct GetUnreportedTransactions;
+pub struct GetUnreportedPaymentsByStatus(pub TransactionStatus);
 
 #[derive(Debug, Deserialize)]
 pub struct Confirm2FA {
@@ -178,11 +173,7 @@ impl Message for ReportAttempt {
     type Result = Result<(), Error>;
 }
 
-impl Message for MarkAsReported {
-    type Result = Result<(), Error>;
-}
-
-impl Message for GetUnreportedTransactions {
+impl Message for GetUnreportedPaymentsByStatus {
     type Result = Result<Vec<Transaction>, Error>;
 }
 
@@ -474,34 +465,20 @@ impl Handler<ReportAttempt> for DbExecutor {
     }
 }
 
-impl Handler<MarkAsReported> for DbExecutor {
-    type Result = Result<(), Error>;
-
-    fn handle(&mut self, msg: MarkAsReported, _: &mut Self::Context) -> Self::Result {
-        info!("Mark transaction {} as reported", msg.transaction_id);
-        use crate::schema::transactions::dsl::*;
-        let conn: &PgConnection = &self.0.get().unwrap();
-        diesel::update(transactions.filter(id.eq(msg.transaction_id)))
-            .set((reported.eq(true),))
-            .get_result(conn)
-            .map_err(|e| e.into())
-            .map(|_: Transaction| ())
-    }
-}
-
-impl Handler<GetUnreportedTransactions> for DbExecutor {
+impl Handler<GetUnreportedPaymentsByStatus> for DbExecutor {
     type Result = Result<Vec<Transaction>, Error>;
 
-    fn handle(&mut self, _: GetUnreportedTransactions, _: &mut Self::Context) -> Self::Result {
+    fn handle(
+        &mut self,
+        msg: GetUnreportedPaymentsByStatus,
+        _: &mut Self::Context,
+    ) -> Self::Result {
         use crate::schema::transactions::dsl::*;
         let conn: &PgConnection = &self.0.get().unwrap();
 
         let query = transactions
             .filter(reported.ne(true))
-            .filter(status.eq_any(vec![
-                TransactionStatus::Confirmed,
-                TransactionStatus::Rejected,
-            ]))
+            .filter(status.eq(msg.0))
             .filter(report_attempts.lt(MAX_REPORT_ATTEMPTS))
             .filter(
                 next_report_attempt
@@ -509,11 +486,11 @@ impl Handler<GetUnreportedTransactions> for DbExecutor {
                     .or(next_report_attempt.is_null()),
             );
 
-        let confirmed_transactions = query
+        let payments = query
             .load::<Transaction>(conn)
             .map_err(|e| Error::Db(s!(e)))?;
 
-        Ok(confirmed_transactions)
+        Ok(payments)
     }
 }
 

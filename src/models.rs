@@ -160,14 +160,14 @@ impl Transaction {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Confirmation {
-    pub id: Uuid,
-    pub token: String,
-    pub external_id: String,
-    pub merchant_id: String,
+#[derive(Debug, Serialize, Clone)]
+pub struct Confirmation<'a> {
+    pub id: &'a Uuid,
+    pub token: &'a str,
+    pub external_id: &'a str,
+    pub merchant_id: &'a str,
     pub grin_amount: i64,
-    pub amount: Money,
+    pub amount: &'a Money,
     pub status: TransactionStatus,
     pub confirmations: i64,
 }

@@ -1,7 +1,7 @@
 use crate::app::AppState;
 use crate::db::{Confirm2FA, GetMerchant};
 use crate::errors::*;
-use crate::extractor::{Identity, Session};
+use crate::extractor::Session;
 use crate::handlers::TemplateIntoResponse;
 use crate::models::Merchant;
 use crate::totp::Totp;

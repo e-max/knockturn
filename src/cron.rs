@@ -3,7 +3,8 @@ use crate::db::{DbExecutor, RejectExpiredPayments};
 use crate::errors::Error;
 use crate::fsm::{
     Fsm, GetExpiredInitializedPayouts, GetExpiredNewPayouts, GetPendingPayments, GetPendingPayouts,
-    GetUnreportedPayments, RejectPayment, RejectPayout, ReportPayment,
+    GetUnreportedConfirmedPayments, GetUnreportedRejectedPayments, RejectPayment, RejectPayout,
+    ReportPayment,
 };
 use crate::models::{Transaction, TransactionStatus};
 use crate::node::Node;
@@ -39,7 +40,14 @@ impl Actor for Cron {
         );
         ctx.run_interval(std::time::Duration::new(5, 0), reject_expired_payments);
         ctx.run_interval(std::time::Duration::new(5, 0), process_pending_payments);
-        ctx.run_interval(std::time::Duration::new(5, 0), process_unreported_payments);
+        ctx.run_interval(
+            std::time::Duration::new(5, 0),
+            process_unreported_confirmed_payments,
+        );
+        ctx.run_interval(
+            std::time::Duration::new(5, 0),
+            process_unreported_rejected_payments,
+        );
         ctx.run_interval(std::time::Duration::new(5, 0), process_expired_new_payouts);
         ctx.run_interval(
             std::time::Duration::new(5, 0),
@@ -121,10 +129,54 @@ fn process_pending_payments(cron: &mut Cron, _: &mut Context<Cron>) {
     actix::spawn(res.map_err(|e| error!("Got an error in processing penging payments {}", e)));
 }
 
-fn process_unreported_payments(cron: &mut Cron, _: &mut Context<Cron>) {
+fn process_unreported_confirmed_payments(cron: &mut Cron, _: &mut Context<Cron>) {
     let res = cron
         .fsm
-        .send(GetUnreportedPayments)
+        .send(GetUnreportedConfirmedPayments)
+        .map_err(|e| Error::General(s!(e)))
+        .and_then(move |db_response| {
+            let payments = db_response?;
+            Ok(payments)
+        })
+        .and_then({
+            let fsm = cron.fsm.clone();
+            move |payments| {
+                let mut futures = vec![];
+                debug!("Found {} unreported payments", payments.len());
+                for payment in payments {
+                    let payment_id = payment.id.clone();
+                    futures.push(
+                        fsm.send(ReportPayment { payment })
+                            .map_err(|e| Error::General(s!(e)))
+                            .and_then(|db_response| {
+                                db_response?;
+                                Ok(())
+                            })
+                            .or_else({
+                                move |e| {
+                                    warn!("Couldn't report payment {}: {}", payment_id, e);
+                                    Ok(())
+                                }
+                            }),
+                    );
+                }
+                join_all(futures).map(|_| ()).map_err(|e| {
+                    error!("got an error {}", e);
+                    e
+                })
+            }
+        });
+
+    actix::spawn(res.map_err(|e| {
+        error!("got an error {}", e);
+        ()
+    }));
+}
+
+fn process_unreported_rejected_payments(cron: &mut Cron, _: &mut Context<Cron>) {
+    let res = cron
+        .fsm
+        .send(GetUnreportedRejectedPayments)
         .map_err(|e| Error::General(s!(e)))
         .and_then(move |db_response| {
             let payments = db_response?;
