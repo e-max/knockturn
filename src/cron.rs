@@ -357,7 +357,7 @@ fn sync_with_node(cron: &mut Cron, _: &mut Context<Cron>) {
     })
     .map_err(|e| e.into())
     .and_then(move |last_height| {
-        node.blocks(last_height, last_height + REQUST_BLOCKS_FROM_NODE)
+        node.blocks(last_height + 1, last_height + 1 + REQUST_BLOCKS_FROM_NODE)
             .and_then(move |blocks| {
                 let new_height = blocks
                     .iter()
