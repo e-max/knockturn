@@ -42,6 +42,7 @@
 		</td></tr>
 		{%- endif %}
 	</table>
+{% if !payment.reported && payment.status != TransactionStatus::Rejected %}
 	<script>
 
 
@@ -70,11 +71,10 @@
 		}
 
 window.onload = function() {
-	if (!data.reported && data.status != 'Rejected') {
-		setTimeout(update_status,5000);
-	}
+	setTimeout(update_status,5000);
 }
 
 	</script>
+{% endif %}
 
 {% endblock %}
