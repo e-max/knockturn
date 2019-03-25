@@ -1,37 +1,14 @@
-#[macro_use]
-mod macros;
-
-mod app;
-mod blocking;
-mod clients;
-mod cron;
-mod db;
-mod errors;
-mod extractor;
-mod filters;
-mod fsm;
-mod handlers;
-mod models;
-mod node;
-mod qrcode;
-mod rates;
-#[allow(unused_imports)]
-mod schema;
-mod totp;
-mod wallet;
-
-#[macro_use]
-extern crate diesel;
-
-use crate::db::DbExecutor;
-use crate::fsm::Fsm;
-use crate::node::Node;
-use crate::wallet::Wallet;
 use actix::prelude::*;
 use actix_web::server;
 use diesel::{r2d2::ConnectionManager, PgConnection};
 use dotenv::dotenv;
 use env_logger;
+use knockturn::app;
+use knockturn::cron;
+use knockturn::db::DbExecutor;
+use knockturn::fsm::Fsm;
+use knockturn::node::Node;
+use knockturn::wallet::Wallet;
 use log::info;
 use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 use std::env;
