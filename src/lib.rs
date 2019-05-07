@@ -17,6 +17,7 @@ pub mod qrcode;
 pub mod rates;
 #[allow(unused_imports)]
 pub mod schema;
+mod ser;
 pub mod totp;
 pub mod wallet;
 

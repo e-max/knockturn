@@ -1,5 +1,6 @@
 use crate::clients::PlainHttpAuth;
 use crate::errors::Error;
+use crate::ser;
 use actix::{Actor, Addr};
 use actix_web::client::{self, ClientConnector};
 use actix_web::HttpMessage;
@@ -276,8 +277,10 @@ pub struct TxLogEntry {
     /// number of outputs involved in TX
     pub num_outputs: usize,
     /// Amount credited via this transaction
+    #[serde(with = "ser::string_or_u64")]
     pub amount_credited: u64,
     /// Amount debited via this transaction
+    #[serde(with = "ser::string_or_u64")]
     pub amount_debited: u64,
     /// Fee
     pub fee: Option<u64>,
@@ -320,6 +323,7 @@ pub struct ParticipantMessages {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ParticipantMessageData {
     /// id of the particpant in the tx
+    #[serde(with = "ser::string_or_u64")]
     pub id: u64,
     /// Public key
     pub public_key: String,
