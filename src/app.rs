@@ -8,6 +8,7 @@ use actix_web::middleware::session::{CookieSessionBackend, SessionStorage};
 use actix_web::{http::Method, middleware, App};
 use diesel::pg::PgConnection;
 use diesel::r2d2::{ConnectionManager, Pool};
+use sentry_actix::SentryMiddleware;
 
 pub struct AppState {
     pub db: Addr<DbExecutor>,
@@ -30,6 +31,7 @@ pub fn create_app(
         pool,
     };
     App::with_state(state)
+        .middleware(SentryMiddleware::new())
         .middleware(middleware::Logger::new("\"%r\" %s %b %Dms"))
         .middleware(IdentityService::new(
             CookieIdentityPolicy::new(cookie_secret)

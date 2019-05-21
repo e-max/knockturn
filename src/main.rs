@@ -11,6 +11,7 @@ use knockturn::node::Node;
 use knockturn::wallet::Wallet;
 use log::info;
 use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
+use sentry;
 use std::env;
 
 fn main() {
@@ -42,6 +43,10 @@ fn main() {
     let node_user = env::var("NODE_USER").expect("NODE_USER must be set");
     let node_pass = env::var("NODE_PASS").expect("NODE_PASS must be set");
     let node = Node::new(&node_url, &node_user, &node_pass);
+
+    let _ = sentry::init("https://3a46c4de68e54de9ab7e86e7547a4073@sentry.io/1464519");
+    env::set_var("RUST_BACKTRACE", "1");
+    sentry::integrations::panic::register_panic_handler();
 
     info!("Starting");
     let cron_db = address.clone();
