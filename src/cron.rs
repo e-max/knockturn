@@ -2,9 +2,8 @@ use crate::blocking;
 use crate::db::{DbExecutor, RejectExpiredPayments};
 use crate::errors::Error;
 use crate::fsm::{
-    Fsm, GetExpiredInitializedPayouts, GetExpiredNewPayouts, GetPendingPayments, GetPendingPayouts,
-    GetUnreportedConfirmedPayments, GetUnreportedRejectedPayments, RejectPayment, RejectPayout,
-    ReportPayment,
+    Fsm, GetPendingPayments, GetUnreportedConfirmedPayments, GetUnreportedRejectedPayments,
+    RejectPayment, ReportPayment,
 };
 use crate::models::{Transaction, TransactionStatus};
 use crate::node::Node;
@@ -48,12 +47,6 @@ impl Actor for Cron {
             std::time::Duration::new(5, 0),
             process_unreported_rejected_payments,
         );
-        ctx.run_interval(std::time::Duration::new(5, 0), process_expired_new_payouts);
-        ctx.run_interval(
-            std::time::Duration::new(5, 0),
-            process_expired_initialized_payouts,
-        );
-        ctx.run_interval(std::time::Duration::new(5, 0), process_pending_payouts);
         ctx.run_interval(std::time::Duration::new(5, 0), sync_with_node);
         ctx.run_interval(std::time::Duration::new(5, 0), autoconfirmation);
     }
@@ -216,132 +209,6 @@ fn process_unreported_rejected_payments(cron: &mut Cron, _: &mut Context<Cron>) 
         ()
     }));
 }
-
-fn process_expired_new_payouts(cron: &mut Cron, _: &mut Context<Cron>) {
-    debug!("run process_expired_new_payouts");
-    let res = cron
-        .fsm
-        .send(GetExpiredNewPayouts)
-        .map_err(|e| Error::General(s!(e)))
-        .and_then(|db_response| {
-            let payouts = db_response?;
-            Ok(payouts)
-        })
-        .and_then({
-            let fsm = cron.fsm.clone();
-            move |payouts| {
-                let mut futures = vec![];
-                debug!("Found {} expired new payouts", payouts.len());
-                for payout in payouts {
-                    let payout_id = payout.id.clone();
-                    futures.push(
-                        fsm.send(RejectPayout { payout })
-                            .map_err(|e| Error::General(s!(e)))
-                            .and_then(|db_response| {
-                                db_response?;
-                                Ok(())
-                            })
-                            .or_else({
-                                move |e| {
-                                    error!("Couldn't reject payout {}: {}", payout_id, e);
-                                    Ok(())
-                                }
-                            }),
-                    );
-                }
-                join_all(futures).map(|_| ()).map_err(|e| {
-                    error!("got an error {}", e);
-                    e
-                })
-            }
-        });
-    actix::spawn(res.map_err(|e| error!("Got an error in processing expired new payouts {}", e)));
-}
-
-fn process_expired_initialized_payouts(cron: &mut Cron, _: &mut Context<Cron>) {
-    debug!("run process_expired_initialized_payouts");
-    let res = cron
-        .fsm
-        .send(GetExpiredInitializedPayouts)
-        .map_err(|e| Error::General(s!(e)))
-        .and_then(|db_response| {
-            let payouts = db_response?;
-            Ok(payouts)
-        })
-        .and_then({
-            let fsm = cron.fsm.clone();
-            move |payouts| {
-                let mut futures = vec![];
-                debug!("Found {} expired initialized payouts", payouts.len());
-                for payout in payouts {
-                    let payout_id = payout.id.clone();
-                    futures.push(
-                        fsm.send(RejectPayout { payout })
-                            .map_err(|e| Error::General(s!(e)))
-                            .and_then(|db_response| {
-                                db_response?;
-                                Ok(())
-                            })
-                            .or_else({
-                                move |e| {
-                                    error!("Couldn't reject payout {}: {}", payout_id, e);
-                                    Ok(())
-                                }
-                            }),
-                    );
-                }
-                join_all(futures).map(|_| ()).map_err(|e| {
-                    error!("got an error {}", e);
-                    e
-                })
-            }
-        });
-    actix::spawn(res.map_err(|e| {
-        error!(
-            "Got an error in processing expired initialized payouts {}",
-            e
-        )
-    }));
-}
-
-fn process_pending_payouts(cron: &mut Cron, _: &mut Context<Cron>) {
-    debug!("run process_pending_payouts");
-    let fsm = cron.fsm.clone();
-    let res = cron
-        .fsm
-        .send(GetPendingPayouts)
-        .map_err(|e| Error::General(s!(e)))
-        .and_then(move |db_response| {
-            let payouts = db_response?;
-            Ok(payouts)
-        })
-        .and_then(move |payouts| {
-            let mut futures = vec![];
-            debug!("Found {} pending payouts", payouts.len());
-            for payout in payouts {
-                if payout.is_expired() {
-                    debug!("payout {} expired: try to reject it", payout.id);
-                    futures.push(
-                        fsm.send(RejectPayout {
-                            payout: payout.clone(),
-                        })
-                        .map_err(|e| Error::General(s!(e)))
-                        .and_then(|db_response| {
-                            db_response?;
-                            Ok(())
-                        })
-                        .or_else(move |e| {
-                            error!("Cannot reject payout {}: {}", payout.id, e);
-                            Ok(())
-                        }),
-                    );
-                }
-            }
-            join_all(futures).map(|_| ())
-        });
-    actix::spawn(res.map_err(|e| error!("Got an error in processing penging payouts {}", e)));
-}
-
 fn sync_with_node(cron: &mut Cron, _: &mut Context<Cron>) {
     debug!("run sync_with_node");
     let pool = cron.pool.clone();

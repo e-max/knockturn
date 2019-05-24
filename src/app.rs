@@ -1,5 +1,6 @@
 use crate::db::DbExecutor;
 use crate::fsm::Fsm;
+use crate::fsm_payout::FsmPayout;
 use crate::handlers::*;
 use crate::wallet::Wallet;
 use actix::prelude::*;
@@ -15,24 +16,30 @@ pub struct AppState {
     pub wallet: Wallet,
     pub pool: Pool<ConnectionManager<PgConnection>>,
     pub fsm: Addr<Fsm>,
+    pub fsm_payout: Addr<FsmPayout>,
 }
 
 pub fn create_app(
     db: Addr<DbExecutor>,
     wallet: Wallet,
     fsm: Addr<Fsm>,
+    fsm_payout: Addr<FsmPayout>,
     pool: Pool<ConnectionManager<PgConnection>>,
     cookie_secret: &[u8],
+    enable_sentry: bool,
 ) -> App<AppState> {
     let state = AppState {
         db,
         wallet,
         fsm,
+        fsm_payout,
         pool,
     };
-    App::with_state(state)
-        .middleware(SentryMiddleware::new())
-        .middleware(middleware::Logger::new("\"%r\" %s %b %Dms"))
+    let mut app = App::with_state(state);
+    if enable_sentry {
+        app = app.middleware(SentryMiddleware::new());
+    }
+    app.middleware(middleware::Logger::new("\"%r\" %s %b %Dms"))
         .middleware(IdentityService::new(
             CookieIdentityPolicy::new(cookie_secret)
                 .name("auth-example")

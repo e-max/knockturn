@@ -1,4 +1,13 @@
 #![allow(dead_code)]
+
+use std::fmt::Write;
+pub fn to_hex(bytes: Vec<u8>) -> String {
+    let mut s = String::new();
+    for byte in bytes {
+        write!(&mut s, "{:02x}", byte).expect("Unable to write");
+    }
+    s
+}
 /// Used to ensure u64s are serialised in json
 /// as strings by default, since it can't be guaranteed that consumers
 /// will know what to do with u64 literals (e.g. Javascript). However,

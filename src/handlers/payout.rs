@@ -3,7 +3,7 @@ use crate::errors::*;
 use crate::extractor::{Identity, SimpleJson};
 use crate::filters;
 use crate::fsm::MINIMAL_WITHDRAW;
-use crate::fsm::{
+use crate::fsm_payout::{
     CreatePayout, FinalizePayout, GetInitializedPayout, GetNewPayout, GetPayout, InitializePayout,
     PayoutFees,
 };
@@ -79,7 +79,7 @@ pub fn create_payout(
                     withdraw(identity_merchant)
                 } else {
                     req.state()
-                        .fsm
+                        .fsm_payout
                         .send(CreatePayout {
                             amount: form.amount,
                             merchant_id: merchant.id,
@@ -110,7 +110,7 @@ pub fn get_payout(
     let merchant_id = req.identity().unwrap();
 
     state
-        .fsm
+        .fsm_payout
         .send(GetPayout {
             merchant_id: merchant_id,
             transaction_id: transaction_id.clone(),
@@ -143,7 +143,7 @@ pub fn generate_slate(
     };
 
     let res = state
-        .fsm
+        .fsm_payout
         .send(GetNewPayout {
             merchant_id: merchant_id,
             transaction_id: transaction_id.clone(),
@@ -173,7 +173,7 @@ pub fn generate_slate(
             }
         })
         .and_then({
-            let fsm = state.fsm.clone();
+            let fsm = state.fsm_payout.clone();
             move |(new_payout, slate, wallet_tx)| {
                 let commit = slate.tx.output_commitments()[0].clone();
                 fsm.send(InitializePayout {
@@ -202,7 +202,7 @@ pub fn accept_slate(
     (slate, tx_id, state): (SimpleJson<Slate>, Path<Uuid>, State<AppState>),
 ) -> FutureResponse<HttpResponse, Error> {
     state
-        .fsm
+        .fsm_payout
         .send(GetInitializedPayout {
             transaction_id: tx_id.clone(),
         })
@@ -213,7 +213,7 @@ pub fn accept_slate(
         })
         .and_then({
             let wallet = state.wallet.clone();
-            let fsm = state.fsm.clone();
+            let fsm = state.fsm_payout.clone();
             move |initialized_payout| {
                 wallet.finalize(&slate).and_then({
                     let wallet = wallet.clone();

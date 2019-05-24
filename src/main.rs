@@ -3,12 +3,12 @@ use actix_web::server;
 use diesel::{r2d2::ConnectionManager, PgConnection};
 use dotenv::dotenv;
 use env_logger;
-use knockturn::app;
-use knockturn::cron;
 use knockturn::db::DbExecutor;
 use knockturn::fsm::Fsm;
+use knockturn::fsm_payout::FsmPayout;
 use knockturn::node::Node;
 use knockturn::wallet::Wallet;
+use knockturn::{app, cron, cron_payout};
 use log::info;
 use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 use sentry;
@@ -42,11 +42,14 @@ fn main() {
     let node_url = env::var("NODE_URL").expect("NODE_URL must be set");
     let node_user = env::var("NODE_USER").expect("NODE_USER must be set");
     let node_pass = env::var("NODE_PASS").expect("NODE_PASS must be set");
+    let sentry_url = env::var("SENTRY_URL").unwrap_or("".to_owned());
     let node = Node::new(&node_url, &node_user, &node_pass);
 
-    let _ = sentry::init("https://3a46c4de68e54de9ab7e86e7547a4073@sentry.io/1464519");
-    env::set_var("RUST_BACKTRACE", "1");
-    sentry::integrations::panic::register_panic_handler();
+    if sentry_url != "" {
+        let _ = sentry::init("https://3a46c4de68e54de9ab7e86e7547a4073@sentry.io/1464519");
+        env::set_var("RUST_BACKTRACE", "1");
+        sentry::integrations::panic::register_panic_handler();
+    }
 
     info!("Starting");
     let cron_db = address.clone();
@@ -57,10 +60,21 @@ fn main() {
         let pool = pool.clone();
         move |_| Fsm { db, wallet, pool }
     });
+    let fsm_payout: Addr<FsmPayout> = Arbiter::start({
+        let wallet = wallet.clone();
+        let db = address.clone();
+        let pool = pool.clone();
+        move |_| FsmPayout { db, wallet, pool }
+    });
     let _cron = Arbiter::start({
         let fsm = fsm.clone();
         let pool = pool.clone();
+        let cron_db = cron_db.clone();
         move |_| cron::Cron::new(cron_db, fsm, node, pool)
+    });
+    let _cron_payout = Arbiter::start({
+        let fsm = fsm_payout.clone();
+        move |_| cron_payout::CronPayout::new(cron_db.clone(), fsm)
     });
 
     let mut srv = server::new(move || {
@@ -68,8 +82,10 @@ fn main() {
             address.clone(),
             wallet.clone(),
             fsm.clone(),
+            fsm_payout.clone(),
             pool.clone(),
             cookie_secret.as_bytes(),
+            sentry_url != "",
         )
     });
 
