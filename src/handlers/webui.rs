@@ -4,12 +4,13 @@ use crate::db::GetMerchant;
 use crate::errors::*;
 use crate::extractor::Identity;
 use crate::filters;
+use crate::handlers::paginator::Paginate;
 use crate::handlers::BootstrapColor;
 use crate::handlers::TemplateIntoResponse;
 use crate::models::{Merchant, Transaction, TransactionType};
 use actix_web::middleware::identity::RequestIdentity;
 use actix_web::middleware::session::RequestSession;
-use actix_web::{AsyncResponder, Form, FutureResponse, HttpRequest, HttpResponse};
+use actix_web::{AsyncResponder, Form, FutureResponse, HttpRequest, HttpResponse, Query};
 use askama::Template;
 use diesel::pg::PgConnection;
 use diesel::{self, prelude::*};
@@ -138,7 +139,7 @@ struct TransactionsTemplate {
 }
 
 pub fn get_transactions(
-    (merchant, req): (Identity<Merchant>, HttpRequest<AppState>),
+    (merchant, req, paginate): (Identity<Merchant>, HttpRequest<AppState>, Query<Paginate>),
 ) -> FutureResponse<HttpResponse> {
     let merchant = merchant.into_inner();
     blocking::run({
@@ -147,10 +148,9 @@ pub fn get_transactions(
         move || {
             use crate::schema::transactions::dsl::*;
             let conn: &PgConnection = &pool.get().unwrap();
-            let txs = transactions
+            let txs = paginate
+                .set(transactions)
                 .filter(merchant_id.eq(merch_id))
-                .offset(0)
-                .limit(10)
                 .load::<Transaction>(conn)
                 .map_err::<Error, _>(|e| e.into())?;
 
