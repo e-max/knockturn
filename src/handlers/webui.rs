@@ -4,7 +4,7 @@ use crate::db::GetMerchant;
 use crate::errors::*;
 use crate::extractor::Identity;
 use crate::filters;
-use crate::handlers::paginator::Paginate;
+use crate::handlers::paginator::{Paginate, Paginator};
 use crate::handlers::BootstrapColor;
 use crate::handlers::TemplateIntoResponse;
 use crate::models::{Merchant, Transaction, TransactionType};
@@ -148,8 +148,8 @@ pub fn get_transactions(
         move || {
             use crate::schema::transactions::dsl::*;
             let conn: &PgConnection = &pool.get().unwrap();
-            let txs = paginate
-                .set(transactions)
+            let txs = transactions
+                .for_page(&paginate)
                 .filter(merchant_id.eq(merch_id))
                 .load::<Transaction>(conn)
                 .map_err::<Error, _>(|e| e.into())?;

@@ -1,6 +1,4 @@
-use diesel::dsl::Limit;
 use diesel::query_dsl::methods::{LimitDsl, OffsetDsl};
-use diesel::query_dsl::QueryDsl;
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -20,20 +18,18 @@ impl Default for Paginate {
     }
 }
 
-impl Paginate {
-    pub fn set<T>(&self, query: T) -> Limit<T::Output>
-    where
-        T: OffsetDsl,
-        T::Output: LimitDsl,
-        <<T as OffsetDsl>::Output as LimitDsl>::Output: QueryDsl,
-    {
-        let page = if self.page == 0 { 1 } else { self.page };
-        let per_page = if self.per_page == 0 {
-            10
-        } else {
-            self.per_page
-        };
-
-        LimitDsl::limit(OffsetDsl::offset(query, (page - 1) * per_page), per_page)
+pub trait Paginator : Sized
+where
+    Self: OffsetDsl,
+    Self::Output: LimitDsl
+{
+    fn for_page(self, p: &Paginate) -> <Self::Output as LimitDsl>::Output {
+        self.offset(p.page - 1).limit(p.per_page)
     }
 }
+
+impl<T> Paginator for T
+where
+    T: OffsetDsl,
+    T::Output: LimitDsl {}
+
