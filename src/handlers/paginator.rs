@@ -1,11 +1,10 @@
 use diesel::query_dsl::methods::{LimitDsl, OffsetDsl};
 use serde::Deserialize;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
+#[serde(default)]
 pub struct Paginate {
-    #[serde(default)]
     page: i64,
-    #[serde(default)]
     per_page: i64,
 }
 
