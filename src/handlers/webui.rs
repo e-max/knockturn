@@ -4,7 +4,7 @@ use crate::db::GetMerchant;
 use crate::errors::*;
 use crate::extractor::Identity;
 use crate::filters;
-use crate::handlers::paginator::{Paginate, Paginator};
+use crate::handlers::paginator::{PageInfo, Paginator};
 use crate::handlers::BootstrapColor;
 use crate::handlers::TemplateIntoResponse;
 use crate::models::{Merchant, Transaction, TransactionType};
@@ -139,7 +139,7 @@ struct TransactionsTemplate {
 }
 
 pub fn get_transactions(
-    (merchant, req, paginate): (Identity<Merchant>, HttpRequest<AppState>, Query<Paginate>),
+    (merchant, req, page_info): (Identity<Merchant>, HttpRequest<AppState>, Query<PageInfo>),
 ) -> FutureResponse<HttpResponse> {
     let merchant = merchant.into_inner();
     blocking::run({
@@ -149,7 +149,7 @@ pub fn get_transactions(
             use crate::schema::transactions::dsl::*;
             let conn: &PgConnection = &pool.get().unwrap();
             let txs = transactions
-                .for_page(&paginate)
+                .for_page(&page_info)
                 .filter(merchant_id.eq(merch_id))
                 .load::<Transaction>(conn)
                 .map_err::<Error, _>(|e| e.into())?;

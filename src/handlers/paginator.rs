@@ -3,14 +3,14 @@ use serde::Deserialize;
 
 #[derive(Deserialize, Debug)]
 #[serde(default)]
-pub struct Paginate {
+pub struct PageInfo {
     page: i64,
     per_page: i64,
 }
 
-impl Default for Paginate {
+impl Default for PageInfo {
     fn default() -> Self {
-        Paginate {
+        PageInfo {
             page: 1,
             per_page: 10,
         }
@@ -22,7 +22,7 @@ where
     Self: OffsetDsl,
     Self::Output: LimitDsl
 {
-    fn for_page(self, p: &Paginate) -> <Self::Output as LimitDsl>::Output {
+    fn for_page(self, p: &PageInfo) -> <Self::Output as LimitDsl>::Output {
         self.offset(p.page - 1).limit(p.per_page)
     }
 }
