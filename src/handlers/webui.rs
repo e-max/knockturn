@@ -4,7 +4,7 @@ use crate::db::GetMerchant;
 use crate::errors::*;
 use crate::extractor::Identity;
 use crate::filters;
-use crate::handlers::paginator::{PageInfo, Paginator};
+use crate::handlers::paginator::{Paginate, Paginator, Pages};
 use crate::handlers::BootstrapColor;
 use crate::handlers::TemplateIntoResponse;
 use crate::models::{Merchant, Transaction, TransactionType};
@@ -136,23 +136,29 @@ pub fn logout(req: HttpRequest<AppState>) -> Result<HttpResponse, Error> {
 struct TransactionsTemplate {
     transactions: Vec<Transaction>,
     current_height: i64,
+    pages: Pages,
 }
 
 pub fn get_transactions(
-    (merchant, req, page_info): (Identity<Merchant>, HttpRequest<AppState>, Query<PageInfo>),
+    (merchant, req, paginate): (Identity<Merchant>, HttpRequest<AppState>, Paginate),
 ) -> FutureResponse<HttpResponse> {
     let merchant = merchant.into_inner();
     blocking::run({
         let merch_id = merchant.id.clone();
         let pool = req.state().pool.clone();
+        let paginate = paginate.clone();
         move || {
             use crate::schema::transactions::dsl::*;
             let conn: &PgConnection = &pool.get().unwrap();
             let txs = transactions
-                .for_page(&page_info)
-                .filter(merchant_id.eq(merch_id))
+                .for_page(&paginate)
+                .filter(merchant_id.eq(merch_id.clone()))
                 .load::<Transaction>(conn)
                 .map_err::<Error, _>(|e| e.into())?;
+
+            let total = transactions
+                .filter(merchant_id.eq(merch_id))
+                .count().first(conn)?;
 
             let current_height = {
                 use crate::schema::current_height::dsl::*;
@@ -161,17 +167,17 @@ pub fn get_transactions(
                     .first(conn)
                     .map_err::<Error, _>(|e| e.into())
             }?;
-            Ok((txs, current_height))
+            Ok((txs, current_height, total))
         }
     })
     .from_err()
-    .and_then(|(transactions, current_height)| {
+    .and_then(move |(transactions, current_height, total)| {
         let html = TransactionsTemplate {
-            transactions,
-            current_height,
-        }
-        .render()
-        .map_err(|e| Error::from(e))?;
+            transactions: transactions,
+            current_height: current_height,
+            pages: paginate.for_total(total),
+        }.render()
+            .map_err(|e| Error::from(e))?;
         Ok(HttpResponse::Ok().content_type("text/html").body(html))
     })
     .responder()
