@@ -12,8 +12,8 @@ pub struct Paginate {
     url: Url,
 }
 
-impl Paginate {
-    pub fn for_total(&self, total_items: i64) -> Pages {
+impl<'a> Paginate {
+    pub fn for_total(&'a self, total_items: i64) -> Pages<'a> {
         let mut total_pages = total_items / self.per_page;
         if total_items % self.per_page != 0 {
             total_pages += 1;
@@ -21,7 +21,7 @@ impl Paginate {
         Pages {
             page: self.page,
             total: total_pages,
-            url: self.url.clone(),
+            url: &self.url,
         }
     }
 }
@@ -67,41 +67,41 @@ impl<S> FromRequest<S> for Paginate {
     }
 }
 
-pub struct PageIter {
+pub struct PageIter<'a> {
     page: i64,
     total: i64,
     current: i64,
-    url: Url,
+    url: &'a Url,
 }
 
-pub struct Pages {
+pub struct Pages<'a> {
     page: i64,
     total: i64,
-    url: Url,
+    url: &'a Url,
 }
 
-impl IntoIterator for Pages {
+impl<'a> IntoIterator for Pages<'a> {
     type Item = Page;
-    type IntoIter = PageIter;
+    type IntoIter = PageIter<'a>;
     fn into_iter(self) -> Self::IntoIter {
         PageIter {
             page: self.page,
             total: self.total,
             current: 0,
-            url: self.url.clone(),
+            url: self.url,
         }
     }
 }
 
-impl<'a> IntoIterator for &'a Pages {
+impl<'a> IntoIterator for &'a Pages<'a> {
     type Item = Page;
-    type IntoIter = PageIter;
+    type IntoIter = PageIter<'a>;
     fn into_iter(self) -> Self::IntoIter {
         PageIter {
             page: self.page,
             total: self.total,
             current: 0,
-            url: self.url.clone(),
+            url: self.url,
         }
     }
 }
@@ -121,7 +121,7 @@ impl fmt::Display for Page {
     }
 }
 
-impl Iterator for PageIter {
+impl<'a> Iterator for PageIter<'a> {
     type Item = Page;
     fn next(&mut self) -> Option<Self::Item> {
         if self.current >= self.total {

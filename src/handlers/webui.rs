@@ -133,10 +133,10 @@ pub fn logout(req: HttpRequest<AppState>) -> Result<HttpResponse, Error> {
 
 #[derive(Template)]
 #[template(path = "transactions.html")]
-struct TransactionsTemplate {
+struct TransactionsTemplate<'a> {
     transactions: Vec<Transaction>,
     current_height: i64,
-    pages: Pages,
+    pages: Pages<'a>,
 }
 
 pub fn get_transactions(
