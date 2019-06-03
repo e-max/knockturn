@@ -36,7 +36,12 @@
   </table>
 
 {% for page in pages %}
-	{{ page }}
+	{{ page|safe }}
 {% endfor %}
+
+!!!!<br/>
+
+{{ pages|join(",")|safe }}
+
 
 {% endblock %}

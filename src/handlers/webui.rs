@@ -4,7 +4,7 @@ use crate::db::GetMerchant;
 use crate::errors::*;
 use crate::extractor::Identity;
 use crate::filters;
-use crate::handlers::paginator::{Paginate, Paginator, Pages};
+use crate::handlers::paginator::{Pages, Paginate, Paginator};
 use crate::handlers::BootstrapColor;
 use crate::handlers::TemplateIntoResponse;
 use crate::models::{Merchant, Transaction, TransactionType};
@@ -158,7 +158,8 @@ pub fn get_transactions(
 
             let total = transactions
                 .filter(merchant_id.eq(merch_id))
-                .count().first(conn)?;
+                .count()
+                .first(conn)?;
 
             let current_height = {
                 use crate::schema::current_height::dsl::*;
@@ -176,8 +177,9 @@ pub fn get_transactions(
             transactions: transactions,
             current_height: current_height,
             pages: paginate.for_total(total),
-        }.render()
-            .map_err(|e| Error::from(e))?;
+        }
+        .render()
+        .map_err(|e| Error::from(e))?;
         Ok(HttpResponse::Ok().content_type("text/html").body(html))
     })
     .responder()
