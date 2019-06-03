@@ -2,6 +2,7 @@ use actix_web::{Error, FromRequest, HttpRequest};
 use diesel::query_dsl::methods::{LimitDsl, OffsetDsl};
 use serde::Deserialize;
 use serde_urlencoded;
+use std::fmt;
 use url::Url;
 
 #[derive(Debug, Clone)]
@@ -80,7 +81,7 @@ pub struct Pages {
 }
 
 impl IntoIterator for Pages {
-    type Item = String;
+    type Item = Page;
     type IntoIter = PageIter;
     fn into_iter(self) -> Self::IntoIter {
         PageIter {
@@ -93,7 +94,7 @@ impl IntoIterator for Pages {
 }
 
 impl<'a> IntoIterator for &'a Pages {
-    type Item = String;
+    type Item = Page;
     type IntoIter = PageIter;
     fn into_iter(self) -> Self::IntoIter {
         PageIter {
@@ -105,9 +106,24 @@ impl<'a> IntoIterator for &'a Pages {
     }
 }
 
+pub struct Page {
+    pub url: String,
+    pub num: String,
+    pub is_current: bool,
+}
+impl fmt::Display for Page {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if self.is_current {
+            write!(f, "{}", self.num)
+        } else {
+            write!(f, "<a href =\"{}\">{}</a>", self.url, self.num)
+        }
+    }
+}
+
 impl Iterator for PageIter {
-    type Item = String;
-    fn next(&mut self) -> Option<String> {
+    type Item = Page;
+    fn next(&mut self) -> Option<Self::Item> {
         if self.current >= self.total {
             return None;
         }
@@ -122,13 +138,17 @@ impl Iterator for PageIter {
             .append_pair("page", &self.current.to_string());
 
         if self.current == self.page {
-            Some(self.page.to_string())
+            Some(Page {
+                url: "".to_owned(),
+                num: self.page.to_string(),
+                is_current: true,
+            })
         } else {
-            Some(format!(
-                "<a href =\"{}\">{}</a>",
-                url.as_str(),
-                self.current
-            ))
+            Some(Page {
+                url: url.as_str().to_owned(),
+                num: self.current.to_string(),
+                is_current: false,
+            })
         }
     }
 }

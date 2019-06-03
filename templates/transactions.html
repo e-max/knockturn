@@ -42,6 +42,23 @@
 !!!!<br/>
 
 {{ pages|join(",")|safe }}
+!!!!<br/>
+
+{% for page in pages -%}
+	
+	{% if page.is_current -%}
+		{{page.num}}
+	{%- else -%}
+		<a href="{{page.url|safe}}">{{page.num}}</a>
+	{%- endif -%}
+
+
+	{%- if !loop.last -%}
+	  ,
+	{%- endif -%}
+
+{% endfor %}
+
 
 
 {% endblock %}
