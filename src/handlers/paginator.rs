@@ -1,31 +1,8 @@
-use actix_web::dev::QueryConfig;
-use actix_web::http::StatusCode;
-use actix_web::{Error, FromRequest, HttpRequest, HttpResponse, ResponseError};
+use actix_web::{Error, FromRequest, HttpRequest};
 use diesel::query_dsl::methods::{LimitDsl, OffsetDsl};
-use failure::Fail;
-use failure::ResultExt;
 use serde::Deserialize;
 use serde_urlencoded;
-use std::borrow::Cow;
-use std::fmt;
-use std::rc::Rc;
-use std::str::FromStr;
 use url::Url;
-
-#[derive(Fail, Debug)]
-pub struct PaginateError;
-
-impl fmt::Display for PaginateError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt("paginate error", f)
-    }
-}
-
-impl ResponseError for PaginateError {
-    fn error_response(&self) -> HttpResponse {
-        HttpResponse::new(StatusCode::BAD_REQUEST)
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct Paginate {
@@ -59,7 +36,7 @@ impl Default for PaginateConfig {
 }
 
 #[derive(Deserialize, Debug)]
-pub struct PageInfo {
+struct PageInfo {
     page: Option<i64>,
     per_page: Option<i64>,
 }
@@ -139,7 +116,7 @@ impl Iterator for PageIter {
 
         url.query_pairs_mut()
             .clear()
-            .extend_pairs(self.url.query_pairs().filter(|(k, v)| k != "page"));
+            .extend_pairs(self.url.query_pairs().filter(|(k, _)| k != "page"));
 
         url.query_pairs_mut()
             .append_pair("page", &self.current.to_string());

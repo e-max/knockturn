@@ -10,7 +10,7 @@ use crate::handlers::TemplateIntoResponse;
 use crate::models::{Merchant, Transaction, TransactionType};
 use actix_web::middleware::identity::RequestIdentity;
 use actix_web::middleware::session::RequestSession;
-use actix_web::{AsyncResponder, Form, FutureResponse, HttpRequest, HttpResponse, Query};
+use actix_web::{AsyncResponder, Form, FutureResponse, HttpRequest, HttpResponse};
 use askama::Template;
 use diesel::pg::PgConnection;
 use diesel::{self, prelude::*};
