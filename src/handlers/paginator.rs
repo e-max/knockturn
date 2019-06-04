@@ -90,10 +90,8 @@ impl<S> FromRequest<S> for Paginate {
 }
 
 pub struct PageIter<'a> {
-    page: i64,
-    end: i64,
     current: i64,
-    url: &'a Url,
+    pages: &'a Pages<'a>,
 }
 
 pub struct Pages<'a> {
@@ -104,15 +102,27 @@ pub struct Pages<'a> {
     url: &'a Url,
 }
 
+impl<'a> Pages<'a> {
+    pub fn url_for_page(&self, page: i64) -> String {
+        let mut url = self.url.clone();
+
+        url.query_pairs_mut()
+            .clear()
+            .extend_pairs(self.url.query_pairs().filter(|(k, _)| k != "page"));
+
+        url.query_pairs_mut().append_pair("page", &page.to_string());
+
+        url.as_str().to_owned()
+    }
+}
+
 impl<'a> IntoIterator for Pages<'a> {
     type Item = Page;
     type IntoIter = PageIter<'a>;
     fn into_iter(self) -> Self::IntoIter {
         PageIter {
-            page: self.page,
-            end: self.end,
             current: self.start - 1,
-            url: self.url,
+            pages: self,
         }
     }
 }
@@ -122,10 +132,8 @@ impl<'a> IntoIterator for &'a Pages<'a> {
     type IntoIter = PageIter<'a>;
     fn into_iter(self) -> Self::IntoIter {
         PageIter {
-            page: self.page,
-            end: self.end,
             current: self.start - 1,
-            url: self.url,
+            pages: self,
         }
     }
 }
@@ -148,28 +156,19 @@ impl fmt::Display for Page {
 impl<'a> Iterator for PageIter<'a> {
     type Item = Page;
     fn next(&mut self) -> Option<Self::Item> {
-        if self.current >= self.end {
+        if self.current >= self.pages.end {
             return None;
         }
         self.current += 1;
-        let mut url = self.url.clone();
-
-        url.query_pairs_mut()
-            .clear()
-            .extend_pairs(self.url.query_pairs().filter(|(k, _)| k != "page"));
-
-        url.query_pairs_mut()
-            .append_pair("page", &self.current.to_string());
-
-        if self.current == self.page {
+        if self.current == self.pages.page {
             Some(Page {
                 url: "".to_owned(),
-                num: self.page.to_string(),
+                num: self.pages.page.to_string(),
                 is_current: true,
             })
         } else {
             Some(Page {
-                url: url.as_str().to_owned(),
+                url: self.pages.url_for_page(self.current),
                 num: self.current.to_string(),
                 is_current: false,
             })
