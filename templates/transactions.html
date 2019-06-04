@@ -44,6 +44,10 @@
 {{ pages|join(",")|safe }}
 !!!!<br/>
 
+{% if pages.start != 1 -%}
+  1 ...
+{%- endif -%}
+
 {% for page in pages -%}
 	
 	{% if page.is_current -%}
@@ -58,6 +62,10 @@
 	{%- endif -%}
 
 {% endfor %}
+
+{% if pages.end != pages.total -%}
+... {{ pages.total }}
+{%- endif -%}
 
 
 

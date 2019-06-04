@@ -2,6 +2,7 @@ use actix_web::{Error, FromRequest, HttpRequest};
 use diesel::query_dsl::methods::{LimitDsl, OffsetDsl};
 use serde::Deserialize;
 use serde_urlencoded;
+use std::cmp;
 use std::fmt;
 use url::Url;
 
@@ -10,6 +11,7 @@ pub struct Paginate {
     pub page: i64,
     pub per_page: i64,
     url: Url,
+    max_pages: Option<i64>,
 }
 
 impl<'a> Paginate {
@@ -18,8 +20,23 @@ impl<'a> Paginate {
         if total_items % self.per_page != 0 {
             total_pages += 1;
         }
+
+        let mut start = 1;
+        let mut end = total_pages;
+
+        if let Some(max) = self.max_pages {
+            start = cmp::max(start, self.page - max / 2);
+            end = start + max - 1;
+            if end > total_pages {
+                start = cmp::max(1, start - (end - total_pages));
+                end = total_pages;
+            }
+        }
+
         Pages {
             page: self.page,
+            start: start,
+            end: end,
             total: total_pages,
             url: &self.url,
         }
@@ -28,11 +45,15 @@ impl<'a> Paginate {
 
 pub struct PaginateConfig {
     per_page: i64,
+    max_pages: Option<i64>,
 }
 
 impl Default for PaginateConfig {
     fn default() -> Self {
-        PaginateConfig { per_page: 10 }
+        PaginateConfig {
+            per_page: 10,
+            max_pages: Some(3),
+        }
     }
 }
 
@@ -63,20 +84,23 @@ impl<S> FromRequest<S> for Paginate {
             page: page_info.page.unwrap_or(1),
             per_page: page_info.per_page.unwrap_or(cfg.per_page),
             url: url,
+            max_pages: cfg.max_pages,
         })
     }
 }
 
 pub struct PageIter<'a> {
     page: i64,
-    total: i64,
+    end: i64,
     current: i64,
     url: &'a Url,
 }
 
 pub struct Pages<'a> {
-    page: i64,
-    total: i64,
+    pub page: i64,
+    pub start: i64,
+    pub end: i64,
+    pub total: i64,
     url: &'a Url,
 }
 
@@ -86,8 +110,8 @@ impl<'a> IntoIterator for Pages<'a> {
     fn into_iter(self) -> Self::IntoIter {
         PageIter {
             page: self.page,
-            total: self.total,
-            current: 0,
+            end: self.end,
+            current: self.start - 1,
             url: self.url,
         }
     }
@@ -99,8 +123,8 @@ impl<'a> IntoIterator for &'a Pages<'a> {
     fn into_iter(self) -> Self::IntoIter {
         PageIter {
             page: self.page,
-            total: self.total,
-            current: 0,
+            end: self.end,
+            current: self.start - 1,
             url: self.url,
         }
     }
@@ -124,7 +148,7 @@ impl fmt::Display for Page {
 impl<'a> Iterator for PageIter<'a> {
     type Item = Page;
     fn next(&mut self) -> Option<Self::Item> {
-        if self.current >= self.total {
+        if self.current >= self.end {
             return None;
         }
         self.current += 1;
