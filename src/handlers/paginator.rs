@@ -2,6 +2,7 @@ use actix_web::{Error, FromRequest, HttpRequest};
 use diesel::query_dsl::methods::{LimitDsl, OffsetDsl};
 use serde::Deserialize;
 use serde_urlencoded;
+use std::borrow::Cow;
 use std::cmp;
 use std::fmt;
 use url::Url;
@@ -91,9 +92,10 @@ impl<S> FromRequest<S> for Paginate {
 
 pub struct PageIter<'a> {
     current: i64,
-    pages: &'a Pages<'a>,
+    pages: Cow<'a, Pages<'a>>,
 }
 
+#[derive(Debug, Clone)]
 pub struct Pages<'a> {
     pub page: i64,
     pub start: i64,
@@ -122,7 +124,7 @@ impl<'a> IntoIterator for Pages<'a> {
     fn into_iter(self) -> Self::IntoIter {
         PageIter {
             current: self.start - 1,
-            pages: self,
+            pages: Cow::Owned(self),
         }
     }
 }
@@ -133,7 +135,7 @@ impl<'a> IntoIterator for &'a Pages<'a> {
     fn into_iter(self) -> Self::IntoIter {
         PageIter {
             current: self.start - 1,
-            pages: self,
+            pages: Cow::Borrowed(&self),
         }
     }
 }
