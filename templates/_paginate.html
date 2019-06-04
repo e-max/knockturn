@@ -1,0 +1,23 @@
+
+{% if pages.start != 1 -%}
+<a href="{{pages.get(1).url|safe}}">1</a> ...
+{%- endif -%}
+
+{% for page in pages -%}
+	
+	{% if page.is_current -%}
+		{{page.num}}
+	{%- else -%}
+		<a href="{{page.url|safe}}">{{page.num}}</a>
+	{%- endif -%}
+
+
+	{%- if !loop.last -%}
+	  ,
+	{%- endif -%}
+
+{% endfor %}
+
+{% if pages.end != pages.total -%}
+...  <a href="{{pages.get(pages.total).url|safe}}">{{pages.total}}</a>
+{%- endif -%}
