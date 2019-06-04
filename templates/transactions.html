@@ -35,15 +35,6 @@
 		</tbody>
   </table>
 
-{% for page in pages %}
-	{{ page|safe }}
-{% endfor %}
-
-!!!!<br/>
-
-{{ pages|join(",")|safe }}
-!!!!<br/>
-
 
 {% if pages.start != 1 -%}
 <a href="{{pages.get(1).url|safe}}">1</a> ...
