@@ -116,6 +116,22 @@ impl<'a> Pages<'a> {
 
         url.as_str().to_owned()
     }
+
+    pub fn get(&self, page: i64) -> Page {
+        if page == self.page {
+            Page {
+                url: "".to_owned(),
+                num: self.page.to_string(),
+                is_current: true,
+            }
+        } else {
+            Page {
+                url: self.url_for_page(page),
+                num: page.to_string(),
+                is_current: false,
+            }
+        }
+    }
 }
 
 impl<'a> IntoIterator for Pages<'a> {
@@ -162,19 +178,7 @@ impl<'a> Iterator for PageIter<'a> {
             return None;
         }
         self.current += 1;
-        if self.current == self.pages.page {
-            Some(Page {
-                url: "".to_owned(),
-                num: self.pages.page.to_string(),
-                is_current: true,
-            })
-        } else {
-            Some(Page {
-                url: self.pages.url_for_page(self.current),
-                num: self.current.to_string(),
-                is_current: false,
-            })
-        }
+        Some(self.pages.get(self.current))
     }
 }
 
