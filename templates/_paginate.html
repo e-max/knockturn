@@ -1,4 +1,4 @@
-
+Pages: 
 {% if pages.start != 1 -%}
 <a href="{{pages.get(1).url|safe}}">1</a> ...
 {%- endif -%}
@@ -14,7 +14,7 @@
 
 	{%- if !loop.last -%}
 	  ,
-	{%- endif -%}
+	{% endif -%}
 
 {% endfor %}
 

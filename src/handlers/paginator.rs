@@ -53,7 +53,7 @@ impl Default for PaginateConfig {
     fn default() -> Self {
         PaginateConfig {
             per_page: 10,
-            max_pages: Some(3),
+            max_pages: Some(10),
         }
     }
 }
