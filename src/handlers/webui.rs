@@ -2,7 +2,7 @@ use crate::app::AppState;
 use crate::blocking;
 use crate::db::GetMerchant;
 use crate::errors::*;
-use crate::extractor::Identity;
+use crate::extractor::User;
 use crate::filters;
 use crate::handlers::paginator::{Pages, Paginate, Paginator};
 use crate::handlers::BootstrapColor;
@@ -27,7 +27,7 @@ struct IndexTemplate<'a> {
 }
 
 pub fn index(
-    (merchant, req): (Identity<Merchant>, HttpRequest<AppState>),
+    (merchant, req): (User<Merchant>, HttpRequest<AppState>),
 ) -> FutureResponse<HttpResponse> {
     let merchant = merchant.into_inner();
     blocking::run({
@@ -140,7 +140,7 @@ struct TransactionsTemplate<'a> {
 }
 
 pub fn get_transactions(
-    (merchant, req, paginate): (Identity<Merchant>, HttpRequest<AppState>, Paginate),
+    (merchant, req, paginate): (User<Merchant>, HttpRequest<AppState>, Paginate),
 ) -> FutureResponse<HttpResponse> {
     let merchant = merchant.into_inner();
     blocking::run({

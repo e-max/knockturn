@@ -1,6 +1,6 @@
 use crate::app::AppState;
 use crate::errors::*;
-use crate::extractor::{Identity, SimpleJson};
+use crate::extractor::{SimpleJson, User};
 use crate::filters;
 use crate::fsm::MINIMAL_WITHDRAW;
 use crate::fsm_payout::{
@@ -30,7 +30,7 @@ struct WithdrawTemplate<'a> {
     url: &'a str,
 }
 
-pub fn withdraw(merchant: Identity<Merchant>) -> FutureResponse<HttpResponse, Error> {
+pub fn withdraw(merchant: User<Merchant>) -> FutureResponse<HttpResponse, Error> {
     let reminder = merchant.balance.reminder().unwrap_or(0);
     let mut template = WithdrawTemplate {
         error: None,
@@ -61,7 +61,7 @@ pub fn create_payout(
     (req, form, identity_merchant): (
         HttpRequest<AppState>,
         Form<CreatePayoutForm>,
-        Identity<Merchant>,
+        User<Merchant>,
     ),
 ) -> FutureResponse<HttpResponse, Error> {
     let merchant = identity_merchant.clone().into_inner();

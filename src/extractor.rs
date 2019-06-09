@@ -96,11 +96,11 @@ impl FromRequest<AppState> for Session<Merchant> {
     }
 }
 
-/// Identity extractor
+/// User extractor
 #[derive(Debug, Deref, Clone)]
-pub struct Identity<T>(pub T);
+pub struct User<T>(pub T);
 
-impl<T> Identity<T> {
+impl<T> User<T> {
     pub fn into_inner(self) -> T {
         self.0
     }
@@ -114,7 +114,7 @@ impl Default for IdentityConfig {
     }
 }
 
-impl FromRequest<AppState> for Identity<Merchant> {
+impl FromRequest<AppState> for User<Merchant> {
     type Config = IdentityConfig;
     type Result = Result<Box<dyn Future<Item = Self, Error = Error>>, Error>;
 
@@ -130,7 +130,7 @@ impl FromRequest<AppState> for Identity<Merchant> {
                 .send(GetMerchant { id: merchant_id })
                 .from_err()
                 .and_then(move |db_response| match db_response {
-                    Ok(m) => ok(Identity(m)),
+                    Ok(m) => ok(User(m)),
                     Err(_) => err(Error::NotAuthorizedInUI),
                 }),
         ))
