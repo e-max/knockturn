@@ -1,5 +1,4 @@
 use crate::app::AppState;
-use crate::blocking;
 use crate::db::GetMerchant;
 use crate::errors::*;
 use crate::extractor::User;
@@ -8,9 +7,10 @@ use crate::handlers::paginator::{Pages, Paginate, Paginator};
 use crate::handlers::BootstrapColor;
 use crate::handlers::TemplateIntoResponse;
 use crate::models::{Merchant, Transaction, TransactionType};
-use actix_web::middleware::identity::RequestIdentity;
-use actix_web::middleware::session::RequestSession;
-use actix_web::{AsyncResponder, Form, FutureResponse, HttpRequest, HttpResponse};
+use actix_session::Session;
+use actix_web::middleware::identity::Identity;
+use actix_web::web::{block, Data, Form};
+use actix_web::{HttpRequest, HttpResponse};
 use askama::Template;
 use diesel::pg::PgConnection;
 use diesel::{self, prelude::*};
@@ -27,12 +27,13 @@ struct IndexTemplate<'a> {
 }
 
 pub fn index(
-    (merchant, req): (User<Merchant>, HttpRequest<AppState>),
-) -> FutureResponse<HttpResponse> {
+    merchant: User<Merchant>,
+    data: Data<AppState>,
+) -> impl Future<Item = HttpResponse, Error = Error> {
     let merchant = merchant.into_inner();
-    blocking::run({
+    block::<_, _, Error>({
         let merch_id = merchant.id.clone();
-        let pool = req.state().pool.clone();
+        let pool = data.pool.clone();
         move || {
             let conn: &PgConnection = &pool.get().unwrap();
             let txs = {
@@ -77,7 +78,6 @@ pub fn index(
         .map_err(|e| Error::from(e))?;
         Ok(HttpResponse::Ok().content_type("text/html").body(html))
     })
-    .responder()
 }
 
 #[derive(Debug, Deserialize)]
@@ -86,10 +86,11 @@ pub struct LoginRequest {
     pub password: String,
 }
 pub fn login(
-    (req, login_form): (HttpRequest<AppState>, Form<LoginRequest>),
-) -> FutureResponse<HttpResponse> {
-    req.state()
-        .db
+    data: Data<AppState>,
+    login_form: Form<LoginRequest>,
+    session: Session,
+) -> impl Future<Item = HttpResponse, Error = Error> {
+    data.db
         .send(GetMerchant {
             id: login_form.login.clone(),
         })
@@ -99,7 +100,7 @@ pub fn login(
             match bcrypt::verify(&login_form.password, &merchant.password) {
                 Ok(res) => {
                     if res {
-                        req.session().set("merchant", merchant.id)?;
+                        session.set("merchant", merchant.id)?;
                         if merchant.confirmed_2fa {
                             Ok(HttpResponse::Found().header("location", "/2fa").finish())
                         } else {
@@ -114,20 +115,19 @@ pub fn login(
                 Err(_) => Ok(HttpResponse::Found().header("location", "/login").finish()),
             }
         })
-        .responder()
 }
 
 #[derive(Template)]
 #[template(path = "login.html")]
 struct LoginTemplate;
 
-pub fn login_form(_: HttpRequest<AppState>) -> Result<HttpResponse, Error> {
+pub fn login_form(_: HttpRequest) -> Result<HttpResponse, Error> {
     LoginTemplate.into_response()
 }
 
-pub fn logout(req: HttpRequest<AppState>) -> Result<HttpResponse, Error> {
-    req.forget();
-    req.session().clear();
+pub fn logout(identity: Identity, session: Session) -> Result<HttpResponse, Error> {
+    identity.forget();
+    session.clear();
     Ok(HttpResponse::Found().header("location", "/login").finish())
 }
 
@@ -140,12 +140,14 @@ struct TransactionsTemplate<'a> {
 }
 
 pub fn get_transactions(
-    (merchant, req, paginate): (User<Merchant>, HttpRequest<AppState>, Paginate),
-) -> FutureResponse<HttpResponse> {
+    merchant: User<Merchant>,
+    data: Data<AppState>,
+    paginate: Paginate,
+) -> impl Future<Item = HttpResponse, Error = Error> {
     let merchant = merchant.into_inner();
-    blocking::run({
+    block::<_, _, Error>({
         let merch_id = merchant.id.clone();
-        let pool = req.state().pool.clone();
+        let pool = data.pool.clone();
         let paginate = paginate.clone();
         move || {
             use crate::schema::transactions::dsl::*;
@@ -182,5 +184,4 @@ pub fn get_transactions(
         .map_err(|e| Error::from(e))?;
         Ok(HttpResponse::Ok().content_type("text/html").body(html))
     })
-    .responder()
 }

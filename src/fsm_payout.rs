@@ -1,4 +1,3 @@
-use crate::blocking;
 use crate::db::{self, DbExecutor, UpdateTransactionStatus};
 use crate::errors::Error;
 use crate::models::Merchant;
@@ -8,6 +7,7 @@ use crate::ser;
 use crate::wallet::TxLogEntry;
 use crate::wallet::Wallet;
 use actix::{Actor, Addr, Context, Handler, Message, ResponseFuture};
+use actix_web::web::block;
 use chrono::{Duration, Utc};
 use derive_deref::Deref;
 use diesel::pg::PgConnection;
@@ -168,7 +168,7 @@ impl Handler<CreatePayout> for FsmPayout {
     type Result = ResponseFuture<NewPayout, Error>;
 
     fn handle(&mut self, msg: CreatePayout, _: &mut Self::Context) -> Self::Result {
-        let res = blocking::run({
+        let res = block::<_, _, Error>({
             let pool = self.pool.clone();
             let merchant_id = msg.merchant_id.clone();
             move || {
@@ -242,7 +242,7 @@ impl Handler<GetPayout> for FsmPayout {
     type Result = ResponseFuture<Transaction, Error>;
 
     fn handle(&mut self, msg: GetPayout, _: &mut Self::Context) -> Self::Result {
-        let res = blocking::run({
+        let res = block::<_, _, Error>({
             let pool = self.pool.clone();
             move || {
                 use crate::schema::transactions::dsl::*;
@@ -278,7 +278,7 @@ impl Handler<InitializePayout> for FsmPayout {
 
         let pool = self.pool.clone();
 
-        let res = blocking::run(move || {
+        let res = block::<_, _, Error>(move || {
             use crate::schema::transactions::dsl::*;
             let conn: &PgConnection = &pool.get().unwrap();
 
@@ -305,7 +305,7 @@ impl Handler<GetNewPayout> for FsmPayout {
     type Result = ResponseFuture<NewPayout, Error>;
 
     fn handle(&mut self, msg: GetNewPayout, _: &mut Self::Context) -> Self::Result {
-        let res = blocking::run({
+        let res = block::<_, _, Error>({
             let pool = self.pool.clone();
             move || {
                 use crate::schema::transactions::dsl::*;
@@ -329,7 +329,7 @@ impl Handler<GetInitializedPayout> for FsmPayout {
     type Result = ResponseFuture<InitializedPayout, Error>;
 
     fn handle(&mut self, msg: GetInitializedPayout, _: &mut Self::Context) -> Self::Result {
-        let res = blocking::run({
+        let res = block::<_, _, Error>({
             let pool = self.pool.clone();
             move || {
                 use crate::schema::transactions::dsl::*;
@@ -402,7 +402,7 @@ impl Handler<GetExpiredNewPayouts> for FsmPayout {
     type Result = ResponseFuture<Vec<NewPayout>, Error>;
 
     fn handle(&mut self, _: GetExpiredNewPayouts, _: &mut Self::Context) -> Self::Result {
-        let res = blocking::run({
+        let res = block::<_, _, Error>({
             let pool = self.pool.clone();
             move || {
                 use crate::schema::transactions::dsl::*;
@@ -429,7 +429,7 @@ impl Handler<GetExpiredInitializedPayouts> for FsmPayout {
     type Result = ResponseFuture<Vec<InitializedPayout>, Error>;
 
     fn handle(&mut self, _: GetExpiredInitializedPayouts, _: &mut Self::Context) -> Self::Result {
-        let res = blocking::run({
+        let res = block::<_, _, Error>({
             let pool = self.pool.clone();
             move || {
                 use crate::schema::transactions::dsl::*;
@@ -456,7 +456,7 @@ impl Handler<RejectPayout<NewPayout>> for FsmPayout {
     type Result = ResponseFuture<RejectedPayout, Error>;
 
     fn handle(&mut self, msg: RejectPayout<NewPayout>, _: &mut Self::Context) -> Self::Result {
-        let res = blocking::run({
+        let res = block::<_, _, Error>({
             let pool = self.pool.clone();
             move || {
                 use crate::schema::merchants;
@@ -508,7 +508,7 @@ impl Handler<RejectPayout<InitializedPayout>> for FsmPayout {
             .and_then({
                 let pool = self.pool.clone();
                 move |_| {
-                    blocking::run({
+                    block::<_, _, Error>({
                         move || {
                             use crate::schema::merchants;
                             use crate::schema::transactions;
@@ -559,7 +559,7 @@ impl Handler<RejectPayout<PendingPayout>> for FsmPayout {
             .and_then({
                 let pool = self.pool.clone();
                 move |_| {
-                    blocking::run({
+                    block::<_, _, Error>({
                         move || {
                             use crate::schema::merchants;
                             use crate::schema::transactions;

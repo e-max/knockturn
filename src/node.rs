@@ -1,7 +1,6 @@
-use crate::clients::PlainHttpAuth;
 use crate::errors::Error;
 use actix::{Actor, Addr};
-use actix_web::client::{self, ClientConnector};
+use actix_web::client::{self, Client, Connector};
 use actix_web::HttpMessage;
 use futures::Future;
 use log::{debug, error};
@@ -14,7 +13,7 @@ const CHAIN_OUTPUTS_BY_HEIGHT: &'static str = "v1/chain/outputs/byheight";
 
 #[derive(Clone)]
 pub struct Node {
-    conn: Addr<ClientConnector>,
+    client: Client,
     username: String,
     password: String,
     url: String,
@@ -22,14 +21,15 @@ pub struct Node {
 
 impl Node {
     pub fn new(url: &str, username: &str, password: &str) -> Self {
-        let connector = ClientConnector::default()
+        let connector = Connector::new()
             .conn_lifetime(Duration::from_secs(300))
-            .conn_keep_alive(Duration::from_secs(300));
+            .conn_keep_alive(Duration::from_secs(300))
+            .finish();
         Node {
             url: url.trim_end_matches('/').to_owned(),
             username: username.to_owned(),
             password: password.to_owned(),
-            conn: connector.start(),
+            client: Client::build().connector(connector).finish(),
         }
     }
 
@@ -39,10 +39,9 @@ impl Node {
             self.url, CHAIN_OUTPUTS_BY_HEIGHT, start, end
         );
         debug!("Get latest blocks from node {}", url);
-        client::get(&url) // <- Create request builder
-            .auth(&self.username, &self.password)
-            .finish()
-            .unwrap()
+        self.client
+            .get(&url) // <- Create request builder
+            .basic_auth(&self.username, Some(&self.password))
             .send() // <- Send http request
             .map_err(|e| Error::NodeAPIError(s!(e)))
             .and_then(|resp| {
@@ -52,7 +51,7 @@ impl Node {
                     Ok(resp)
                 }
             })
-            .and_then(|resp| {
+            .and_then(|mut resp| {
                 // <- server http response
                 resp.body()
                     .limit(10 * 1024 * 1024)

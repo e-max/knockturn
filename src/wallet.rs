@@ -1,8 +1,7 @@
-use crate::clients::PlainHttpAuth;
 use crate::errors::Error;
 use crate::ser;
 use actix::{Actor, Addr};
-use actix_web::client::{self, ClientConnector};
+use actix_web::client::{self, Client, Connector};
 use actix_web::HttpMessage;
 use chrono::{DateTime, Utc};
 use futures::Future;
@@ -16,7 +15,7 @@ use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct Wallet {
-    conn: Addr<ClientConnector>,
+    client: Client,
     username: String,
     password: String,
     url: String,
@@ -31,14 +30,15 @@ const POST_TX_URL: &'static str = "/v1/wallet/owner/post_tx?fluff";
 
 impl Wallet {
     pub fn new(url: &str, username: &str, password: &str) -> Self {
-        let connector = ClientConnector::default()
+        let connector = Connector::new()
             .conn_lifetime(Duration::from_secs(300))
-            .conn_keep_alive(Duration::from_secs(300));
+            .conn_keep_alive(Duration::from_secs(300))
+            .finish();
         Wallet {
             url: url.trim_end_matches('/').to_owned(),
             username: username.to_owned(),
             password: password.to_owned(),
-            conn: connector.start(),
+            client: Client::build().connector(connector).finish(),
         }
     }
 
@@ -46,10 +46,9 @@ impl Wallet {
         let tx_id = tx_id.to_owned();
         let url = format!("{}/{}?tx_id={}&refresh", self.url, RETRIEVE_TXS_URL, tx_id);
         debug!("Get transaction from wallet {}", url);
-        client::get(&url) // <- Create request builder
-            .auth(&self.username, &self.password)
-            .finish()
-            .unwrap()
+        self.client
+            .get(&url) // <- Create request builder
+            .basic_auth(&self.username, Some(&self.password))
             .send() // <- Send http request
             .map_err(|e| Error::WalletAPIError(s!(e)))
             .and_then(|resp| {
@@ -59,7 +58,7 @@ impl Wallet {
                     Ok(resp)
                 }
             })
-            .and_then(|resp| {
+            .and_then(|mut resp| {
                 // <- server http response
                 debug!("Response: {:?}", resp);
                 resp.body()
@@ -94,11 +93,10 @@ impl Wallet {
     pub fn receive(&self, slate: &Slate) -> impl Future<Item = Slate, Error = Error> {
         let url = format!("{}/{}", self.url, RECEIVE_URL);
         debug!("Receive slate by wallet  {}", url);
-        client::post(&url)
-            .auth(&self.username, &self.password)
-            .json(slate)
-            .unwrap()
-            .send()
+        self.client
+            .post(&url)
+            .basic_auth(&self.username, Some(&self.password))
+            .send_json(slate)
             .map_err(|e| Error::WalletAPIError(s!(e)))
             .and_then(|resp| {
                 if !resp.status().is_success() {
@@ -107,7 +105,7 @@ impl Wallet {
                     Ok(resp)
                 }
             })
-            .and_then(|resp| {
+            .and_then(|mut resp| {
                 debug!("Response: {:?}", resp);
                 resp.body()
                     .map_err(|e| Error::WalletAPIError(s!(e)))
@@ -128,11 +126,10 @@ impl Wallet {
     pub fn finalize(&self, slate: &Slate) -> impl Future<Item = Slate, Error = Error> {
         let url = format!("{}/{}", self.url, FINALIZE_URL);
         debug!("Finalize slate by wallet {}", url);
-        client::post(&url)
-            .auth(&self.username, &self.password)
-            .json(slate)
-            .unwrap()
-            .send()
+        self.client
+            .post(&url)
+            .basic_auth(&self.username, Some(&self.password))
+            .send_json(slate)
             .map_err(|e| Error::WalletAPIError(s!(e)))
             .and_then(|resp| {
                 if !resp.status().is_success() {
@@ -141,7 +138,7 @@ impl Wallet {
                     Ok(resp)
                 }
             })
-            .and_then(|resp| {
+            .and_then(|mut resp| {
                 debug!("Response: {:?}", resp);
                 resp.body()
                     .map_err(|e| Error::WalletAPIError(s!(e)))
@@ -161,10 +158,9 @@ impl Wallet {
     pub fn cancel_tx(&self, tx_slate_id: &str) -> impl Future<Item = (), Error = Error> {
         let url = format!("{}/{}?tx_id={}", self.url, CANCEL_TX_URL, tx_slate_id);
         debug!("Cancel transaction in wallet {}", url);
-        client::post(&url)
-            .auth(&self.username, &self.password)
-            .finish()
-            .unwrap()
+        self.client
+            .post(&url)
+            .basic_auth(&self.username, Some(&self.password))
             .send()
             .map_err(|e| Error::WalletAPIError(s!(e)))
             .and_then(|resp| {
@@ -179,10 +175,9 @@ impl Wallet {
     pub fn post_tx(&self) -> impl Future<Item = (), Error = Error> {
         let url = format!("{}/{}", self.url, POST_TX_URL);
         debug!("Post transaction in chain by wallet as {}", url);
-        client::post(&url)
-            .auth(&self.username, &self.password)
-            .finish()
-            .unwrap()
+        self.client
+            .post(&url)
+            .basic_auth(&self.username, Some(&self.password))
             .send()
             .map_err(|e| Error::WalletAPIError(s!(e)))
             .and_then(|resp| {
@@ -211,11 +206,10 @@ impl Wallet {
             selection_strategy_is_use_all: false,
             message: Some(message),
         };
-        client::post(&url)
-            .auth(&self.username, &self.password)
-            .json(&payment)
-            .unwrap()
-            .send()
+        self.client
+            .post(&url)
+            .basic_auth(&self.username, Some(&self.password))
+            .send_json(&payment)
             .map_err(|e| Error::WalletAPIError(s!(e)))
             .and_then(|resp| {
                 if !resp.status().is_success() {
@@ -224,7 +218,7 @@ impl Wallet {
                     Ok(resp)
                 }
             })
-            .and_then(|resp| {
+            .and_then(|mut resp| {
                 debug!("Response: {:?}", resp);
                 resp.body()
                     .map_err(|e| Error::WalletAPIError(s!(e)))

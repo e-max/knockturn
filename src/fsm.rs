@@ -1,4 +1,3 @@
-use crate::blocking;
 use crate::db::{
     self, CreateTransaction, DbExecutor, GetMerchant, GetPayment, GetUnreportedPaymentsByStatus,
     ReportAttempt, UpdateTransactionStatus,
@@ -10,7 +9,8 @@ use crate::ser;
 use crate::wallet::TxLogEntry;
 use crate::wallet::Wallet;
 use actix::{Actor, Addr, Context, Handler, Message, ResponseFuture};
-use actix_web::client;
+use actix_web::client::Client;
+use actix_web::web::block;
 use chrono::{Duration, Utc};
 use derive_deref::Deref;
 use diesel::pg::PgConnection;
@@ -234,7 +234,7 @@ impl Handler<MakePayment> for Fsm {
 
         let pool = self.pool.clone();
 
-        let res = blocking::run(move || {
+        let res = block::<_, _, Error>(move || {
             use crate::schema::transactions::dsl::*;
             let conn: &PgConnection = &pool.get().unwrap();
 
@@ -282,7 +282,7 @@ impl Handler<SeenInChainPayment<PendingPayment>> for Fsm {
         _: &mut Self::Context,
     ) -> Self::Result {
         Box::new(
-            blocking::run({
+            block::<_, _, Error>({
                 let pool = self.pool.clone();
                 move || {
                     use crate::schema::transactions::dsl::*;
@@ -310,7 +310,7 @@ impl Handler<SeenInChainPayment<RejectedPayment>> for Fsm {
         _: &mut Self::Context,
     ) -> Self::Result {
         Box::new(
-            blocking::run({
+            block::<_, _, Error>({
                 let pool = self.pool.clone();
                 move || {
                     use crate::schema::transactions::dsl::*;
@@ -397,8 +397,9 @@ fn run_callback(
     token: &str,
     transaction: &Transaction,
 ) -> impl Future<Item = (), Error = Error> {
-    client::post(callback_url)
-        .json(Confirmation {
+    Client::default()
+        .post(callback_url)
+        .send_json(Confirmation {
             id: &transaction.id,
             external_id: &transaction.external_id,
             merchant_id: &transaction.merchant_id,
@@ -408,8 +409,6 @@ fn run_callback(
             confirmations: transaction.confirmations,
             token: token,
         })
-        .unwrap()
-        .send()
         .map_err({
             let callback_url = callback_url.to_owned();
             move |e| Error::MerchantCallbackError {
@@ -431,6 +430,49 @@ fn run_callback(
             }
         })
 }
+
+/*
+
+fn run_callback<'a>(
+    callback_url: &'a str,
+    token: &'a str,
+    transaction: &'a Transaction,
+) -> impl Future<Item = (), Error = Error> + 'a {
+    Client::default()
+        .post(callback_url)
+        .send_json(&Confirmation {
+            id: &transaction.id,
+            external_id: &transaction.external_id,
+            merchant_id: &transaction.merchant_id,
+            grin_amount: transaction.grin_amount,
+            amount: &transaction.amount,
+            status: transaction.status,
+            confirmations: transaction.confirmations,
+            token: token,
+        })
+        .map_err({
+            let callback_url = callback_url.to_owned();
+            move |e| Error::MerchantCallbackError {
+                callback_url: callback_url,
+                error: s!(e),
+            }
+        })
+        .and_then({
+            let callback_url = callback_url.to_owned();
+            |resp| {
+                if resp.status().is_success() {
+                    Ok(())
+                } else {
+                    Err(Error::MerchantCallbackError {
+                        callback_url: callback_url,
+                        error: s!("aaa"),
+                    })
+                }
+            }
+        })
+}
+
+*/
 
 impl Handler<RejectPayment<NewPayment>> for Fsm {
     type Result = ResponseFuture<RejectedPayment, Error>;
@@ -479,7 +521,7 @@ impl Handler<ReportPayment<ConfirmedPayment>> for Fsm {
             report_transaction(self.db.clone(), msg.payment.0.clone()).and_then({
                 let pool = self.pool.clone();
                 move |_| {
-                    blocking::run({
+                    block::<_, _, Error>({
                         move || {
                             let conn: &PgConnection = &pool.get().unwrap();
                             conn.transaction(|| {
@@ -520,7 +562,7 @@ impl Handler<ReportPayment<RejectedPayment>> for Fsm {
             report_transaction(self.db.clone(), msg.payment.0.clone()).and_then({
                 let pool = self.pool.clone();
                 move |_| {
-                    blocking::run({
+                    block::<_, _, Error>({
                         move || {
                             let conn: &PgConnection = &pool.get().unwrap();
                             conn.transaction(|| {

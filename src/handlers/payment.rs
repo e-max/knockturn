@@ -8,12 +8,13 @@ use crate::handlers::BootstrapColor;
 use crate::models::{Merchant, Money, Transaction, TransactionStatus};
 use crate::qrcode;
 use crate::wallet::Slate;
-use actix_web::{AsyncResponder, FutureResponse, HttpResponse, Path, State};
+use actix_web::web::{Data, Path};
+use actix_web::HttpResponse;
 use askama::Template;
 use chrono_humanize::{Accuracy, HumanTime, Tense};
 use data_encoding::BASE64;
-use futures::future::ok;
 use futures::future::Future;
+use futures::future::{err, ok, Either};
 use serde::{Deserialize, Serialize};
 use std::env;
 
@@ -28,16 +29,14 @@ pub struct CreatePaymentRequest {
 }
 
 pub fn create_payment(
-    (merchant, merchant_id, payment_req, state): (
-        BasicAuth<Merchant>,
-        Path<String>,
-        SimpleJson<CreatePaymentRequest>,
-        State<AppState>,
-    ),
-) -> FutureResponse<HttpResponse> {
+    merchant: BasicAuth<Merchant>,
+    merchant_id: Path<String>,
+    payment_req: SimpleJson<CreatePaymentRequest>,
+    state: Data<AppState>,
+) -> impl Future<Item = HttpResponse, Error = Error> {
     let merchant_id = merchant_id.into_inner();
     if merchant.id != merchant_id {
-        return Box::new(ok(HttpResponse::BadRequest().finish()));
+        return Either::A(err(Error::InvalidEntity(s!("wrong merchant_id"))));
     }
     let create_transaction = CreatePayment {
         merchant_id: merchant_id,
@@ -48,16 +47,17 @@ pub fn create_payment(
         message: payment_req.message.clone(),
         redirect_url: payment_req.redirect_url.clone(),
     };
-    state
-        .fsm
-        .send(create_transaction)
-        .from_err()
-        .and_then(|db_response| {
-            let new_payment = db_response?;
+    Either::B(
+        state
+            .fsm
+            .send(create_transaction)
+            .from_err()
+            .and_then(|db_response| {
+                let new_payment = db_response?;
 
-            Ok(HttpResponse::Created().json(new_payment))
-        })
-        .responder()
+                Ok(HttpResponse::Created().json(new_payment))
+            }),
+    )
 }
 
 #[derive(Debug, Serialize)]
@@ -72,8 +72,9 @@ struct PaymentStatus {
 }
 
 pub fn get_payment_status(
-    (get_transaction, state): (Path<GetTransaction>, State<AppState>),
-) -> FutureResponse<HttpResponse> {
+    get_transaction: Path<GetTransaction>,
+    state: Data<AppState>,
+) -> impl Future<Item = HttpResponse, Error = Error> {
     state
         .db
         .send(GetCurrentHeight)
@@ -105,12 +106,12 @@ pub fn get_payment_status(
                     })
             }
         })
-        .responder()
 }
 
 pub fn get_payment(
-    (get_transaction, state): (Path<GetTransaction>, State<AppState>),
-) -> FutureResponse<HttpResponse> {
+    get_transaction: Path<GetTransaction>,
+    state: Data<AppState>,
+) -> impl Future<Item = HttpResponse, Error = Error> {
     state
         .db
         .send(GetCurrentHeight)
@@ -152,7 +153,6 @@ pub fn get_payment(
                     })
             }
         })
-        .responder()
 }
 
 #[derive(Template)]
@@ -166,8 +166,10 @@ struct PaymentTemplate<'a> {
 }
 
 pub fn make_payment(
-    (slate, payment, state): (SimpleJson<Slate>, Path<GetNewPayment>, State<AppState>),
-) -> FutureResponse<HttpResponse, Error> {
+    slate: SimpleJson<Slate>,
+    payment: Path<GetNewPayment>,
+    state: Data<AppState>,
+) -> impl Future<Item = HttpResponse, Error = Error> {
     let slate_amount = slate.amount;
     state
         .fsm
@@ -207,5 +209,4 @@ pub fn make_payment(
             }
         })
         .and_then(|slate| Ok(HttpResponse::Ok().json(slate)))
-        .responder()
 }
