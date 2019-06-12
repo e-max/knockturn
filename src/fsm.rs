@@ -397,18 +397,19 @@ fn run_callback(
     token: &str,
     transaction: &Transaction,
 ) -> impl Future<Item = (), Error = Error> {
+    let confirmation = Confirmation {
+        id: transaction.id.clone(),
+        external_id: transaction.external_id.clone(),
+        merchant_id: transaction.merchant_id.clone(),
+        grin_amount: transaction.grin_amount,
+        amount: transaction.amount.clone(),
+        status: transaction.status.clone(),
+        confirmations: transaction.confirmations.clone(),
+        token: token.to_owned(),
+    };
     Client::default()
         .post(callback_url)
-        .send_json(Confirmation {
-            id: &transaction.id,
-            external_id: &transaction.external_id,
-            merchant_id: &transaction.merchant_id,
-            grin_amount: transaction.grin_amount,
-            amount: &transaction.amount,
-            status: transaction.status,
-            confirmations: transaction.confirmations,
-            token: token,
-        })
+        .send_json(&confirmation)
         .map_err({
             let callback_url = callback_url.to_owned();
             move |e| Error::MerchantCallbackError {
