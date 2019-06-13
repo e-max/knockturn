@@ -6,14 +6,9 @@ use crate::node::Node;
 use crate::wallet::Wallet;
 use crate::{cron, cron_payout};
 use actix::prelude::*;
-use actix_session::{CookieSession, Session};
-use actix_web::body::Body;
-use actix_web::middleware::identity::{CookieIdentityPolicy, IdentityService};
 use actix_web::web;
-use actix_web::{http::Method, middleware, App};
 use diesel::pg::PgConnection;
 use diesel::r2d2::{ConnectionManager, Pool};
-use sentry_actix::SentryMiddleware;
 
 #[derive(Debug, Clone)]
 pub struct AppCfg {
@@ -40,7 +35,6 @@ impl AppState {
         let pool = r2d2::Pool::builder()
             .build(manager)
             .expect("Failed to create pool.");
-
         let pool_clone = pool.clone();
         let db: Addr<DbExecutor> = SyncArbiter::start(10, move || DbExecutor(pool_clone.clone()));
         let wallet = Wallet::new(&cfg.wallet_url, &cfg.wallet_user, &cfg.wallet_pass);

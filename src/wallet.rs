@@ -1,8 +1,6 @@
 use crate::errors::Error;
 use crate::ser;
-use actix::{Actor, Addr};
-use actix_web::client::{self, Client, Connector};
-use actix_web::HttpMessage;
+use actix_web::client::{Client, Connector};
 use chrono::{DateTime, Utc};
 use futures::Future;
 use log::{debug, error};

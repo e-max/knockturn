@@ -1,7 +1,5 @@
 use crate::errors::Error;
-use actix::{Actor, Addr};
-use actix_web::client::{self, Client, Connector};
-use actix_web::HttpMessage;
+use actix_web::client::{Client, Connector};
 use futures::Future;
 use log::{debug, error};
 use serde::Deserialize;

@@ -1,7 +1,6 @@
 use crate::db::{DbExecutor, RegisterRate};
 use actix::prelude::*;
 use actix_web::client::Client;
-use actix_web::HttpMessage;
 use futures;
 use futures::future::{err, ok, result, Future};
 use log::*;

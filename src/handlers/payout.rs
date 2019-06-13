@@ -103,7 +103,6 @@ struct PayoutTemplate<'a> {
 }
 
 pub fn get_payout(
-    req: HttpRequest,
     transaction_id: Path<Uuid>,
     state: Data<AppState>,
     id: Identity,
@@ -135,7 +134,6 @@ pub fn get_payout(
 }
 
 pub fn generate_slate(
-    req: HttpRequest,
     transaction_id: Path<Uuid>,
     state: Data<AppState>,
     id: Identity,

@@ -5,7 +5,7 @@ use crate::extractor::Session;
 use crate::handlers::TemplateIntoResponse;
 use crate::models::Merchant;
 use crate::totp::Totp;
-use actix_session::{Session as ActixSession, UserSession};
+use actix_session::Session as ActixSession;
 use actix_web::http::Method;
 use actix_web::middleware::identity::Identity;
 use actix_web::web::{Data, Form};
@@ -13,7 +13,7 @@ use actix_web::{HttpRequest, HttpResponse};
 use askama::Template;
 use data_encoding::BASE64;
 use futures::future::Future;
-use futures::future::{err, ok, result, Either};
+use futures::future::{err, ok, Either};
 use serde::Deserialize;
 
 #[derive(Template)]

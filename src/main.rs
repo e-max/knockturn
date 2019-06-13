@@ -1,12 +1,9 @@
-use actix::prelude::*;
-use actix_session::{CookieSession, Session};
+use actix_session::CookieSession;
 use actix_web::middleware::identity::{CookieIdentityPolicy, IdentityService};
 use actix_web::{middleware, App, HttpServer};
-use diesel::{r2d2::ConnectionManager, PgConnection};
 use dotenv::dotenv;
 use env_logger;
 use knockturn::app::{routing, AppCfg, AppState};
-use knockturn::db::DbExecutor;
 use log::info;
 use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 use sentry;
@@ -62,6 +59,7 @@ fn main() {
                     .secure(false),
             ))
             .wrap(CookieSession::private(cookie_secret.as_bytes()).secure(false));
+
         /*
          * doesn't work yet with actix 1.0
          * https://github.com/getsentry/sentry-rust/issues/143

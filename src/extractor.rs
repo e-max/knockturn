@@ -2,11 +2,10 @@ use crate::app::AppState;
 use crate::db::GetMerchant;
 use crate::errors::*;
 use crate::models::Merchant;
-use actix_session::{Session as ActixSession, UserSession};
+use actix_session::Session as ActixSession;
 use actix_web::dev;
 use actix_web::middleware::identity::Identity;
-use actix_web::web::Data;
-use actix_web::{FromRequest, HttpMessage, HttpRequest};
+use actix_web::{FromRequest, HttpRequest};
 use actix_web_httpauth::extractors::basic;
 use bytes::BytesMut;
 use derive_deref::Deref;
@@ -185,7 +184,7 @@ where
     type Error = Error;
     type Future = Box<dyn Future<Item = Self, Error = Self::Error>>;
 
-    fn from_request(req: &HttpRequest, payload: &mut dev::Payload) -> Self::Future {
+    fn from_request(_: &HttpRequest, payload: &mut dev::Payload) -> Self::Future {
         Box::new(
             payload
                 .take()

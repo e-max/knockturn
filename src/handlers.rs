@@ -8,7 +8,7 @@ use actix_web::web::{Data, Path};
 use actix_web::HttpResponse;
 use askama::Template;
 use bcrypt;
-use futures::future::{ok, result, Future};
+use futures::future::{ok, Future};
 use mime_guess::get_mime_type;
 
 pub mod mfa;
