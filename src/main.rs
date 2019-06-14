@@ -19,7 +19,6 @@ fn main() {
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     let host = env::var("HOST").unwrap_or("0.0.0.0:3000".to_owned());
     let _ = env::var("DOMAIN").expect("DOMAIN must be set");
-    let sys = actix::System::new("Knockout");
 
     let wallet_url = env::var("WALLET_URL").expect("WALLET_URL must be set");
     let wallet_user = env::var("WALLET_USER").expect("WALLET_USER must be set");
@@ -90,10 +89,7 @@ fn main() {
     };
     */
 
-    srv = srv
-        .bind(&host)
-        .expect(&format!("Can not bind to '{}'", &host));
-
-    srv.start();
-    sys.run();
+    srv.bind(&host)
+        .expect(&format!("Can not bind to '{}'", &host))
+        .run();
 }
