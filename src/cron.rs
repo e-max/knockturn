@@ -29,7 +29,6 @@ impl Actor for Cron {
     type Context = Context<Self>;
 
     fn started(&mut self, ctx: &mut Self::Context) {
-        println!("\x1B[31;1m RUN CRON\x1B[0m");
         info!("Starting cron process");
         let rates = RatesFetcher::new(self.db.clone());
         ctx.run_interval(
@@ -53,7 +52,7 @@ impl Actor for Cron {
     }
 
     fn stopping(&mut self, _ctx: &mut Self::Context) -> Running {
-        println!("\x1B[35;1m STOP\x1B[0m");
+        info!("Stop cron process");
         Running::Stop
     }
 }
@@ -74,7 +73,6 @@ impl Cron {
     }
 }
 fn reject_expired_payments(cron: &mut Cron, _: &mut Context<Cron>) {
-    println!("\x1B[35;1m CRON RUNNING\x1B[0m");
     debug!("run process_expired_payments");
     let res = cron
         .db

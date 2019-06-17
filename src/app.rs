@@ -58,11 +58,13 @@ impl AppState {
             let pool = pool.clone();
             let cron_db = cron_db.clone();
             cron::Cron::new(cron_db, fsm, node, pool)
-        };
+        }
+        .start();
         let _cron_payout = {
             let fsm = fsm_payout.clone();
             cron_payout::CronPayout::new(cron_db.clone(), fsm)
-        };
+        }
+        .start();
         AppState {
             db,
             wallet,
