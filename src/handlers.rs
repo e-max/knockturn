@@ -11,6 +11,7 @@ use futures::future::{ok, result, Future};
 use mime_guess::get_mime_type;
 
 pub mod mfa;
+pub mod paginator;
 pub mod payment;
 pub mod payout;
 pub mod webui;
