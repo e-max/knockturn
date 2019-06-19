@@ -18,7 +18,7 @@
 		<tr><td>Reminder:</td><td>{{payout.reminder().unwrap()|grin}}</td></tr>
 		<tr><td >Status:</td><td class="table-{{payout.color()}}">{{payout.status}}</td></tr>
 		{% if payout.time_until_expired().is_some() -%}
-		<tr><td >Expired in:</td><td >{{payout.time_until_expired().unwrap()|duration}}</td></tr>
+		<tr><td >Expired </td><td >{{payout.time_until_expired().unwrap().for_human()}}</td></tr>
 		{%- endif %}
 	</table>
 
