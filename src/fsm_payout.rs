@@ -1,8 +1,8 @@
 use crate::db::{self, DbExecutor, UpdateTransactionStatus};
 use crate::errors::Error;
 use crate::models::Merchant;
-use crate::models::PENDING_PAYOUT_TTL_SECONDS;
 use crate::models::{Money, Transaction, TransactionStatus, TransactionType};
+use crate::models::{NEW_PAYOUT_TTL_SECONDS, PENDING_PAYOUT_TTL_SECONDS};
 use crate::ser;
 use crate::wallet::TxLogEntry;
 use crate::wallet::Wallet;
@@ -412,8 +412,7 @@ impl Handler<GetExpiredNewPayouts> for FsmPayout {
                     .filter(transaction_type.eq(TransactionType::Payout))
                     .filter(
                         created_at
-                            .lt(Utc::now().naive_utc()
-                                - Duration::seconds(PENDING_PAYOUT_TTL_SECONDS)),
+                            .lt(Utc::now().naive_utc() - Duration::seconds(NEW_PAYOUT_TTL_SECONDS)),
                     )
                     .load::<Transaction>(conn)
                     .map_err(|e| e.into())
@@ -463,6 +462,19 @@ impl Handler<RejectPayout<NewPayout>> for FsmPayout {
                 let tx: Transaction = conn.transaction(|| -> Result<Transaction, Error> {
                     let payout = msg.payout;
                     warn!("Reject payout {:?}", payout);
+                    let tx = {
+                        use crate::schema::transactions::dsl::*;
+                        diesel::update(
+                            transactions
+                                .filter(id.eq(payout.id.clone()))
+                                .filter(status.eq(TransactionStatus::New)),
+                        )
+                        .set((
+                            status.eq(TransactionStatus::Rejected),
+                            updated_at.eq(Utc::now().naive_utc()),
+                        ))
+                        .get_result(conn)
+                    }?;
                     {
                         use crate::schema::merchants::dsl::*;
                         diesel::update(merchants.filter(id.eq(payout.merchant_id.clone())))
@@ -470,15 +482,6 @@ impl Handler<RejectPayout<NewPayout>> for FsmPayout {
                             .get_result::<Merchant>(conn)?;
                     }
 
-                    let tx = {
-                        use crate::schema::transactions::dsl::*;
-                        diesel::update(transactions.filter(id.eq(payout.id.clone())))
-                            .set((
-                                status.eq(TransactionStatus::Rejected),
-                                updated_at.eq(Utc::now().naive_utc()),
-                            ))
-                            .get_result(conn)
-                    }?;
                     Ok(tx)
                 })?;
 
@@ -511,6 +514,19 @@ impl Handler<RejectPayout<InitializedPayout>> for FsmPayout {
                                 conn.transaction(|| -> Result<Transaction, Error> {
                                     let payout = msg.payout;
                                     warn!("Reject payout {:?}", payout);
+                                    let tx = {
+                                        use crate::schema::transactions::dsl::*;
+                                        diesel::update(
+                                            transactions
+                                                .filter(id.eq(payout.id.clone()))
+                                                .filter(status.eq(TransactionStatus::Initialized)),
+                                        )
+                                        .set((
+                                            status.eq(TransactionStatus::Rejected),
+                                            updated_at.eq(Utc::now().naive_utc()),
+                                        ))
+                                        .get_result(conn)
+                                    }?;
                                     {
                                         use crate::schema::merchants::dsl::*;
                                         diesel::update(
@@ -520,17 +536,6 @@ impl Handler<RejectPayout<InitializedPayout>> for FsmPayout {
                                         .get_result::<Merchant>(conn)?;
                                     }
 
-                                    let tx = {
-                                        use crate::schema::transactions::dsl::*;
-                                        diesel::update(
-                                            transactions.filter(id.eq(payout.id.clone())),
-                                        )
-                                        .set((
-                                            status.eq(TransactionStatus::Rejected),
-                                            updated_at.eq(Utc::now().naive_utc()),
-                                        ))
-                                        .get_result(conn)
-                                    }?;
                                     Ok(tx)
                                 })?;
                             Ok(RejectedPayout(tx))
@@ -561,6 +566,19 @@ impl Handler<RejectPayout<PendingPayout>> for FsmPayout {
                                 conn.transaction(|| -> Result<Transaction, Error> {
                                     let payout = msg.payout;
                                     warn!("Reject payout {:?}", payout);
+                                    let tx = {
+                                        use crate::schema::transactions::dsl::*;
+                                        diesel::update(
+                                            transactions
+                                                .filter(id.eq(payout.id.clone()))
+                                                .filter(status.eq(TransactionStatus::Pending)),
+                                        )
+                                        .set((
+                                            status.eq(TransactionStatus::Rejected),
+                                            updated_at.eq(Utc::now().naive_utc()),
+                                        ))
+                                        .get_result(conn)
+                                    }?;
                                     {
                                         use crate::schema::merchants::dsl::*;
                                         diesel::update(
@@ -570,17 +588,6 @@ impl Handler<RejectPayout<PendingPayout>> for FsmPayout {
                                         .get_result::<Merchant>(conn)?;
                                     }
 
-                                    let tx = {
-                                        use crate::schema::transactions::dsl::*;
-                                        diesel::update(
-                                            transactions.filter(id.eq(payout.id.clone())),
-                                        )
-                                        .set((
-                                            status.eq(TransactionStatus::Rejected),
-                                            updated_at.eq(Utc::now().naive_utc()),
-                                        ))
-                                        .get_result(conn)
-                                    }?;
                                     Ok(tx)
                                 })?;
                             Ok(RejectedPayout(tx))
