@@ -567,15 +567,6 @@ impl Handler<ReportPayment<RejectedPayment>> for Fsm {
                         move || {
                             let conn: &PgConnection = &pool.get().unwrap();
                             conn.transaction(|| {
-                                {
-                                    use crate::schema::merchants::dsl::*;
-                                    diesel::update(
-                                        merchants.filter(id.eq(msg.payment.merchant_id.clone())),
-                                    )
-                                    .set(balance.eq(balance + msg.payment.grin_amount))
-                                    .get_result::<Merchant>(conn)
-                                    .map_err::<Error, _>(|e| e.into())?;
-                                };
                                 use crate::schema::transactions::dsl::*;
                                 diesel::update(transactions.filter(id.eq(msg.payment.id)))
                                     .set(reported.eq(true))
