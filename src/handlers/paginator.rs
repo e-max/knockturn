@@ -73,7 +73,7 @@ impl FromRequest for Paginate {
 
     #[inline]
     fn from_request(req: &HttpRequest, _: &mut dev::Payload) -> Self::Future {
-        let mut tmp;
+        let tmp;
         let cfg = if let Some(cfg) = req.app_data::<PaginateConfig>() {
             cfg
         } else {

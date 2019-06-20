@@ -5,10 +5,13 @@ use dotenv::dotenv;
 use env_logger;
 use knockturn::app::{routing, AppCfg, AppState};
 use log::info;
-use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
+use rustls::internal::pemfile::{certs, pkcs8_private_keys};
+use rustls::{NoClientAuth, ServerConfig};
 use sentry;
 use sentry_actix::SentryMiddleware;
 use std::env;
+use std::fs::File;
+use std::io::BufReader;
 
 fn main() {
     dotenv().ok();
@@ -70,6 +73,24 @@ fn main() {
         app
     });
 
+    if let Ok(folder) = env::var("TLS_FOLDER") {
+        // load ssl keys
+        let mut config = ServerConfig::new(NoClientAuth::new());
+        let cert_file =
+            &mut BufReader::new(File::open(format!("{}/fullchain.pem", folder)).unwrap());
+        let key_file = &mut BufReader::new(File::open(format!("{}/privkey.pem", folder)).unwrap());
+        let cert_chain = certs(cert_file).unwrap();
+        let mut keys = pkcs8_private_keys(key_file).unwrap();
+        config.set_single_cert(cert_chain, keys.remove(0)).unwrap();
+        srv.bind_rustls(&host, config)
+            .expect(&format!("Can not TLS  bind to '{}'", &host))
+            .run();
+    } else {
+        srv.bind(&host)
+            .expect(&format!("Can not bind to '{}'", &host))
+            .run();
+    }
+
     /*
      *
      * replace me with a proper TLS implementation
@@ -88,8 +109,4 @@ fn main() {
             .expect(&format!("Can not bind to '{}'", &host))
     };
     */
-
-    srv.bind(&host)
-        .expect(&format!("Can not bind to '{}'", &host))
-        .run();
 }
