@@ -155,6 +155,7 @@ pub fn get_transactions(
             let txs = transactions
                 .for_page(&paginate)
                 .filter(merchant_id.eq(merch_id.clone()))
+                .order(created_at.desc())
                 .load::<Transaction>(conn)
                 .map_err::<Error, _>(|e| e.into())?;
 

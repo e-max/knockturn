@@ -90,6 +90,9 @@ impl BootstrapColor for Transaction {
         match (self.transaction_type, self.status) {
             (TransactionType::Payout, TransactionStatus::Confirmed) => "success",
             (TransactionType::Payout, TransactionStatus::Pending) => "info",
+            (TransactionType::Payout, TransactionStatus::Rejected) => "secondary",
+            (TransactionType::Payment, TransactionStatus::Confirmed) => "success",
+            (TransactionType::Payment, TransactionStatus::Refund) => "danger",
             (TransactionType::Payment, TransactionStatus::Rejected) => "secondary",
             (_, _) => "light",
         }
