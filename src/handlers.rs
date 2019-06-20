@@ -4,10 +4,11 @@ use crate::errors::*;
 use crate::extractor::SimpleJson;
 use crate::models::{Merchant, Transaction, TransactionStatus, TransactionType};
 use crate::totp::Totp;
-use actix_web::{AsyncResponder, FutureResponse, HttpResponse, Path, State};
+use actix_web::web::{Data, Path};
+use actix_web::HttpResponse;
 use askama::Template;
 use bcrypt;
-use futures::future::{ok, result, Future};
+use futures::future::{ok, Future};
 use mime_guess::get_mime_type;
 
 pub mod mfa;
@@ -17,27 +18,33 @@ pub mod payout;
 pub mod webui;
 
 pub fn create_merchant(
-    (create_merchant, state): (SimpleJson<CreateMerchant>, State<AppState>),
-) -> FutureResponse<HttpResponse> {
+    create_merchant: SimpleJson<CreateMerchant>,
+    state: Data<AppState>,
+) -> impl Future<Item = HttpResponse, Error = Error> {
     let mut create_merchant = create_merchant.into_inner();
-    create_merchant.password = match bcrypt::hash(&create_merchant.password, bcrypt::DEFAULT_COST) {
-        Ok(v) => v,
-        Err(_) => return result(Ok(HttpResponse::InternalServerError().finish())).responder(),
-    };
-    state
-        .db
-        .send(create_merchant)
-        .from_err()
-        .and_then(|db_response| {
-            let merchant = db_response?;
-            Ok(HttpResponse::Created().json(merchant))
+    ok(())
+        .and_then(move |_| {
+            create_merchant.password =
+                bcrypt::hash(&create_merchant.password, bcrypt::DEFAULT_COST)
+                    .map_err(|e| Error::General(s!(e)))?;
+            Ok(create_merchant)
         })
-        .responder()
+        .and_then(move |create_merchant| {
+            state
+                .db
+                .send(create_merchant)
+                .from_err()
+                .and_then(|db_response| {
+                    let merchant = db_response?;
+                    Ok(HttpResponse::Created().json(merchant))
+                })
+        })
 }
 
 pub fn get_merchant(
-    (merchant_id, state): (Path<String>, State<AppState>),
-) -> FutureResponse<HttpResponse> {
+    merchant_id: Path<String>,
+    state: Data<AppState>,
+) -> impl Future<Item = HttpResponse, Error = Error> {
     state
         .db
         .send(GetMerchant {
@@ -48,7 +55,6 @@ pub fn get_merchant(
             let merchant = db_response?;
             Ok(HttpResponse::Ok().json(merchant))
         })
-        .responder()
 }
 
 fn check_2fa_code(merchant: &Merchant, code: &str) -> Result<bool, Error> {
@@ -62,7 +68,7 @@ fn check_2fa_code(merchant: &Merchant, code: &str) -> Result<bool, Error> {
 
 pub trait TemplateIntoResponse {
     fn into_response(&self) -> Result<HttpResponse, Error>;
-    fn into_future(&self) -> FutureResponse<HttpResponse, Error>;
+    fn into_future(&self) -> Box<dyn Future<Item = HttpResponse, Error = Error>>;
 }
 
 impl<T: Template> TemplateIntoResponse for T {
@@ -71,7 +77,7 @@ impl<T: Template> TemplateIntoResponse for T {
         let ctype = get_mime_type(T::extension().unwrap_or("txt")).to_string();
         Ok(HttpResponse::Ok().content_type(ctype.as_str()).body(rsp))
     }
-    fn into_future(&self) -> FutureResponse<HttpResponse, Error> {
+    fn into_future(&self) -> Box<dyn Future<Item = HttpResponse, Error = Error>> {
         Box::new(ok(self.into_response().into()))
     }
 }

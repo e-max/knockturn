@@ -1,7 +1,6 @@
 use crate::db::{DbExecutor, RegisterRate};
 use actix::prelude::*;
-use actix_web::client;
-use actix_web::HttpMessage;
+use actix_web::client::Client;
 use futures;
 use futures::future::{err, ok, result, Future};
 use log::*;
@@ -26,18 +25,16 @@ impl RatesFetcher {
 
     pub fn fetch(&self) {
         let db = self.db.clone();
-        let f = client::get(
+        let f = Client::default().get(
             "https://api.coingecko.com/api/v3/simple/price?ids=grin&vs_currencies=btc%2Cusd%2Ceur",
         )
         .header("Accept", "application/json")
-        .finish()
-        .unwrap()
         .send()
         .map_err(|e| {
             error!("failed to fetch exchange rates: {:?}", e);
             ()
         })
-        .and_then(|response| {
+        .and_then(|mut response| {
             response
                 .body()
                 .map_err(|e| {

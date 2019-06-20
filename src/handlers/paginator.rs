@@ -1,4 +1,6 @@
-use actix_web::{Error, FromRequest, HttpRequest};
+use crate::errors::Error;
+use actix_web::dev;
+use actix_web::{FromRequest, HttpRequest};
 use diesel::query_dsl::methods::{LimitDsl, OffsetDsl};
 use serde::Deserialize;
 use serde_urlencoded;
@@ -64,12 +66,20 @@ struct PageInfo {
     per_page: Option<i64>,
 }
 
-impl<S> FromRequest<S> for Paginate {
+impl FromRequest for Paginate {
     type Config = PaginateConfig;
-    type Result = Result<Self, Error>;
+    type Future = Result<Self, Self::Error>;
+    type Error = Error;
 
     #[inline]
-    fn from_request(req: &HttpRequest<S>, cfg: &Self::Config) -> Self::Result {
+    fn from_request(req: &HttpRequest, _: &mut dev::Payload) -> Self::Future {
+        let tmp;
+        let cfg = if let Some(cfg) = req.app_data::<PaginateConfig>() {
+            cfg
+        } else {
+            tmp = PaginateConfig::default();
+            &tmp
+        };
         let conn = req.connection_info();
         let url = Url::parse(&format!(
             "{}://{}{}?{}",
@@ -77,9 +87,11 @@ impl<S> FromRequest<S> for Paginate {
             conn.host(),
             req.path(),
             req.query_string(),
-        ))?;
+        ))
+        .map_err(|e| Error::General(s!(e)))?;
 
-        let page_info = serde_urlencoded::from_str::<PageInfo>(req.query_string())?;
+        let page_info = serde_urlencoded::from_str::<PageInfo>(req.query_string())
+            .map_err(|e| Error::General(s!(e)))?;
 
         Ok(Paginate {
             page: page_info.page.unwrap_or(1),

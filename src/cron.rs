@@ -1,4 +1,3 @@
-use crate::blocking;
 use crate::db::{DbExecutor, RejectExpiredPayments};
 use crate::errors::Error;
 use crate::fsm::{
@@ -9,6 +8,7 @@ use crate::models::{Transaction, TransactionStatus};
 use crate::node::Node;
 use crate::rates::RatesFetcher;
 use actix::prelude::*;
+use actix_web::web::block;
 use diesel::pg::PgConnection;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::{self, prelude::*};
@@ -52,6 +52,7 @@ impl Actor for Cron {
     }
 
     fn stopping(&mut self, _ctx: &mut Self::Context) -> Running {
+        info!("Stop cron process");
         Running::Stop
     }
 }
@@ -213,7 +214,7 @@ fn sync_with_node(cron: &mut Cron, _: &mut Context<Cron>) {
     debug!("run sync_with_node");
     let pool = cron.pool.clone();
     let node = cron.node.clone();
-    let res = blocking::run({
+    let res = block::<_, _, Error>({
         let pool = pool.clone();
         move || {
             use crate::schema::current_height::dsl::*;
@@ -243,7 +244,7 @@ fn sync_with_node(cron: &mut Cron, _: &mut Context<Cron>) {
                     .map(|o| (o.commit.clone(), o.block_height.unwrap() as i64))
                     .collect();
                 debug!("Found {} non coinbase outputs", commits.len());
-                blocking::run({
+                block({
                     let pool = pool.clone();
                     move || {
                         use crate::schema::transactions::dsl::*;
@@ -302,7 +303,7 @@ fn sync_with_node(cron: &mut Cron, _: &mut Context<Cron>) {
 
 fn autoconfirmation(cron: &mut Cron, _: &mut Context<Cron>) {
     debug!("run autoconfirmation");
-    let res = blocking::run({
+    let res = block::<_, _, Error>({
         let pool = cron.pool.clone();
         move || {
             let conn: &PgConnection = &pool.get().unwrap();

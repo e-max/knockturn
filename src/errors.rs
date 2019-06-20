@@ -1,6 +1,6 @@
-use crate::blocking::BlockingError;
 use actix::MailboxError;
-use actix_web::{error::ResponseError, HttpResponse};
+use actix_web::error::{BlockingError, ResponseError};
+use actix_web::{Error as ActixError, HttpResponse};
 use failure::Fail;
 
 #[derive(Fail, Debug)]
@@ -66,11 +66,20 @@ impl From<MailboxError> for Error {
     }
 }
 
-impl From<BlockingError> for Error {
-    fn from(error: BlockingError) -> Self {
+impl From<ActixError> for Error {
+    fn from(error: ActixError) -> Self {
+        Error::General(s!(error))
+    }
+}
+
+impl<E> From<BlockingError<E>> for Error
+where
+    E: std::fmt::Debug,
+{
+    fn from(error: BlockingError<E>) -> Self {
         match error {
-            BlockingError::Canceled => Error::General(s!("Got blocking error")),
-            BlockingError::Error(e) => e,
+            BlockingError::Canceled => Error::General(s!("Got cancelled blocking error")),
+            BlockingError::Error(e) => Error::General(format!("Got blocking error {:?}", e)),
         }
     }
 }

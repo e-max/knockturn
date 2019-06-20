@@ -2,9 +2,10 @@ use crate::app::AppState;
 use crate::db::GetMerchant;
 use crate::errors::*;
 use crate::models::Merchant;
-use actix_web::middleware::identity::RequestIdentity;
-use actix_web::middleware::session::RequestSession;
-use actix_web::{FromRequest, HttpMessage, HttpRequest};
+use actix_session::Session as ActixSession;
+use actix_web::dev;
+use actix_web::middleware::identity::Identity;
+use actix_web::{FromRequest, HttpRequest};
 use actix_web_httpauth::extractors::basic;
 use bytes::BytesMut;
 use derive_deref::Deref;
@@ -19,24 +20,25 @@ pub struct BasicAuth<T>(pub T);
 pub struct BasicAuthConfig(pub basic::Config);
 impl Default for BasicAuthConfig {
     fn default() -> Self {
-        let mut config = basic::Config::default();
-        config.realm("knocktrun");
-        BasicAuthConfig(config)
+        BasicAuthConfig(basic::Config::default().realm("knocktrun"))
     }
 }
 
-impl FromRequest<AppState> for BasicAuth<Merchant> {
+impl FromRequest for BasicAuth<Merchant> {
     type Config = BasicAuthConfig;
-    type Result = Result<Box<dyn Future<Item = Self, Error = Error>>, Error>;
+    type Error = Error;
+    type Future = Box<dyn Future<Item = Self, Error = Self::Error>>;
 
-    fn from_request(req: &HttpRequest<AppState>, cfg: &Self::Config) -> Self::Result {
-        let bauth =
-            basic::BasicAuth::from_request(&req, &cfg.0).map_err(|_| Error::NotAuthorized)?;
-        let username = bauth.username().to_owned();
-
-        Ok(Box::new(
-            req.state()
-                .db
+    fn from_request(req: &HttpRequest, _: &mut dev::Payload) -> Self::Future {
+        let bauth = match basic::BasicAuth::extract(req) {
+            Ok(v) => v,
+            _ => return Box::new(err(Error::NotAuthorized)),
+        };
+        let data = req.app_data::<AppState>().unwrap();
+        let username = bauth.user_id().to_string();
+        let password = bauth.password().map(|p| p.to_string()).unwrap_or(s!(""));
+        Box::new(
+            data.db
                 .send(GetMerchant { id: username })
                 .from_err()
                 .and_then(move |db_response| {
@@ -44,14 +46,13 @@ impl FromRequest<AppState> for BasicAuth<Merchant> {
                         Ok(m) => m,
                         Err(_) => return err(Error::NotAuthorized),
                     };
-                    let password = bauth.password().unwrap_or("");
                     if merchant.token != password {
                         err(Error::NotAuthorized)
                     } else {
                         ok(BasicAuth(merchant))
                     }
                 }),
-        ))
+        )
     }
 }
 
@@ -73,34 +74,47 @@ impl Default for SessionConfig {
     }
 }
 
-impl FromRequest<AppState> for Session<Merchant> {
+impl FromRequest for Session<Merchant> {
     type Config = SessionConfig;
-    type Result = Result<Box<dyn Future<Item = Self, Error = Error>>, Error>;
+    type Error = Error;
+    type Future = Box<dyn Future<Item = Self, Error = Self::Error>>;
 
-    fn from_request(req: &HttpRequest<AppState>, cfg: &Self::Config) -> Self::Result {
-        let merchant_id = match req.session().get::<String>(&cfg.0) {
+    fn from_request(req: &HttpRequest, _: &mut dev::Payload) -> Self::Future {
+        let mut tmp;
+        let cfg = if let Some(cfg) = req.app_data::<SessionConfig>() {
+            cfg
+        } else {
+            tmp = SessionConfig::default();
+            &tmp
+        };
+        let session = match ActixSession::extract(req) {
+            Ok(v) => v,
+            _ => return Box::new(err(Error::NotAuthorizedInUI)),
+        };
+        let merchant_id = match session.get::<String>(&cfg.0) {
             Ok(Some(v)) => v,
-            _ => return Err(Error::NotAuthorizedInUI),
+            _ => return Box::new(err(Error::NotAuthorizedInUI)),
         };
 
-        Ok(Box::new(
-            req.state()
-                .db
+        let data = req.app_data::<AppState>().unwrap();
+
+        Box::new(
+            data.db
                 .send(GetMerchant { id: merchant_id })
                 .from_err()
                 .and_then(move |db_response| match db_response {
                     Ok(m) => ok(Session(m)),
                     Err(_) => err(Error::NotAuthorizedInUI),
                 }),
-        ))
+        )
     }
 }
 
-/// Identity extractor
+/// User extractor
 #[derive(Debug, Deref, Clone)]
-pub struct Identity<T>(pub T);
+pub struct User<T>(pub T);
 
-impl<T> Identity<T> {
+impl<T> User<T> {
     pub fn into_inner(self) -> T {
         self.0
     }
@@ -114,26 +128,32 @@ impl Default for IdentityConfig {
     }
 }
 
-impl FromRequest<AppState> for Identity<Merchant> {
+impl FromRequest for User<Merchant> {
     type Config = IdentityConfig;
-    type Result = Result<Box<dyn Future<Item = Self, Error = Error>>, Error>;
+    type Error = Error;
+    type Future = Box<dyn Future<Item = Self, Error = Self::Error> + 'static>;
 
-    fn from_request(req: &HttpRequest<AppState>, _: &Self::Config) -> Self::Result {
-        let merchant_id = match req.identity() {
-            Some(v) => v,
-            None => return Err(Error::NotAuthorizedInUI),
+    fn from_request(req: &HttpRequest, _: &mut dev::Payload) -> Self::Future {
+        let id = match Identity::extract(req) {
+            Ok(v) => v,
+            _ => return Box::new(err(Error::NotAuthorizedInUI)),
         };
 
-        Ok(Box::new(
-            req.state()
-                .db
+        let merchant_id = match id.identity() {
+            Some(v) => v,
+            _ => return Box::new(err(Error::NotAuthorizedInUI)),
+        };
+
+        let data = req.app_data::<AppState>().unwrap();
+        Box::new(
+            data.db
                 .send(GetMerchant { id: merchant_id })
                 .from_err()
                 .and_then(move |db_response| match db_response {
-                    Ok(m) => ok(Identity(m)),
+                    Ok(m) => ok(User(m)),
                     Err(_) => err(Error::NotAuthorizedInUI),
                 }),
-        ))
+        )
     }
 }
 
@@ -156,16 +176,18 @@ impl Default for SimpleJsonConfig {
 }
 const MAX_SIZE: usize = 262_144 * 1024; // max payload size is 256m
 
-impl<T> FromRequest<AppState> for SimpleJson<T>
+impl<T> FromRequest for SimpleJson<T>
 where
     T: DeserializeOwned + 'static,
 {
     type Config = SimpleJsonConfig;
-    type Result = Result<Box<dyn Future<Item = Self, Error = Error>>, Error>;
+    type Error = Error;
+    type Future = Box<dyn Future<Item = Self, Error = Self::Error>>;
 
-    fn from_request(req: &HttpRequest<AppState>, _cfg: &Self::Config) -> Self::Result {
-        Ok(Box::new(
-            req.payload()
+    fn from_request(_: &HttpRequest, payload: &mut dev::Payload) -> Self::Future {
+        Box::new(
+            payload
+                .take()
                 .map_err(|e| Error::Internal(format!("Payload error: {:?}", e)))
                 .fold(BytesMut::new(), move |mut body, chunk| {
                     if (body.len() + chunk.len()) > MAX_SIZE {
@@ -179,6 +201,6 @@ where
                     let obj = serde_json::from_slice::<T>(&body)?;
                     Ok(SimpleJson(obj))
                 }),
-        ))
+        )
     }
 }
