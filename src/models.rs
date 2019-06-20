@@ -43,6 +43,7 @@ pub struct Merchant {
  * InChain - transaction was accepted to chain
  * Confirmed - we got required number of confirmation for this transaction
  * Rejected - transaction spent too much time in New or Pending state
+ * Refund - transaction was received from user, but we won't be able to report about it to merchant
  *
  * The status of payout changes as follows:
  * New - payout created in db
