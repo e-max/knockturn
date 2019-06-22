@@ -139,6 +139,7 @@ struct TransactionsTemplate<'a> {
     pages: Pages<'a>,
     refunds_num: i64,
     txtype: TxType,
+    total: i64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -255,6 +256,7 @@ pub fn get_transactions(
                 pages: paginate.for_total(total),
                 refunds_num: refunds,
                 txtype: info.txtype.clone().unwrap_or(TxType::All),
+                total: total,
             }
             .render()
             .map_err(|e| Error::from(e))?;
