@@ -65,24 +65,19 @@ pub fn index(
                     .first(conn)
                     .map_err::<Error, _>(|e| e.into())
             }?;
-            Ok((txs, last_payout, current_height, balance))
-        }
-    })
-    .from_err()
-    .and_then(
-        move |(transactions, last_payout, current_height, balance)| {
-            let html = IndexTemplate {
+            IndexTemplate {
                 merchant: &merchant,
                 balance: balance,
-                transactions: transactions,
+                transactions: txs,
                 last_payout: &last_payout,
                 current_height: current_height,
             }
             .render()
-            .map_err(|e| Error::from(e))?;
-            Ok(HttpResponse::Ok().content_type("text/html").body(html))
-        },
-    )
+            .map_err(|e| Error::from(e))
+        }
+    })
+    .from_err()
+    .and_then(move |html| Ok(HttpResponse::Ok().content_type("text/html").body(html)))
 }
 
 #[derive(Debug, Deserialize)]
