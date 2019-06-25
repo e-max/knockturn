@@ -26,7 +26,6 @@ pub struct Merchant {
     pub email: String,
     pub password: String,
     pub wallet_url: Option<String>,
-    pub balance: i64,
     pub created_at: NaiveDateTime,
     pub token: String,
     pub callback_url: Option<String>,

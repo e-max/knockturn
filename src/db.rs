@@ -92,11 +92,6 @@ pub struct GetPaymentsByStatus(pub TransactionStatus);
 #[derive(Debug, Deserialize)]
 pub struct GetPayoutsByStatus(pub TransactionStatus);
 
-pub struct ConfirmTransaction {
-    pub transaction: Transaction,
-    pub confirmed_at: Option<NaiveDateTime>,
-}
-
 #[derive(Debug, Deserialize)]
 pub struct ReportAttempt {
     pub transaction_id: Uuid,
@@ -165,9 +160,6 @@ impl Message for RegisterRate {
 impl Message for ConvertCurrency {
     type Result = Result<Money, Error>;
 }
-impl Message for ConfirmTransaction {
-    type Result = Result<Transaction, Error>;
-}
 
 impl Message for ReportAttempt {
     type Result = Result<(), Error>;
@@ -213,7 +205,6 @@ impl Handler<CreateMerchant> for DbExecutor {
             email: msg.email,
             password: msg.password,
             wallet_url: msg.wallet_url,
-            balance: 0,
             created_at: Local::now().naive_local() + Duration::hours(24),
             callback_url: msg.callback_url,
             token: new_token.ok_or(Error::General(s!("cannot generate rangom token")))?,
@@ -414,37 +405,6 @@ impl Handler<RegisterRate> for DbExecutor {
     }
 }
 
-impl Handler<ConfirmTransaction> for DbExecutor {
-    type Result = Result<Transaction, Error>;
-
-    fn handle(&mut self, msg: ConfirmTransaction, _: &mut Self::Context) -> Self::Result {
-        use crate::schema::merchants;
-        use crate::schema::transactions;
-        let conn: &PgConnection = &self.0.get().unwrap();
-
-        conn.transaction(|| {
-            let tx = diesel::update(
-                transactions::table.filter(transactions::columns::id.eq(msg.transaction.id)),
-            )
-            .set((
-                transactions::columns::status.eq(TransactionStatus::Confirmed),
-                transactions::columns::updated_at.eq(Utc::now().naive_utc()),
-            ))
-            .get_result(conn)?;
-            diesel::update(
-                merchants::table.filter(merchants::columns::id.eq(msg.transaction.merchant_id)),
-            )
-            .set(
-                merchants::columns::balance
-                    .eq(merchants::columns::balance + msg.transaction.grin_amount),
-            )
-            .get_result(conn)
-            .map(|_: Merchant| ())?;
-            Ok(tx)
-        })
-    }
-}
-
 impl Handler<ReportAttempt> for DbExecutor {
     type Result = Result<(), Error>;
 
@@ -564,4 +524,8 @@ impl Handler<GetCurrentHeight> for DbExecutor {
             .first(conn)
             .map_err(|e| e.into())
     }
+}
+
+pub fn get_balance(merchant_id: &str, conn: &PgConnection) -> Result<i64, Error> {
+    Ok(0)
 }

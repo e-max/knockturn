@@ -1,4 +1,5 @@
 use crate::app::AppState;
+use crate::db::get_balance;
 use crate::errors::*;
 use crate::extractor::{SimpleJson, User};
 use crate::filters::{self, ForHuman};
@@ -13,8 +14,9 @@ use crate::handlers::TemplateIntoResponse;
 use crate::models::{Merchant, Money, Transaction, TransactionStatus};
 use crate::wallet::Slate;
 use actix_web::middleware::identity::Identity;
-use actix_web::web::{Data, Form, Path};
+use actix_web::web::{block, Data, Form, Path};
 use actix_web::{HttpRequest, HttpResponse};
+use diesel::pg::PgConnection;
 
 use askama::Template;
 use futures::future::{ok, result, Either, Future};
@@ -32,25 +34,38 @@ struct WithdrawTemplate<'a> {
     url: &'a str,
 }
 
-pub fn withdraw(merchant: User<Merchant>) -> Result<HttpResponse, Error> {
-    let reminder = merchant.balance.reminder().unwrap_or(0);
-    let mut template = WithdrawTemplate {
-        error: None,
-        balance: merchant.balance.into(),
-        transfer_fee: merchant.balance.transfer_fee().into(),
-        knockturn_fee: merchant.balance.knockturn_fee().into(),
-        total: reminder.into(),
-        url: "http://localhost:6000/withdraw/confirm",
-    };
+pub fn withdraw(
+    merchant: User<Merchant>,
+    data: Data<AppState>,
+) -> impl Future<Item = HttpResponse, Error = Error> {
+    block::<_, _, Error>({
+        let merch_id = merchant.id.clone();
+        let pool = data.pool.clone();
+        move || {
+            let conn: &PgConnection = &pool.get().unwrap();
+            let balance = get_balance(&merchant.id, conn)?;
+            let reminder = balance.reminder().unwrap_or(0);
+            let mut template = WithdrawTemplate {
+                error: None,
+                balance: balance.into(),
+                transfer_fee: balance.transfer_fee().into(),
+                knockturn_fee: balance.knockturn_fee().into(),
+                total: reminder.into(),
+                url: "http://localhost:6000/withdraw/confirm",
+            };
 
-    if merchant.balance < MINIMAL_WITHDRAW {
-        template.error = Some(format!(
-            "You balance is too small. Minimal withdraw amount is {}",
-            Money::from_grin(MINIMAL_WITHDRAW)
-        ));
-    }
+            if balance < MINIMAL_WITHDRAW {
+                template.error = Some(format!(
+                    "You balance is too small. Minimal withdraw amount is {}",
+                    Money::from_grin(MINIMAL_WITHDRAW)
+                ));
+            }
 
-    template.into_response()
+            template.render().map_err(|e| Error::from(e))
+        }
+    })
+    .from_err()
+    .and_then(|html| Ok(HttpResponse::Ok().content_type("text/html").body(html)))
 }
 
 #[derive(Debug, Deserialize)]
@@ -75,7 +90,7 @@ pub fn create_payout(
         })
         .and_then(move |(merchant, validated)| {
             if !validated {
-                Either::A(result(withdraw(identity_merchant)))
+                Either::A(withdraw(identity_merchant, data))
             } else {
                 Either::B(
                     data.fsm_payout

@@ -1,5 +1,5 @@
 use crate::app::AppState;
-use crate::db::GetMerchant;
+use crate::db::{get_balance, GetMerchant};
 use crate::errors::*;
 use crate::extractor::User;
 use crate::filters;
@@ -21,6 +21,7 @@ use serde::Deserialize;
 #[template(path = "index.html")]
 struct IndexTemplate<'a> {
     merchant: &'a Merchant,
+    balance: i64,
     transactions: Vec<Transaction>,
     last_payout: &'a Option<Transaction>,
     current_height: i64,
@@ -36,6 +37,7 @@ pub fn index(
         let pool = data.pool.clone();
         move || {
             let conn: &PgConnection = &pool.get().unwrap();
+            let balance = get_balance(&merch_id, conn)?;
             let txs = {
                 use crate::schema::transactions::dsl::*;
                 transactions
@@ -63,21 +65,24 @@ pub fn index(
                     .first(conn)
                     .map_err::<Error, _>(|e| e.into())
             }?;
-            Ok((txs, last_payout, current_height))
+            Ok((txs, last_payout, current_height, balance))
         }
     })
     .from_err()
-    .and_then(move |(transactions, last_payout, current_height)| {
-        let html = IndexTemplate {
-            merchant: &merchant,
-            transactions: transactions,
-            last_payout: &last_payout,
-            current_height: current_height,
-        }
-        .render()
-        .map_err(|e| Error::from(e))?;
-        Ok(HttpResponse::Ok().content_type("text/html").body(html))
-    })
+    .and_then(
+        move |(transactions, last_payout, current_height, balance)| {
+            let html = IndexTemplate {
+                merchant: &merchant,
+                balance: balance,
+                transactions: transactions,
+                last_payout: &last_payout,
+                current_height: current_height,
+            }
+            .render()
+            .map_err(|e| Error::from(e))?;
+            Ok(HttpResponse::Ok().content_type("text/html").body(html))
+        },
+    )
 }
 
 #[derive(Debug, Deserialize)]
