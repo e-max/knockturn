@@ -13,7 +13,7 @@
 	<table class="table">
 		<tr><td >Status:</td><td id="status" class="table-{{payment.color()}}">{{payment.status}}</td></tr>
 		{% if payment.time_until_expired().is_some() -%}
-		<tr><td >Expired in:</td><td id="expired_in">{{payment.time_until_expired().unwrap()|duration}}</td></tr>
+		<tr><td >Expired </td><td id="expired_in">{{payment.time_until_expired().unwrap().for_human()}}</td></tr>
 		{%- endif %}
 		<tr><td>Amount: </td><td>{{payment.amount}}</td></tr>
 		<tr><td>Message: </td><td>{{payment.message}}</td></tr>

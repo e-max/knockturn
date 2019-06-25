@@ -4,7 +4,22 @@
 
 {% block content %}
 
-	<p>Transactions: {{transactions.len()}}</p>
+	<p>Transactions: {{total}}</p>
+	
+	<ul class="nav nav-tabs">
+		<li class="nav-item">
+			<a class="nav-link {{txtype.is_active("All")}}" href="?txtype=All">Transactions</a>
+		</li>
+		<li class="nav-item">
+			<a class="nav-link {{txtype.is_active("Payouts")}}" href="?txtype=Payouts">Payouts</a>
+		</li>
+		<li class="nav-item">
+			<a class="nav-link {{txtype.is_active("Payments")}}" href="?txtype=Payments">Payments</a>
+		</li>
+		<li class="nav-item">
+			<a class="nav-link {{txtype.is_active("Refunds")}}" href="?txtype=Refunds">Refunds <span class="badge badge-danger">{{refunds_num}}</span></a>
+		</li>
+	</ul>
 	<table class="table">
 		<thead>
 			<tr>
@@ -12,6 +27,7 @@
 				<th>Amount</th>
 				<th>Grins</th>
 				<th>Status</th>
+				<th>Reported</th>
 				<th>Confirmations</th>
 				<th>Created</th>
 				<th>Updated</th>

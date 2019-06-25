@@ -7,7 +7,7 @@
 					<td class="text-nowrap">{{ transaction.amount }}</td>
 					<td class="text-nowrap">{{ transaction.grins() }}</td>
 				{% endif %}
-				<td class="table-{{transaction.color()}}" >{{ transaction.status.to_string() }}</td>
+				<td><span class="badge badge-{{transaction.color()}}">{{ transaction.status.to_string() }}</span></td>
 				<td>{{ transaction.reported }}</td>
 				{% if transaction.current_confirmations(current_height) > transaction.confirmations %}
 				<td>{{transaction.confirmations}}/{{transaction.confirmations}}</td>

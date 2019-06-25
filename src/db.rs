@@ -479,6 +479,7 @@ impl Handler<GetUnreportedPaymentsByStatus> for DbExecutor {
         let query = transactions
             .filter(reported.ne(true))
             .filter(status.eq(msg.0))
+            .filter(transaction_type.eq(TransactionType::Payment))
             .filter(report_attempts.lt(MAX_REPORT_ATTEMPTS))
             .filter(
                 next_report_attempt

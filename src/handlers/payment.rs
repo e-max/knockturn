@@ -2,7 +2,7 @@ use crate::app::AppState;
 use crate::db::{GetCurrentHeight, GetTransaction};
 use crate::errors::*;
 use crate::extractor::{BasicAuth, SimpleJson};
-use crate::filters;
+use crate::filters::{self, ForHuman};
 use crate::fsm::{CreatePayment, GetNewPayment, MakePayment};
 use crate::handlers::BootstrapColor;
 use crate::models::{Merchant, Money, Transaction, TransactionStatus};
@@ -95,9 +95,7 @@ pub fn get_payment_status(
                             status: tx.status.to_string(),
                             seconds_until_expired: tx.time_until_expired().map(|d| d.num_seconds()),
 
-                            expired_in: tx.time_until_expired().map(|d| {
-                                HumanTime::from(d).to_text_en(Accuracy::Precise, Tense::Present)
-                            }),
+                            expired_in: tx.time_until_expired().map(|d| d.for_human()),
                             current_confirmations: tx.current_confirmations(current_height),
                             required_confirmations: tx.confirmations,
                             reported: tx.reported,
