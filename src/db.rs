@@ -5,11 +5,14 @@ use crate::models::{
 };
 use actix::{Actor, SyncContext};
 use actix::{Handler, Message};
+use bigdecimal::{BigDecimal, ToPrimitive};
 use chrono::NaiveDateTime;
 use chrono::{Duration, Local, Utc};
 use data_encoding::BASE32;
+use diesel::dsl::{sql, sum};
 use diesel::pg::PgConnection;
 use diesel::r2d2::{ConnectionManager, Pool};
+use diesel::sql_types::BigInt;
 use diesel::{self, prelude::*};
 use log::info;
 use rand::seq::SliceRandom;
@@ -526,6 +529,34 @@ impl Handler<GetCurrentHeight> for DbExecutor {
     }
 }
 
-pub fn get_balance(merchant_id: &str, conn: &PgConnection) -> Result<i64, Error> {
-    Ok(0)
+pub fn get_balance(merch_id: &str, conn: &PgConnection) -> Result<i64, Error> {
+    use crate::schema::transactions::dsl::*;
+    let payments = transactions
+        .select(sum(grin_amount))
+        .filter(merchant_id.eq(merch_id))
+        .filter(
+            // As a valid we consider a payments with
+            // Status=Confirmed and reported to merchant (which means that user got his goods)
+            // or Status = Refund (which means that we took user's money, but couldn't report to merchant)
+            status.eq(TransactionStatus::Refund).or(status
+                .eq(TransactionStatus::Confirmed)
+                .and(reported.eq(true))),
+        )
+        .filter(transaction_type.eq(TransactionType::Payment))
+        .first::<Option<BigDecimal>>(conn)
+        .map_err::<Error, _>(|e| e.into())?
+        .and_then(|b| b.to_i64())
+        .unwrap_or(0);
+
+    let payouts = transactions
+        .select(sum(grin_amount))
+        .filter(merchant_id.eq(merch_id))
+        .filter(status.ne(TransactionStatus::Rejected))
+        .filter(transaction_type.eq(TransactionType::Payout))
+        .first::<Option<BigDecimal>>(conn)
+        .map_err::<Error, _>(|e| e.into())?
+        .and_then(|b| b.to_i64())
+        .unwrap_or(0);
+
+    Ok(payments - payouts)
 }
