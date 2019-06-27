@@ -13,7 +13,7 @@ use crate::handlers::BootstrapColor;
 use crate::handlers::TemplateIntoResponse;
 use crate::models::{Merchant, Money, Transaction, TransactionStatus};
 use crate::wallet::Slate;
-use actix_web::middleware::identity::Identity;
+use actix_identity::Identity;
 use actix_web::web::{block, Data, Form, Path};
 use actix_web::{HttpRequest, HttpResponse};
 use diesel::pg::PgConnection;

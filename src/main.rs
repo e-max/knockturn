@@ -1,5 +1,5 @@
+use actix_identity::{CookieIdentityPolicy, IdentityService};
 use actix_session::CookieSession;
-use actix_web::middleware::identity::{CookieIdentityPolicy, IdentityService};
 use actix_web::{middleware, App, HttpServer};
 use dotenv::dotenv;
 use env_logger;
