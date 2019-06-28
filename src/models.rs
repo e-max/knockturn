@@ -43,6 +43,7 @@ pub struct Merchant {
  * Confirmed - we got required number of confirmation for this transaction
  * Rejected - transaction spent too much time in New or Pending state
  * Refund - transaction was received from user, but we won't be able to report about it to merchant
+ * ManuallyRefunded - marchant has manually sent refund to client. Mark as resolved.
  *
  * The status of payout changes as follows:
  * New - payout created in db
@@ -61,6 +62,7 @@ pub enum TransactionStatus {
     Confirmed,
     Initialized,
     Refund,
+    ManuallyRefunded,
 }
 
 #[derive(Debug, PartialEq, DbEnum, Serialize, Deserialize, Clone, Copy, EnumString, Display)]
