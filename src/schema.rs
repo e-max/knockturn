@@ -18,7 +18,6 @@ table! {
         email -> Varchar,
         password -> Varchar,
         wallet_url -> Nullable<Text>,
-        balance -> Int8,
         created_at -> Timestamp,
         token -> Text,
         callback_url -> Nullable<Text>,
@@ -95,10 +94,4 @@ table! {
 joinable!(transactions -> merchants (merchant_id));
 joinable!(txs -> transactions (order_id));
 
-allow_tables_to_appear_in_same_query!(
-    current_height,
-    merchants,
-    rates,
-    transactions,
-    txs,
-);
+allow_tables_to_appear_in_same_query!(current_height, merchants, rates, transactions, txs,);

@@ -5,11 +5,14 @@ use crate::models::{
 };
 use actix::{Actor, SyncContext};
 use actix::{Handler, Message};
+use bigdecimal::{BigDecimal, ToPrimitive};
 use chrono::NaiveDateTime;
 use chrono::{Duration, Local, Utc};
 use data_encoding::BASE32;
+use diesel::dsl::{sql, sum};
 use diesel::pg::PgConnection;
 use diesel::r2d2::{ConnectionManager, Pool};
+use diesel::sql_types::BigInt;
 use diesel::{self, prelude::*};
 use log::info;
 use rand::seq::SliceRandom;
@@ -92,11 +95,6 @@ pub struct GetPaymentsByStatus(pub TransactionStatus);
 #[derive(Debug, Deserialize)]
 pub struct GetPayoutsByStatus(pub TransactionStatus);
 
-pub struct ConfirmTransaction {
-    pub transaction: Transaction,
-    pub confirmed_at: Option<NaiveDateTime>,
-}
-
 #[derive(Debug, Deserialize)]
 pub struct ReportAttempt {
     pub transaction_id: Uuid,
@@ -165,9 +163,6 @@ impl Message for RegisterRate {
 impl Message for ConvertCurrency {
     type Result = Result<Money, Error>;
 }
-impl Message for ConfirmTransaction {
-    type Result = Result<Transaction, Error>;
-}
 
 impl Message for ReportAttempt {
     type Result = Result<(), Error>;
@@ -213,7 +208,6 @@ impl Handler<CreateMerchant> for DbExecutor {
             email: msg.email,
             password: msg.password,
             wallet_url: msg.wallet_url,
-            balance: 0,
             created_at: Local::now().naive_local() + Duration::hours(24),
             callback_url: msg.callback_url,
             token: new_token.ok_or(Error::General(s!("cannot generate rangom token")))?,
@@ -414,37 +408,6 @@ impl Handler<RegisterRate> for DbExecutor {
     }
 }
 
-impl Handler<ConfirmTransaction> for DbExecutor {
-    type Result = Result<Transaction, Error>;
-
-    fn handle(&mut self, msg: ConfirmTransaction, _: &mut Self::Context) -> Self::Result {
-        use crate::schema::merchants;
-        use crate::schema::transactions;
-        let conn: &PgConnection = &self.0.get().unwrap();
-
-        conn.transaction(|| {
-            let tx = diesel::update(
-                transactions::table.filter(transactions::columns::id.eq(msg.transaction.id)),
-            )
-            .set((
-                transactions::columns::status.eq(TransactionStatus::Confirmed),
-                transactions::columns::updated_at.eq(Utc::now().naive_utc()),
-            ))
-            .get_result(conn)?;
-            diesel::update(
-                merchants::table.filter(merchants::columns::id.eq(msg.transaction.merchant_id)),
-            )
-            .set(
-                merchants::columns::balance
-                    .eq(merchants::columns::balance + msg.transaction.grin_amount),
-            )
-            .get_result(conn)
-            .map(|_: Merchant| ())?;
-            Ok(tx)
-        })
-    }
-}
-
 impl Handler<ReportAttempt> for DbExecutor {
     type Result = Result<(), Error>;
 
@@ -564,4 +527,36 @@ impl Handler<GetCurrentHeight> for DbExecutor {
             .first(conn)
             .map_err(|e| e.into())
     }
+}
+
+pub fn get_balance(merch_id: &str, conn: &PgConnection) -> Result<i64, Error> {
+    use crate::schema::transactions::dsl::*;
+    let payments = transactions
+        .select(sum(grin_amount))
+        .filter(merchant_id.eq(merch_id))
+        .filter(
+            // As a valid we consider a payments with
+            // Status=Confirmed and reported to merchant (which means that user got his goods)
+            // or Status = Refund (which means that we took user's money, but couldn't report to merchant)
+            status.eq(TransactionStatus::Refund).or(status
+                .eq(TransactionStatus::Confirmed)
+                .and(reported.eq(true))),
+        )
+        .filter(transaction_type.eq(TransactionType::Payment))
+        .first::<Option<BigDecimal>>(conn)
+        .map_err::<Error, _>(|e| e.into())?
+        .and_then(|b| b.to_i64())
+        .unwrap_or(0);
+
+    let payouts = transactions
+        .select(sum(grin_amount))
+        .filter(merchant_id.eq(merch_id))
+        .filter(status.ne(TransactionStatus::Rejected))
+        .filter(transaction_type.eq(TransactionType::Payout))
+        .first::<Option<BigDecimal>>(conn)
+        .map_err::<Error, _>(|e| e.into())?
+        .and_then(|b| b.to_i64())
+        .unwrap_or(0);
+
+    Ok(payments - payouts)
 }

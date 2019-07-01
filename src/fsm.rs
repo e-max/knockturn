@@ -3,7 +3,6 @@ use crate::db::{
     ReportAttempt, UpdateTransactionStatus,
 };
 use crate::errors::Error;
-use crate::models::Merchant;
 use crate::models::{Confirmation, Money, Transaction, TransactionStatus, TransactionType};
 use crate::ser;
 use crate::wallet::TxLogEntry;
@@ -333,14 +332,24 @@ impl Handler<ConfirmPayment> for Fsm {
     type Result = ResponseFuture<ConfirmedPayment, Error>;
 
     fn handle(&mut self, msg: ConfirmPayment, _: &mut Self::Context) -> Self::Result {
-        let tx_msg = db::ConfirmTransaction {
-            transaction: msg.payment.0,
-            confirmed_at: Some(Utc::now().naive_utc()),
-        };
-        Box::new(self.db.send(tx_msg).from_err().and_then(|res| {
-            let tx = res?;
-            Ok(ConfirmedPayment(tx))
-        }))
+        Box::new(
+            block::<_, _, Error>({
+                let pool = self.pool.clone();
+                move || {
+                    use crate::schema::transactions::dsl::*;
+                    let conn: &PgConnection = &pool.get().unwrap();
+
+                    let tx = diesel::update(transactions.filter(id.eq(msg.payment.id)))
+                        .set((
+                            status.eq(TransactionStatus::Confirmed),
+                            updated_at.eq(Utc::now().naive_utc()),
+                        ))
+                        .get_result(conn)?;
+                    Ok(ConfirmedPayment(tx))
+                }
+            })
+            .from_err(),
+        )
     }
 }
 
@@ -525,23 +534,12 @@ impl Handler<ReportPayment<ConfirmedPayment>> for Fsm {
                     block::<_, _, Error>({
                         move || {
                             let conn: &PgConnection = &pool.get().unwrap();
-                            conn.transaction(|| {
-                                {
-                                    use crate::schema::merchants::dsl::*;
-                                    diesel::update(
-                                        merchants.filter(id.eq(msg.payment.merchant_id.clone())),
-                                    )
-                                    .set(balance.eq(balance + msg.payment.grin_amount))
-                                    .get_result::<Merchant>(conn)
-                                    .map_err::<Error, _>(|e| e.into())?;
-                                };
-                                use crate::schema::transactions::dsl::*;
-                                diesel::update(transactions.filter(id.eq(msg.payment.id)))
-                                    .set(reported.eq(true))
-                                    .get_result::<Transaction>(conn)
-                                    .map_err::<Error, _>(|e| e.into())?;
-                                Ok(())
-                            })
+                            use crate::schema::transactions::dsl::*;
+                            diesel::update(transactions.filter(id.eq(msg.payment.id)))
+                                .set(reported.eq(true))
+                                .get_result::<Transaction>(conn)
+                                .map_err::<Error, _>(|e| e.into())?;
+                            Ok(())
                         }
                     })
                     .from_err()
