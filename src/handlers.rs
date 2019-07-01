@@ -15,6 +15,7 @@ pub mod mfa;
 pub mod paginator;
 pub mod payment;
 pub mod payout;
+pub mod transaction;
 pub mod webui;
 
 pub fn create_merchant(
