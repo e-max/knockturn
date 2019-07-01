@@ -5,13 +5,14 @@ use crate::filters;
 use crate::handlers::paginator::{Pages, Paginate, Paginator};
 use crate::handlers::BootstrapColor;
 use crate::models::{Merchant, Transaction, TransactionStatus, TransactionType};
-use actix_web::web::{block, Data, Form, Query};
+use actix_web::web::{block, Data, Form, Path, Query};
 use actix_web::{HttpRequest, HttpResponse};
 use askama::Template;
 use diesel::pg::PgConnection;
 use diesel::{self, prelude::*};
 use futures::future::Future;
 use serde::Deserialize;
+use uuid::Uuid;
 
 #[derive(Template)]
 #[template(path = "transactions.html")]
@@ -139,6 +140,50 @@ pub fn get_transactions(
                 refunds_num: refunds,
                 txtype: info.txtype.clone().unwrap_or(TxType::All),
                 total: total,
+            }
+            .render()
+            .map_err(|e| Error::from(e))?;
+            Ok(html)
+        }
+    })
+    .from_err()
+    .and_then(move |html| Ok(HttpResponse::Ok().content_type("text/html").body(html)))
+}
+
+#[derive(Template)]
+#[template(path = "transaction.html")]
+struct TransactionTemplate {
+    transaction: Transaction,
+    current_height: i64,
+}
+
+pub fn get_transaction(
+    merchant: User<Merchant>,
+    data: Data<AppState>,
+    transaction_id: Path<Uuid>,
+) -> impl Future<Item = HttpResponse, Error = Error> {
+    let merchant = merchant.into_inner();
+    block::<_, _, Error>({
+        let merch_id = merchant.id.clone();
+        let pool = data.pool.clone();
+        let transaction_id = transaction_id.clone();
+        move || {
+            use crate::schema::transactions::dsl::*;
+            let conn: &PgConnection = &pool.get().unwrap();
+
+            let transaction = transactions
+                .filter(id.eq(transaction_id))
+                .filter(merchant_id.eq(merch_id.clone()))
+                .first::<Transaction>(conn)?;
+
+            let cur_height: i64 = {
+                use crate::schema::current_height::dsl::*;
+                current_height.select(height).first::<i64>(conn)
+            }?;
+
+            let html = TransactionTemplate {
+                transaction: transaction,
+                current_height: cur_height,
             }
             .render()
             .map_err(|e| Error::from(e))?;

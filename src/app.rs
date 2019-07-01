@@ -129,10 +129,10 @@ pub fn routing(cfg: &mut web::ServiceConfig) {
             web::resource("/payouts/{id}/knockturn-payout.grinslate")
                 .route(web::get().to_async(payout::generate_slate)),
         )
-        //.service(
-        //web::resource("/transactions/{id}")
-        //.route(web::get().to_async(transaction::get_transaction)),
-        //)
+        .service(
+            web::resource("/transactions/{id}")
+                .route(web::get().to_async(transaction::get_transaction)),
+        )
         .service(
             web::resource("/transactions")
                 .route(web::get().to_async(transaction::get_transactions)),
