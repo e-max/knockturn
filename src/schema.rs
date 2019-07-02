@@ -94,4 +94,10 @@ table! {
 joinable!(transactions -> merchants (merchant_id));
 joinable!(txs -> transactions (order_id));
 
-allow_tables_to_appear_in_same_query!(current_height, merchants, rates, transactions, txs,);
+allow_tables_to_appear_in_same_query!(
+    current_height,
+    merchants,
+    rates,
+    transactions,
+    txs,
+);

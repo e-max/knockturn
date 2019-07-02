@@ -2,6 +2,7 @@ use actix::MailboxError;
 use actix_web::error::{BlockingError, ResponseError};
 use actix_web::{Error as ActixError, HttpResponse};
 use failure::Fail;
+use log::*;
 
 #[derive(Fail, Debug)]
 pub enum Error {
@@ -121,6 +122,7 @@ impl From<std::str::Utf8Error> for Error {
 // impl ResponseError trait allows to convert our errors into http responses with appropriate data
 impl ResponseError for Error {
     fn error_response(&self) -> HttpResponse {
+        error!("{}", self);
         match *self {
             Error::Db(ref message) | Error::Template(ref message) => {
                 HttpResponse::InternalServerError().json(message)

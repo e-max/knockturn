@@ -32,6 +32,18 @@
 
 	</table>
 	
+{% if transaction.status == TransactionStatus::Refund -%}
+<p>
+This is transaction in status Refund. This means that we received payment from client, but couldn't report merchant 
+about it.  If you dealt with this payment, you can manually resolve this transaction.
+</p>
+
+<form action="/transactions/{{transaction.id}}/manually_refunded" method="post">
+	<button type="submit" class="btn  btn-primary">Manually Refunded</button>
+</form>
+
+{%- endif %}
+
 
 
 

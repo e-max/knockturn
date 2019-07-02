@@ -134,6 +134,10 @@ pub fn routing(cfg: &mut web::ServiceConfig) {
                 .route(web::get().to_async(transaction::get_transaction)),
         )
         .service(
+            web::resource("/transactions/{id}/manually_refunded")
+                .route(web::post().to_async(transaction::manually_refunded)),
+        )
+        .service(
             web::resource("/transactions")
                 .route(web::get().to_async(transaction::get_transactions)),
         );

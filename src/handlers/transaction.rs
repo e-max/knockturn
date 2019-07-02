@@ -8,6 +8,7 @@ use crate::models::{Merchant, Transaction, TransactionStatus, TransactionType};
 use actix_web::web::{block, Data, Form, Path, Query};
 use actix_web::{HttpRequest, HttpResponse};
 use askama::Template;
+use chrono::Utc;
 use diesel::pg::PgConnection;
 use diesel::{self, prelude::*};
 use futures::future::Future;
@@ -192,4 +193,45 @@ pub fn get_transaction(
     })
     .from_err()
     .and_then(move |html| Ok(HttpResponse::Ok().content_type("text/html").body(html)))
+}
+
+pub fn manually_refunded(
+    merchant: User<Merchant>,
+    data: Data<AppState>,
+    transaction_id: Path<Uuid>,
+) -> impl Future<Item = HttpResponse, Error = Error> {
+    let merchant = merchant.into_inner();
+    block::<_, _, Error>({
+        let merch_id = merchant.id.clone();
+        let pool = data.pool.clone();
+        let transaction_id = transaction_id.clone();
+        move || {
+            use crate::schema::transactions::dsl::*;
+            let conn: &PgConnection = &pool.get().unwrap();
+
+            let tx: Transaction = diesel::update(
+                transactions
+                    .filter(id.eq(transaction_id))
+                    .filter(merchant_id.eq(merch_id))
+                    .filter(status.eq(TransactionStatus::Refund)),
+            )
+            .set((
+                status.eq(TransactionStatus::RefundedManually),
+                updated_at.eq(Utc::now().naive_utc()),
+            ))
+            .get_result(conn)
+            .map_err::<Error, _>(|e| e.into())?;
+            Ok(())
+        }
+    })
+    .from_err()
+    .and_then(move |_| {
+        Ok(HttpResponse::Found()
+            .header(
+                http::header::LOCATION,
+                format!("/transactions/{}", transaction_id),
+            )
+            .finish()
+            .into_body())
+    })
 }

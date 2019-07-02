@@ -1,5 +1,5 @@
 			<tr>
-				<td>{{ transaction.external_id }}</td>
+				<td><a href="/transactions/{{transaction.id}}">{{ transaction.external_id }}</a></td>
 				{% if transaction.transaction_type == TransactionType::Payout %}
 					<td class="text-nowrap">&ndash;&nbsp;{{ transaction.amount }}</td>
 					<td class="text-nowrap">&ndash;&nbsp;{{ transaction.grins() }}</td>

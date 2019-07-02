@@ -529,6 +529,19 @@ impl Handler<GetCurrentHeight> for DbExecutor {
     }
 }
 
+//
+//  SELECT (
+//              SELECT coalesce(sum(grin_amount), 0)
+//                  FROM transactions
+//                  WHERE merchant_id = 'id' AND transaction_type = 'payment' AND ( status = 'refund' OR status = 'refunded_manually' OR  ( status = 'confirmed' and reported = true))
+//          )
+//          -
+//          (
+//              SELECT coalesce(sum(grin_amount), 0)
+//                  FROM transactions
+//                  WHERE merchant_id = 'id' AND transaction_type = 'payout' AND status <> 'rejected'
+//          );
+//
 pub fn get_balance(merch_id: &str, conn: &PgConnection) -> Result<i64, Error> {
     use crate::schema::transactions::dsl::*;
     let payments = transactions
@@ -538,9 +551,12 @@ pub fn get_balance(merch_id: &str, conn: &PgConnection) -> Result<i64, Error> {
             // As a valid we consider a payments with
             // Status=Confirmed and reported to merchant (which means that user got his goods)
             // or Status = Refund (which means that we took user's money, but couldn't report to merchant)
-            status.eq(TransactionStatus::Refund).or(status
-                .eq(TransactionStatus::Confirmed)
-                .and(reported.eq(true))),
+            status
+                .eq(TransactionStatus::Refund)
+                .or(status.eq(TransactionStatus::RefundedManually))
+                .or(status
+                    .eq(TransactionStatus::Confirmed)
+                    .and(reported.eq(true))),
         )
         .filter(transaction_type.eq(TransactionType::Payment))
         .first::<Option<BigDecimal>>(conn)
