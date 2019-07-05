@@ -567,3 +567,32 @@ pub fn get_balance(merch_id: &str, conn: &PgConnection) -> Result<i64, Error> {
 
     Ok(payments - payouts)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::errors::Error;
+    use crate::test_utils::{get_test_pool, run_migrations};
+    use diesel::Connection;
+    use diesel::{self, prelude::*};
+
+    #[test]
+    fn balance_test() {
+        let pool = get_test_pool();
+
+        let conn = pool.get().unwrap();
+        conn.test_transaction::<(), Error, _>(|| {
+            run_migrations(&conn);
+            let m = create_merchant(
+                CreateMerchant {
+                    id: s!("user"),
+                    ..Default::default()
+                },
+                &conn,
+            )
+            .unwrap();
+            assert!(get_balance("user", &conn).unwrap() == 0);
+            Ok(())
+        });
+    }
+}
