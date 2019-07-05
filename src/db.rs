@@ -29,7 +29,7 @@ impl Actor for DbExecutor {
     type Context = SyncContext<Self>;
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 pub struct CreateMerchant {
     pub id: String,
     pub email: String,
@@ -120,10 +120,6 @@ pub struct GetCurrentHeight;
 #[derive(Debug, Deserialize)]
 pub struct RejectExpiredPayments;
 
-impl Message for CreateMerchant {
-    type Result = Result<Merchant, Error>;
-}
-
 impl Message for GetMerchant {
     type Result = Result<Merchant, Error>;
 }
@@ -188,38 +184,33 @@ impl Message for GetCurrentHeight {
     type Result = Result<i64, Error>;
 }
 
-impl Handler<CreateMerchant> for DbExecutor {
-    type Result = Result<Merchant, Error>;
-
-    fn handle(&mut self, msg: CreateMerchant, _: &mut Self::Context) -> Self::Result {
-        use crate::schema::merchants::dsl::*;
-        let conn: &PgConnection = &self.0.get().unwrap();
-        const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ\
+pub fn create_merchant(m: CreateMerchant, conn: &PgConnection) -> Result<Merchant, Error> {
+    use crate::schema::merchants;
+    const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ\
     abcdefghijklmnopqrstuvwxyz\
     0123456789";
 
-        let mut rng = thread_rng();
-        let new_token: Option<String> = (0..64)
-            .map(|_| Some(*CHARSET.choose(&mut rng)? as char))
-            .collect();
-        let new_token_2fa = BASE32.encode(&rng.gen::<[u8; 10]>());
-        let new_merchant = Merchant {
-            id: msg.id,
-            email: msg.email,
-            password: msg.password,
-            wallet_url: msg.wallet_url,
-            created_at: Local::now().naive_local() + Duration::hours(24),
-            callback_url: msg.callback_url,
-            token: new_token.ok_or(Error::General(s!("cannot generate rangom token")))?,
-            token_2fa: Some(new_token_2fa),
-            confirmed_2fa: false,
-        };
+    let mut rng = thread_rng();
+    let new_token: Option<String> = (0..64)
+        .map(|_| Some(*CHARSET.choose(&mut rng)? as char))
+        .collect();
+    let new_token_2fa = BASE32.encode(&rng.gen::<[u8; 10]>());
+    let new_merchant = Merchant {
+        id: m.id,
+        email: m.email,
+        password: m.password,
+        wallet_url: m.wallet_url,
+        created_at: Local::now().naive_local() + Duration::hours(24),
+        callback_url: m.callback_url,
+        token: new_token.ok_or(Error::General(s!("cannot generate rangom token")))?,
+        token_2fa: Some(new_token_2fa),
+        confirmed_2fa: false,
+    };
 
-        diesel::insert_into(merchants)
-            .values(&new_merchant)
-            .get_result(conn)
-            .map_err(|e| e.into())
-    }
+    diesel::insert_into(merchants::table)
+        .values(&new_merchant)
+        .get_result(conn)
+        .map_err(|e| e.into())
 }
 
 impl Handler<GetMerchant> for DbExecutor {

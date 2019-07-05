@@ -53,3 +53,6 @@ actix-identity = "0.1.0"
 
 [build-dependencies]
 askama = "0.6"
+
+[dev-dependencies]
+diesel_migrations = "1.4.0"
