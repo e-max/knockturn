@@ -5,17 +5,24 @@ use crate::fsm_payout::{
 };
 use crate::rates::RatesFetcher;
 use actix::prelude::*;
+use diesel::pg::PgConnection;
+use diesel::r2d2::{ConnectionManager, Pool};
 use futures::future::{join_all, Future};
 use log::*;
 
 pub struct CronPayout {
     db: Addr<DbExecutor>,
     fsm: Addr<FsmPayout>,
+    pool: Pool<ConnectionManager<PgConnection>>,
 }
 
 impl CronPayout {
-    pub fn new(db: Addr<DbExecutor>, fsm: Addr<FsmPayout>) -> Self {
-        CronPayout { db, fsm }
+    pub fn new(
+        db: Addr<DbExecutor>,
+        fsm: Addr<FsmPayout>,
+        pool: Pool<ConnectionManager<PgConnection>>,
+    ) -> Self {
+        CronPayout { db, fsm, pool }
     }
 }
 
@@ -24,7 +31,7 @@ impl Actor for CronPayout {
 
     fn started(&mut self, ctx: &mut Self::Context) {
         info!("Starting cron process");
-        let rates = RatesFetcher::new(self.db.clone());
+        let rates = RatesFetcher::new(self.db.clone(), self.pool.clone());
         ctx.run_interval(
             std::time::Duration::new(5, 0),
             move |_instance: &mut CronPayout, _ctx: &mut Context<Self>| {

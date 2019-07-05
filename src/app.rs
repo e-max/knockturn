@@ -62,7 +62,7 @@ impl AppState {
         .start();
         let _cron_payout = {
             let fsm = fsm_payout.clone();
-            cron_payout::CronPayout::new(cron_db.clone(), fsm)
+            cron_payout::CronPayout::new(cron_db.clone(), fsm, pool.clone())
         }
         .start();
         AppState {

@@ -1,6 +1,10 @@
-use crate::db::{DbExecutor, RegisterRate};
+use crate::db::{register_rate, DbExecutor};
+use crate::errors::Error;
 use actix::prelude::*;
 use actix_web::client::Client;
+use actix_web::web::block;
+use diesel::pg::PgConnection;
+use diesel::r2d2::{ConnectionManager, Pool};
 use futures;
 use futures::future::{err, ok, result, Future};
 use log::*;
@@ -16,15 +20,17 @@ struct Rates {
 
 pub struct RatesFetcher {
     db: Addr<DbExecutor>,
+    pool: Pool<ConnectionManager<PgConnection>>,
 }
 
 impl RatesFetcher {
-    pub fn new(db: Addr<DbExecutor>) -> Self {
-        RatesFetcher { db }
+    pub fn new(db: Addr<DbExecutor>, pool: Pool<ConnectionManager<PgConnection>>) -> Self {
+        RatesFetcher { db, pool }
     }
 
     pub fn fetch(&self) {
         let db = self.db.clone();
+        let pool = self.pool.clone();
         let f = Client::default().get(
             "https://api.coingecko.com/api/v3/simple/price?ids=grin&vs_currencies=btc%2Cusd%2Ceur",
         )
@@ -55,17 +61,12 @@ impl RatesFetcher {
                     }))
                 })
                 .and_then(move |rates| {
-                    db.send(RegisterRate { rates: rates.grin })
-                        .map_err(|e| {
-                            error!("failed to parse body: {:?}", e);
-                            ()
-                        })
-                        .and_then(|db_response| match db_response {
-                            Err(e) => {
-                                error!("db error: {:?}", e);
-                                err(())
-                            }
-                            Ok(_) => ok(()),
+                    block::<_, _, Error>({
+                        move || {
+                            let conn: &PgConnection = &pool.get().unwrap();
+                            register_rate(rates.grin, conn)
+                        }}).map_err(|e| { 
+                            error!("Failed to store rates in DB: {}", e);
                         })
                 })
         });

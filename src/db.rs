@@ -74,11 +74,6 @@ pub struct UpdateTransactionStatus {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct RegisterRate {
-    pub rates: HashMap<String, f64>,
-}
-
-#[derive(Debug, Deserialize)]
 pub struct ConvertCurrency {
     pub amount: Money,
     pub to: String,
@@ -146,10 +141,6 @@ impl Message for GetTransactions {
 
 impl Message for UpdateTransactionStatus {
     type Result = Result<Transaction, Error>;
-}
-
-impl Message for RegisterRate {
-    type Result = Result<(), Error>;
 }
 
 impl Message for ConvertCurrency {
@@ -366,30 +357,25 @@ impl Handler<UpdateTransactionStatus> for DbExecutor {
     }
 }
 
-impl Handler<RegisterRate> for DbExecutor {
-    type Result = Result<(), Error>;
+pub fn register_rate(rates_map: HashMap<String, f64>, conn: &PgConnection) -> Result<(), Error> {
+    use crate::schema::rates::dsl::*;
 
-    fn handle(&mut self, msg: RegisterRate, _: &mut Self::Context) -> Self::Result {
-        use crate::schema::rates::dsl::*;
-        let conn: &PgConnection = &self.0.get().unwrap();
+    for (currency, new_rate) in rates_map {
+        let new_rate = Rate {
+            id: currency.to_uppercase(),
+            rate: new_rate,
+            updated_at: Local::now().naive_local(),
+        };
 
-        for (currency, new_rate) in msg.rates {
-            let new_rate = Rate {
-                id: currency.to_uppercase(),
-                rate: new_rate,
-                updated_at: Local::now().naive_local(),
-            };
-
-            diesel::insert_into(rates)
-                .values(&new_rate)
-                .on_conflict(id)
-                .do_update()
-                .set(&new_rate)
-                .get_result::<Rate>(conn)
-                .map_err(|e| Error::from(e))?;
-        }
-        Ok(())
+        diesel::insert_into(rates)
+            .values(&new_rate)
+            .on_conflict(id)
+            .do_update()
+            .set(&new_rate)
+            .get_result::<Rate>(conn)
+            .map_err(|e| Error::from(e))?;
     }
+    Ok(())
 }
 
 impl Handler<ReportAttempt> for DbExecutor {

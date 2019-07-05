@@ -30,7 +30,7 @@ impl Actor for Cron {
 
     fn started(&mut self, ctx: &mut Self::Context) {
         info!("Starting cron process");
-        let rates = RatesFetcher::new(self.db.clone());
+        let rates = RatesFetcher::new(self.db.clone(), self.pool.clone());
         ctx.run_interval(
             std::time::Duration::new(5, 0),
             move |_instance: &mut Cron, _ctx: &mut Context<Self>| {
