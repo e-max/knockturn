@@ -144,10 +144,6 @@ impl Message for GetTransactions {
     type Result = Result<Vec<Transaction>, Error>;
 }
 
-impl Message for CreateTransaction {
-    type Result = Result<Transaction, Error>;
-}
-
 impl Message for UpdateTransactionStatus {
     type Result = Result<Transaction, Error>;
 }
@@ -296,67 +292,64 @@ impl Handler<GetTransactions> for DbExecutor {
     }
 }
 
-impl Handler<CreateTransaction> for DbExecutor {
-    type Result = Result<Transaction, Error>;
+pub fn create_transaction(
+    tx: CreateTransaction,
+    conn: &PgConnection,
+) -> Result<Transaction, Error> {
+    use crate::schema::merchants::dsl::*;
+    use crate::schema::rates::dsl::*;
+    use crate::schema::transactions::dsl::*;
 
-    fn handle(&mut self, msg: CreateTransaction, _: &mut Self::Context) -> Self::Result {
-        use crate::schema::merchants::dsl::*;
-        use crate::schema::rates::dsl::*;
-        use crate::schema::transactions::dsl::*;
-
-        let conn: &PgConnection = &self.0.get().unwrap();
-
-        if !merchants
-            .find(msg.merchant_id.clone())
-            .get_result::<Merchant>(conn)
-            .is_ok()
-        {
-            return Err(Error::InvalidEntity("merchant".to_owned()));
-        }
-
-        let exch_rate = match rates
-            .find(&msg.amount.currency.to_string())
-            .get_result::<Rate>(conn)
-            .optional()?
-        {
-            None => return Err(Error::UnsupportedCurrency(msg.amount.currency.to_string())),
-            Some(v) => v,
-        };
-
-        let grins = msg.amount.convert_to(Currency::GRIN, exch_rate.rate);
-
-        let new_transaction = Transaction {
-            id: uuid::Uuid::new_v4(),
-            external_id: msg.external_id,
-            merchant_id: msg.merchant_id,
-            email: msg.email,
-            amount: msg.amount,
-            grin_amount: grins.amount,
-            status: TransactionStatus::New,
-            confirmations: msg.confirmations,
-            created_at: Local::now().naive_local(),
-            updated_at: Local::now().naive_local(),
-            report_attempts: 0,
-            next_report_attempt: None,
-            reported: false,
-            wallet_tx_id: None,
-            wallet_tx_slate_id: None,
-            message: msg.message,
-            slate_messages: None,
-            transfer_fee: None,
-            knockturn_fee: None,
-            real_transfer_fee: None,
-            transaction_type: msg.transaction_type,
-            height: None,
-            commit: None,
-            redirect_url: msg.redirect_url,
-        };
-
-        diesel::insert_into(transactions)
-            .values(&new_transaction)
-            .get_result(conn)
-            .map_err(|e| e.into())
+    if !merchants
+        .find(tx.merchant_id.clone())
+        .get_result::<Merchant>(conn)
+        .is_ok()
+    {
+        return Err(Error::InvalidEntity("merchant".to_owned()));
     }
+
+    let exch_rate = match rates
+        .find(&tx.amount.currency.to_string())
+        .get_result::<Rate>(conn)
+        .optional()?
+    {
+        None => return Err(Error::UnsupportedCurrency(tx.amount.currency.to_string())),
+        Some(v) => v,
+    };
+
+    let grins = tx.amount.convert_to(Currency::GRIN, exch_rate.rate);
+
+    let new_transaction = Transaction {
+        id: uuid::Uuid::new_v4(),
+        external_id: tx.external_id,
+        merchant_id: tx.merchant_id,
+        email: tx.email,
+        amount: tx.amount,
+        grin_amount: grins.amount,
+        status: TransactionStatus::New,
+        confirmations: tx.confirmations,
+        created_at: Local::now().naive_local(),
+        updated_at: Local::now().naive_local(),
+        report_attempts: 0,
+        next_report_attempt: None,
+        reported: false,
+        wallet_tx_id: None,
+        wallet_tx_slate_id: None,
+        message: tx.message,
+        slate_messages: None,
+        transfer_fee: None,
+        knockturn_fee: None,
+        real_transfer_fee: None,
+        transaction_type: tx.transaction_type,
+        height: None,
+        commit: None,
+        redirect_url: tx.redirect_url,
+    };
+
+    diesel::insert_into(transactions)
+        .values(&new_transaction)
+        .get_result(conn)
+        .map_err(|e| e.into())
 }
 
 impl Handler<UpdateTransactionStatus> for DbExecutor {

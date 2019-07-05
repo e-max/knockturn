@@ -1,6 +1,6 @@
 use crate::db::{
-    self, CreateTransaction, DbExecutor, GetMerchant, GetPayment, GetUnreportedPaymentsByStatus,
-    ReportAttempt, UpdateTransactionStatus,
+    self, create_transaction, CreateTransaction, DbExecutor, GetMerchant, GetPayment,
+    GetUnreportedPaymentsByStatus, ReportAttempt, UpdateTransactionStatus,
 };
 use crate::errors::Error;
 use crate::models::{Confirmation, Money, Transaction, TransactionStatus, TransactionType};
@@ -173,7 +173,7 @@ impl Handler<CreatePayment> for Fsm {
     type Result = ResponseFuture<NewPayment, Error>;
 
     fn handle(&mut self, msg: CreatePayment, _: &mut Self::Context) -> Self::Result {
-        let create_transaction = CreateTransaction {
+        let tx = CreateTransaction {
             merchant_id: msg.merchant_id,
             external_id: msg.external_id,
             amount: msg.amount,
@@ -184,14 +184,13 @@ impl Handler<CreatePayment> for Fsm {
             redirect_url: msg.redirect_url,
         };
 
-        let res = self
-            .db
-            .send(create_transaction)
-            .from_err()
-            .and_then(move |db_response| {
-                let transaction = db_response?;
-                Ok(NewPayment(transaction))
-            });
+        let pool = self.pool.clone();
+
+        let res = block::<_, _, Error>(move || {
+            let conn: &PgConnection = &pool.get().unwrap();
+            create_transaction(tx, conn).map(|transaction| NewPayment(transaction))
+        })
+        .from_err();
         Box::new(res)
     }
 }
