@@ -55,7 +55,7 @@ pub struct GetTransactions {
     pub limit: i64,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 pub struct CreateTransaction {
     pub merchant_id: String,
     pub external_id: String,
@@ -550,7 +550,7 @@ mod tests {
         let conn = pool.get().unwrap();
         conn.test_transaction::<(), Error, _>(|| {
             run_migrations(&conn);
-            let m = create_merchant(
+            create_merchant(
                 CreateMerchant {
                     id: s!("user"),
                     ..Default::default()
@@ -559,6 +559,90 @@ mod tests {
             )
             .unwrap();
             assert!(get_balance("user", &conn).unwrap() == 0);
+            let mut rates = HashMap::new();
+            rates.insert(s!("grin"), 1.0);
+            register_rate(rates, &conn).unwrap();
+            create_transaction(
+                CreateTransaction {
+                    merchant_id: s!("user"),
+                    external_id: s!("1"),
+                    amount: Money::from_grin(1),
+                    ..Default::default()
+                },
+                &conn,
+            )
+            .unwrap();
+            assert!(get_balance("user", &conn).unwrap() == 0);
+
+            // Test that payment doesn't appear on balance during processing
+            let tx = create_transaction(
+                CreateTransaction {
+                    merchant_id: s!("user"),
+                    external_id: s!("2"),
+                    amount: Money::from_grin(1),
+                    ..Default::default()
+                },
+                &conn,
+            )
+            .unwrap();
+            assert!(get_balance("user", &conn).unwrap() == 0);
+
+            update_transaction_status(tx.id, TransactionStatus::Pending, &conn).unwrap();
+            assert!(get_balance("user", &conn).unwrap() == 0);
+            update_transaction_status(tx.id, TransactionStatus::Rejected, &conn).unwrap();
+            assert!(get_balance("user", &conn).unwrap() == 0);
+            update_transaction_status(tx.id, TransactionStatus::InChain, &conn).unwrap();
+            assert!(get_balance("user", &conn).unwrap() == 0);
+
+            // test that Confirmed payment increases balance only if reported
+            update_transaction_status(tx.id, TransactionStatus::Confirmed, &conn).unwrap();
+            assert!(get_balance("user", &conn).unwrap() == 0);
+
+            use crate::schema::transactions::dsl::*;
+            diesel::update(transactions.filter(id.eq(tx.id)))
+                .set(reported.eq(true))
+                .get_result::<Transaction>(&conn)
+                .unwrap();
+
+            assert!(get_balance("user", &conn).unwrap() == 1);
+
+            //text that Refund added to balance
+            let tx2 = create_transaction(
+                CreateTransaction {
+                    merchant_id: s!("user"),
+                    external_id: s!("3"),
+                    amount: Money::from_grin(1),
+                    ..Default::default()
+                },
+                &conn,
+            )
+            .unwrap();
+            assert!(get_balance("user", &conn).unwrap() == 1);
+
+            update_transaction_status(tx2.id, TransactionStatus::Refund, &conn).unwrap();
+            assert!(get_balance("user", &conn).unwrap() == 2);
+
+            // test that payouts reduces balance
+            let payout = create_transaction(
+                CreateTransaction {
+                    merchant_id: s!("user"),
+                    external_id: s!("-"),
+                    transaction_type: TransactionType::Payout,
+                    amount: Money::from_grin(1),
+                    ..Default::default()
+                },
+                &conn,
+            )
+            .unwrap();
+            assert!(get_balance("user", &conn).unwrap() == 1);
+
+            update_transaction_status(payout.id, TransactionStatus::Confirmed, &conn).unwrap();
+            assert!(get_balance("user", &conn).unwrap() == 1);
+
+            // test that Rejected payouts ignored
+            update_transaction_status(payout.id, TransactionStatus::Rejected, &conn).unwrap();
+            assert!(get_balance("user", &conn).unwrap() == 2);
+
             Ok(())
         });
     }

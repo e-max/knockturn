@@ -72,6 +72,12 @@ pub enum TransactionType {
     Payout,
 }
 
+impl Default for TransactionType {
+    fn default() -> Self {
+        TransactionType::Payment
+    }
+}
+
 #[derive(
     Debug, Serialize, Deserialize, Queryable, Insertable, Identifiable, Clone, AsExpression,
 )]
@@ -201,6 +207,12 @@ impl Currency {
     }
 }
 
+impl Default for Currency {
+    fn default() -> Self {
+        Currency::GRIN
+    }
+}
+
 impl fmt::Display for Currency {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let s = match self {
@@ -213,7 +225,7 @@ impl fmt::Display for Currency {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, AsExpression, FromSqlRow, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, AsExpression, FromSqlRow, Clone, Copy, Default)]
 #[sql_type = "Jsonb"]
 pub struct Money {
     pub amount: i64,
