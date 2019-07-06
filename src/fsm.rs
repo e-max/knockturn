@@ -1,6 +1,6 @@
 use crate::db::{
-    self, create_transaction, CreateTransaction, DbExecutor, GetMerchant, GetPayment,
-    GetUnreportedPaymentsByStatus, ReportAttempt, UpdateTransactionStatus,
+    self, create_transaction, update_transaction_status, CreateTransaction, DbExecutor,
+    GetMerchant, GetPayment, GetUnreportedPaymentsByStatus, ReportAttempt,
 };
 use crate::errors::Error;
 use crate::models::{Confirmation, Money, Transaction, TransactionStatus, TransactionType};
@@ -487,7 +487,7 @@ impl Handler<RejectPayment<NewPayment>> for Fsm {
     type Result = ResponseFuture<RejectedPayment, Error>;
 
     fn handle(&mut self, msg: RejectPayment<NewPayment>, _: &mut Self::Context) -> Self::Result {
-        Box::new(reject_transaction(&self.db, &msg.payment.id).map(RejectedPayment))
+        Box::new(reject_transaction(self.pool.clone(), &msg.payment.id).map(RejectedPayment))
     }
 }
 
@@ -499,23 +499,20 @@ impl Handler<RejectPayment<PendingPayment>> for Fsm {
         msg: RejectPayment<PendingPayment>,
         _: &mut Self::Context,
     ) -> Self::Result {
-        Box::new(reject_transaction(&self.db, &msg.payment.id).map(RejectedPayment))
+        Box::new(reject_transaction(self.pool.clone(), &msg.payment.id).map(RejectedPayment))
     }
 }
 
 fn reject_transaction(
-    db: &Addr<DbExecutor>,
+    pool: Pool<ConnectionManager<PgConnection>>,
     id: &Uuid,
 ) -> impl Future<Item = Transaction, Error = Error> {
-    db.send(UpdateTransactionStatus {
-        id: id.clone(),
-        status: TransactionStatus::Rejected,
+    let id = id.clone();
+    block::<_, _, Error>(move || {
+        let conn: &PgConnection = &pool.get().unwrap();
+        update_transaction_status(id, TransactionStatus::Rejected, conn)
     })
     .from_err()
-    .and_then(|db_response| {
-        let tx = db_response?;
-        Ok(tx)
-    })
 }
 
 impl Handler<ReportPayment<ConfirmedPayment>> for Fsm {

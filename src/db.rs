@@ -68,12 +68,6 @@ pub struct CreateTransaction {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct UpdateTransactionStatus {
-    pub id: Uuid,
-    pub status: TransactionStatus,
-}
-
-#[derive(Debug, Deserialize)]
 pub struct ConvertCurrency {
     pub amount: Money,
     pub to: String,
@@ -137,10 +131,6 @@ impl Message for GetPayoutsByStatus {
 
 impl Message for GetTransactions {
     type Result = Result<Vec<Transaction>, Error>;
-}
-
-impl Message for UpdateTransactionStatus {
-    type Result = Result<Transaction, Error>;
 }
 
 impl Message for ConvertCurrency {
@@ -343,18 +333,16 @@ pub fn create_transaction(
         .map_err(|e| e.into())
 }
 
-impl Handler<UpdateTransactionStatus> for DbExecutor {
-    type Result = Result<Transaction, Error>;
-
-    fn handle(&mut self, msg: UpdateTransactionStatus, _: &mut Self::Context) -> Self::Result {
-        use crate::schema::transactions::dsl::*;
-        let conn: &PgConnection = &self.0.get().unwrap();
-
-        diesel::update(transactions.filter(id.eq(msg.id)))
-            .set((status.eq(msg.status), updated_at.eq(Utc::now().naive_utc())))
-            .get_result(conn)
-            .map_err(|e| e.into())
-    }
+pub fn update_transaction_status(
+    tx_id: Uuid,
+    tx_status: TransactionStatus,
+    conn: &PgConnection,
+) -> Result<Transaction, Error> {
+    use crate::schema::transactions::dsl::*;
+    diesel::update(transactions.filter(id.eq(tx_id)))
+        .set((status.eq(tx_status), updated_at.eq(Utc::now().naive_utc())))
+        .get_result(conn)
+        .map_err(|e| e.into())
 }
 
 pub fn register_rate(rates_map: HashMap<String, f64>, conn: &PgConnection) -> Result<(), Error> {
