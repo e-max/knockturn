@@ -1,4 +1,4 @@
-use crate::schema::{current_height, merchants, rates, transactions};
+use crate::schema::{current_height, merchants, rates, status_changes, transactions};
 use chrono::{Duration, NaiveDateTime, Utc};
 use diesel::deserialize::{self, FromSql};
 use diesel::pg::Pg;
@@ -310,6 +310,15 @@ pub struct Rate {
 #[table_name = "current_height"]
 pub struct CurrentHeight {
     pub height: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Queryable, Identifiable)]
+#[table_name = "status_changes"]
+pub struct StatusChange {
+    pub id: Uuid,
+    pub transaction_id: Uuid,
+    pub status: TransactionStatus,
+    pub updated_at: NaiveDateTime,
 }
 
 #[cfg(test)]

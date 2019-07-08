@@ -4,10 +4,11 @@ use crate::extractor::User;
 use crate::filters;
 use crate::handlers::paginator::{Pages, Paginate, Paginator};
 use crate::handlers::BootstrapColor;
-use crate::models::{Merchant, Transaction, TransactionStatus, TransactionType};
+use crate::models::{Merchant, StatusChange, Transaction, TransactionStatus, TransactionType};
 use actix_web::web::{block, Data, Form, Path, Query};
 use actix_web::{HttpRequest, HttpResponse};
 use askama::Template;
+use chrono::NaiveDateTime;
 use chrono::Utc;
 use diesel::pg::PgConnection;
 use diesel::{self, prelude::*};
@@ -193,6 +194,39 @@ pub fn get_transaction(
     })
     .from_err()
     .and_then(move |html| Ok(HttpResponse::Ok().content_type("text/html").body(html)))
+}
+
+pub fn get_transaction_status_changes(
+    merchant: User<Merchant>,
+    transaction_id: Path<Uuid>,
+    data: Data<AppState>,
+) -> impl Future<Item = HttpResponse, Error = Error> {
+    let merchant = merchant.into_inner();
+    block::<_, _, Error>({
+        let merch_id = merchant.id.clone();
+        let pool = data.pool.clone();
+        let tx_id = transaction_id.clone();
+        move || {
+            let conn: &PgConnection = &pool.get().unwrap();
+            let transaction = {
+                use crate::schema::transactions::dsl::*;
+                transactions
+                    .filter(id.eq(tx_id))
+                    .filter(merchant_id.eq(merch_id.clone()))
+                    .first::<Transaction>(conn)
+            }?;
+            let history = {
+                use crate::schema::status_changes::dsl::*;
+                status_changes
+                    .filter(transaction_id.eq(transaction.id))
+                    .order(updated_at.desc())
+                    .load::<StatusChange>(conn)
+            }?;
+            Ok(history)
+        }
+    })
+    .from_err()
+    .and_then(move |history| Ok(HttpResponse::Ok().json(history)))
 }
 
 pub fn manually_refunded(
