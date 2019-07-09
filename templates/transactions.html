@@ -17,7 +17,13 @@
 			<a class="nav-link {{txtype.is_active("Payments")}}" href="?txtype=Payments">Payments</a>
 		</li>
 		<li class="nav-item">
-			<a class="nav-link {{txtype.is_active("Refunds")}}" href="?txtype=Refunds">Refunds <span class="badge badge-danger">{{refunds_num}}</span></a>
+			<a class="nav-link {{txtype.is_active("Refunds")}}" href="?txtype=Refunds">Refunds 
+				{% if refunds_num > 0 -%}
+					<span class="badge badge-danger">{{refunds_num}}</span>
+				{%- else -%}
+					<span class="badge badge-success">{{refunds_num}}</span>
+				{%- endif %}
+			</a>
 		</li>
 	</ul>
 	<table class="table">

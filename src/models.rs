@@ -43,6 +43,7 @@ pub struct Merchant {
  * Confirmed - we got required number of confirmation for this transaction
  * Rejected - transaction spent too much time in New or Pending state
  * Refund - transaction was received from user, but we won't be able to report about it to merchant
+ * RefundedManually - marchant has manually sent refund to client. Mark as resolved.
  *
  * The status of payout changes as follows:
  * New - payout created in db
@@ -61,6 +62,7 @@ pub enum TransactionStatus {
     Confirmed,
     Initialized,
     Refund,
+    RefundedManually,
 }
 
 #[derive(Debug, PartialEq, DbEnum, Serialize, Deserialize, Clone, Copy, EnumString, Display)]
@@ -68,6 +70,12 @@ pub enum TransactionStatus {
 pub enum TransactionType {
     Payment,
     Payout,
+}
+
+impl Default for TransactionType {
+    fn default() -> Self {
+        TransactionType::Payment
+    }
 }
 
 #[derive(
@@ -199,6 +207,12 @@ impl Currency {
     }
 }
 
+impl Default for Currency {
+    fn default() -> Self {
+        Currency::GRIN
+    }
+}
+
 impl fmt::Display for Currency {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let s = match self {
@@ -211,7 +225,7 @@ impl fmt::Display for Currency {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, AsExpression, FromSqlRow, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, AsExpression, FromSqlRow, Clone, Copy, Default)]
 #[sql_type = "Jsonb"]
 pub struct Money {
     pub amount: i64,

@@ -1,4 +1,4 @@
-use crate::db::{self, get_balance, DbExecutor, UpdateTransactionStatus};
+use crate::db::{self, get_balance, update_transaction_status, DbExecutor};
 use crate::errors::Error;
 use crate::models::Merchant;
 use crate::models::{Money, Transaction, TransactionStatus, TransactionType};
@@ -348,17 +348,18 @@ impl Handler<FinalizePayout> for FsmPayout {
     type Result = ResponseFuture<PendingPayout, Error>;
 
     fn handle(&mut self, msg: FinalizePayout, _: &mut Self::Context) -> Self::Result {
+        let pool = self.pool.clone();
         Box::new(
-            self.db
-                .send(UpdateTransactionStatus {
-                    id: msg.initialized_payout.id.clone(),
-                    status: TransactionStatus::Pending,
-                })
-                .from_err()
-                .and_then(|db_response| {
-                    let tx = db_response?;
-                    Ok(PendingPayout(tx))
-                }),
+            block::<_, _, Error>(move || {
+                let conn: &PgConnection = &pool.get().unwrap();
+                update_transaction_status(
+                    msg.initialized_payout.id.clone(),
+                    TransactionStatus::Pending,
+                    &conn,
+                )
+                .map(PendingPayout)
+            })
+            .from_err(),
         )
     }
 }

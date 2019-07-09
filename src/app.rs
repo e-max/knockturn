@@ -62,7 +62,7 @@ impl AppState {
         .start();
         let _cron_payout = {
             let fsm = fsm_payout.clone();
-            cron_payout::CronPayout::new(cron_db.clone(), fsm)
+            cron_payout::CronPayout::new(cron_db.clone(), fsm, pool.clone())
         }
         .start();
         AppState {
@@ -130,6 +130,15 @@ pub fn routing(cfg: &mut web::ServiceConfig) {
                 .route(web::get().to_async(payout::generate_slate)),
         )
         .service(
-            web::resource("/transactions").route(web::get().to_async(webui::get_transactions)),
+            web::resource("/transactions/{id}")
+                .route(web::get().to_async(transaction::get_transaction)),
+        )
+        .service(
+            web::resource("/transactions/{id}/manually_refunded")
+                .route(web::post().to_async(transaction::manually_refunded)),
+        )
+        .service(
+            web::resource("/transactions")
+                .route(web::get().to_async(transaction::get_transactions)),
         );
 }

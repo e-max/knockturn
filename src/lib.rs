@@ -18,6 +18,8 @@ pub mod rates;
 #[allow(unused_imports)]
 pub mod schema;
 mod ser;
+#[cfg(test)]
+pub mod test_utils;
 pub mod totp;
 pub mod wallet;
 

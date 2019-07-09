@@ -1,20 +1,23 @@
 use crate::app::AppState;
-use crate::db::{CreateMerchant, GetMerchant};
+use crate::db::{self, CreateMerchant, GetMerchant};
 use crate::errors::*;
 use crate::extractor::SimpleJson;
 use crate::models::{Merchant, Transaction, TransactionStatus, TransactionType};
 use crate::totp::Totp;
-use actix_web::web::{Data, Path};
+use actix_web::web::{block, Data, Path};
 use actix_web::HttpResponse;
 use askama::Template;
 use bcrypt;
+use diesel::pg::PgConnection;
 use futures::future::{ok, Future};
 use mime_guess::get_mime_type;
+use serde::Deserialize;
 
 pub mod mfa;
 pub mod paginator;
 pub mod payment;
 pub mod payout;
+pub mod transaction;
 pub mod webui;
 
 pub fn create_merchant(
@@ -22,23 +25,18 @@ pub fn create_merchant(
     state: Data<AppState>,
 ) -> impl Future<Item = HttpResponse, Error = Error> {
     let mut create_merchant = create_merchant.into_inner();
-    ok(())
-        .and_then(move |_| {
-            create_merchant.password =
-                bcrypt::hash(&create_merchant.password, bcrypt::DEFAULT_COST)
-                    .map_err(|e| Error::General(s!(e)))?;
-            Ok(create_merchant)
-        })
-        .and_then(move |create_merchant| {
-            state
-                .db
-                .send(create_merchant)
-                .from_err()
-                .and_then(|db_response| {
-                    let merchant = db_response?;
-                    Ok(HttpResponse::Created().json(merchant))
-                })
-        })
+    block::<_, _, Error>({
+        let pool = state.pool.clone();
+        move || {
+            let password = bcrypt::hash(&create_merchant.password, bcrypt::DEFAULT_COST)
+                .map_err(|e| Error::General(s!(e)))?;
+            let conn: &PgConnection = &pool.get().unwrap();
+            let merchant = db::create_merchant(create_merchant, conn)?;
+            Ok(merchant)
+        }
+    })
+    .from_err()
+    .and_then(|merchant| Ok(HttpResponse::Created().json(merchant)))
 }
 
 pub fn get_merchant(

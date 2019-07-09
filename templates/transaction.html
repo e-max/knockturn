@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %} Transaction {{transaction.id}} {% endblock %}
+
+{% block content %}
+
+<h1> Transaction {{transaction.id}} </h1>
+
+	<table class="table">
+		<tr><td>Id:</td><td>{{transaction.id}}</td></tr>
+		<tr><td>Type:</td><td id="type">{{transaction.transaction_type}}</td></tr>
+		<tr><td>Status:</td><td id="status" class="table-{{transaction.color()}}">{{transaction.status}}</td></tr>
+		<tr><td>Amount: </td><td>{{transaction.amount}}</td></tr>
+		<tr><td>Create at: </td><td>{{transaction.created_at|pretty_date }}</td></tr>
+		<tr><td>Last updated: </td><td>{{transaction.updated_at|pretty_date}}</td></tr>
+		<tr><td>Message: </td><td>{{transaction.message}}</td></tr>
+		{% if transaction.status == TransactionStatus::InChain -%}
+		<tr><td >Confirmations:</td><td id="confirmations">{{transaction.current_confirmations(current_height)}}/{{transaction.confirmations}}</td></tr>
+		{%- endif %}
+		{% if transaction.status == TransactionStatus::Confirmed -%}
+		<tr><td >Confirmations:</td><td >{{transaction.confirmations}}/{{transaction.confirmations}}</td></tr>
+
+		<tr><td>Reported: </td>	
+			{% if !transaction.reported -%}
+			<td> Yes </td>
+		    {% else %}
+			<td> No </td>
+			{%- endif %}
+		</tr>
+		{%- endif %}
+		</tr>
+
+	</table>
+	
+{% if transaction.status == TransactionStatus::Refund -%}
+<p>
+This is transaction in status Refund. This means that we received payment from client, but couldn't report merchant 
+about it.  If you dealt with this payment, you can manually resolve this transaction.
+</p>
+
+<form action="/transactions/{{transaction.id}}/manually_refunded" method="post">
+	<button type="submit" class="btn  btn-primary">Manually Refunded</button>
+</form>
+
+{%- endif %}
+
+
+
+
+
+
+{% endblock %}

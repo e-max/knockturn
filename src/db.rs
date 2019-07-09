@@ -29,7 +29,7 @@ impl Actor for DbExecutor {
     type Context = SyncContext<Self>;
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 pub struct CreateMerchant {
     pub id: String,
     pub email: String,
@@ -55,7 +55,7 @@ pub struct GetTransactions {
     pub limit: i64,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 pub struct CreateTransaction {
     pub merchant_id: String,
     pub external_id: String,
@@ -65,17 +65,6 @@ pub struct CreateTransaction {
     pub message: String,
     pub transaction_type: TransactionType,
     pub redirect_url: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct UpdateTransactionStatus {
-    pub id: Uuid,
-    pub status: TransactionStatus,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct RegisterRate {
-    pub rates: HashMap<String, f64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -120,10 +109,6 @@ pub struct GetCurrentHeight;
 #[derive(Debug, Deserialize)]
 pub struct RejectExpiredPayments;
 
-impl Message for CreateMerchant {
-    type Result = Result<Merchant, Error>;
-}
-
 impl Message for GetMerchant {
     type Result = Result<Merchant, Error>;
 }
@@ -146,18 +131,6 @@ impl Message for GetPayoutsByStatus {
 
 impl Message for GetTransactions {
     type Result = Result<Vec<Transaction>, Error>;
-}
-
-impl Message for CreateTransaction {
-    type Result = Result<Transaction, Error>;
-}
-
-impl Message for UpdateTransactionStatus {
-    type Result = Result<Transaction, Error>;
-}
-
-impl Message for RegisterRate {
-    type Result = Result<(), Error>;
 }
 
 impl Message for ConvertCurrency {
@@ -188,38 +161,33 @@ impl Message for GetCurrentHeight {
     type Result = Result<i64, Error>;
 }
 
-impl Handler<CreateMerchant> for DbExecutor {
-    type Result = Result<Merchant, Error>;
-
-    fn handle(&mut self, msg: CreateMerchant, _: &mut Self::Context) -> Self::Result {
-        use crate::schema::merchants::dsl::*;
-        let conn: &PgConnection = &self.0.get().unwrap();
-        const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ\
+pub fn create_merchant(m: CreateMerchant, conn: &PgConnection) -> Result<Merchant, Error> {
+    use crate::schema::merchants;
+    const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ\
     abcdefghijklmnopqrstuvwxyz\
     0123456789";
 
-        let mut rng = thread_rng();
-        let new_token: Option<String> = (0..64)
-            .map(|_| Some(*CHARSET.choose(&mut rng)? as char))
-            .collect();
-        let new_token_2fa = BASE32.encode(&rng.gen::<[u8; 10]>());
-        let new_merchant = Merchant {
-            id: msg.id,
-            email: msg.email,
-            password: msg.password,
-            wallet_url: msg.wallet_url,
-            created_at: Local::now().naive_local() + Duration::hours(24),
-            callback_url: msg.callback_url,
-            token: new_token.ok_or(Error::General(s!("cannot generate rangom token")))?,
-            token_2fa: Some(new_token_2fa),
-            confirmed_2fa: false,
-        };
+    let mut rng = thread_rng();
+    let new_token: Option<String> = (0..64)
+        .map(|_| Some(*CHARSET.choose(&mut rng)? as char))
+        .collect();
+    let new_token_2fa = BASE32.encode(&rng.gen::<[u8; 10]>());
+    let new_merchant = Merchant {
+        id: m.id,
+        email: m.email,
+        password: m.password,
+        wallet_url: m.wallet_url,
+        created_at: Local::now().naive_local() + Duration::hours(24),
+        callback_url: m.callback_url,
+        token: new_token.ok_or(Error::General(s!("cannot generate rangom token")))?,
+        token_2fa: Some(new_token_2fa),
+        confirmed_2fa: false,
+    };
 
-        diesel::insert_into(merchants)
-            .values(&new_merchant)
-            .get_result(conn)
-            .map_err(|e| e.into())
-    }
+    diesel::insert_into(merchants::table)
+        .values(&new_merchant)
+        .get_result(conn)
+        .map_err(|e| e.into())
 }
 
 impl Handler<GetMerchant> for DbExecutor {
@@ -305,107 +273,97 @@ impl Handler<GetTransactions> for DbExecutor {
     }
 }
 
-impl Handler<CreateTransaction> for DbExecutor {
-    type Result = Result<Transaction, Error>;
+pub fn create_transaction(
+    tx: CreateTransaction,
+    conn: &PgConnection,
+) -> Result<Transaction, Error> {
+    use crate::schema::merchants::dsl::*;
+    use crate::schema::rates::dsl::*;
+    use crate::schema::transactions::dsl::*;
 
-    fn handle(&mut self, msg: CreateTransaction, _: &mut Self::Context) -> Self::Result {
-        use crate::schema::merchants::dsl::*;
-        use crate::schema::rates::dsl::*;
-        use crate::schema::transactions::dsl::*;
+    if !merchants
+        .find(tx.merchant_id.clone())
+        .get_result::<Merchant>(conn)
+        .is_ok()
+    {
+        return Err(Error::InvalidEntity("merchant".to_owned()));
+    }
 
-        let conn: &PgConnection = &self.0.get().unwrap();
+    let exch_rate = match rates
+        .find(&tx.amount.currency.to_string())
+        .get_result::<Rate>(conn)
+        .optional()?
+    {
+        None => return Err(Error::UnsupportedCurrency(tx.amount.currency.to_string())),
+        Some(v) => v,
+    };
 
-        if !merchants
-            .find(msg.merchant_id.clone())
-            .get_result::<Merchant>(conn)
-            .is_ok()
-        {
-            return Err(Error::InvalidEntity("merchant".to_owned()));
-        }
+    let grins = tx.amount.convert_to(Currency::GRIN, exch_rate.rate);
 
-        let exch_rate = match rates
-            .find(&msg.amount.currency.to_string())
-            .get_result::<Rate>(conn)
-            .optional()?
-        {
-            None => return Err(Error::UnsupportedCurrency(msg.amount.currency.to_string())),
-            Some(v) => v,
-        };
+    let new_transaction = Transaction {
+        id: uuid::Uuid::new_v4(),
+        external_id: tx.external_id,
+        merchant_id: tx.merchant_id,
+        email: tx.email,
+        amount: tx.amount,
+        grin_amount: grins.amount,
+        status: TransactionStatus::New,
+        confirmations: tx.confirmations,
+        created_at: Local::now().naive_local(),
+        updated_at: Local::now().naive_local(),
+        report_attempts: 0,
+        next_report_attempt: None,
+        reported: false,
+        wallet_tx_id: None,
+        wallet_tx_slate_id: None,
+        message: tx.message,
+        slate_messages: None,
+        transfer_fee: None,
+        knockturn_fee: None,
+        real_transfer_fee: None,
+        transaction_type: tx.transaction_type,
+        height: None,
+        commit: None,
+        redirect_url: tx.redirect_url,
+    };
 
-        let grins = msg.amount.convert_to(Currency::GRIN, exch_rate.rate);
+    diesel::insert_into(transactions)
+        .values(&new_transaction)
+        .get_result(conn)
+        .map_err(|e| e.into())
+}
 
-        let new_transaction = Transaction {
-            id: uuid::Uuid::new_v4(),
-            external_id: msg.external_id,
-            merchant_id: msg.merchant_id,
-            email: msg.email,
-            amount: msg.amount,
-            grin_amount: grins.amount,
-            status: TransactionStatus::New,
-            confirmations: msg.confirmations,
-            created_at: Local::now().naive_local(),
+pub fn update_transaction_status(
+    tx_id: Uuid,
+    tx_status: TransactionStatus,
+    conn: &PgConnection,
+) -> Result<Transaction, Error> {
+    use crate::schema::transactions::dsl::*;
+    diesel::update(transactions.filter(id.eq(tx_id)))
+        .set((status.eq(tx_status), updated_at.eq(Utc::now().naive_utc())))
+        .get_result(conn)
+        .map_err(|e| e.into())
+}
+
+pub fn register_rate(rates_map: HashMap<String, f64>, conn: &PgConnection) -> Result<(), Error> {
+    use crate::schema::rates::dsl::*;
+
+    for (currency, new_rate) in rates_map {
+        let new_rate = Rate {
+            id: currency.to_uppercase(),
+            rate: new_rate,
             updated_at: Local::now().naive_local(),
-            report_attempts: 0,
-            next_report_attempt: None,
-            reported: false,
-            wallet_tx_id: None,
-            wallet_tx_slate_id: None,
-            message: msg.message,
-            slate_messages: None,
-            transfer_fee: None,
-            knockturn_fee: None,
-            real_transfer_fee: None,
-            transaction_type: msg.transaction_type,
-            height: None,
-            commit: None,
-            redirect_url: msg.redirect_url,
         };
 
-        diesel::insert_into(transactions)
-            .values(&new_transaction)
-            .get_result(conn)
-            .map_err(|e| e.into())
+        diesel::insert_into(rates)
+            .values(&new_rate)
+            .on_conflict(id)
+            .do_update()
+            .set(&new_rate)
+            .get_result::<Rate>(conn)
+            .map_err(|e| Error::from(e))?;
     }
-}
-
-impl Handler<UpdateTransactionStatus> for DbExecutor {
-    type Result = Result<Transaction, Error>;
-
-    fn handle(&mut self, msg: UpdateTransactionStatus, _: &mut Self::Context) -> Self::Result {
-        use crate::schema::transactions::dsl::*;
-        let conn: &PgConnection = &self.0.get().unwrap();
-
-        diesel::update(transactions.filter(id.eq(msg.id)))
-            .set((status.eq(msg.status), updated_at.eq(Utc::now().naive_utc())))
-            .get_result(conn)
-            .map_err(|e| e.into())
-    }
-}
-
-impl Handler<RegisterRate> for DbExecutor {
-    type Result = Result<(), Error>;
-
-    fn handle(&mut self, msg: RegisterRate, _: &mut Self::Context) -> Self::Result {
-        use crate::schema::rates::dsl::*;
-        let conn: &PgConnection = &self.0.get().unwrap();
-
-        for (currency, new_rate) in msg.rates {
-            let new_rate = Rate {
-                id: currency.to_uppercase(),
-                rate: new_rate,
-                updated_at: Local::now().naive_local(),
-            };
-
-            diesel::insert_into(rates)
-                .values(&new_rate)
-                .on_conflict(id)
-                .do_update()
-                .set(&new_rate)
-                .get_result::<Rate>(conn)
-                .map_err(|e| Error::from(e))?;
-        }
-        Ok(())
-    }
+    Ok(())
 }
 
 impl Handler<ReportAttempt> for DbExecutor {
@@ -529,6 +487,19 @@ impl Handler<GetCurrentHeight> for DbExecutor {
     }
 }
 
+//
+//  SELECT (
+//              SELECT coalesce(sum(grin_amount), 0)
+//                  FROM transactions
+//                  WHERE merchant_id = 'id' AND transaction_type = 'payment' AND ( status = 'refund' OR status = 'refunded_manually' OR  ( status = 'confirmed' and reported = true))
+//          )
+//          -
+//          (
+//              SELECT coalesce(sum(grin_amount), 0)
+//                  FROM transactions
+//                  WHERE merchant_id = 'id' AND transaction_type = 'payout' AND status <> 'rejected'
+//          );
+//
 pub fn get_balance(merch_id: &str, conn: &PgConnection) -> Result<i64, Error> {
     use crate::schema::transactions::dsl::*;
     let payments = transactions
@@ -538,9 +509,12 @@ pub fn get_balance(merch_id: &str, conn: &PgConnection) -> Result<i64, Error> {
             // As a valid we consider a payments with
             // Status=Confirmed and reported to merchant (which means that user got his goods)
             // or Status = Refund (which means that we took user's money, but couldn't report to merchant)
-            status.eq(TransactionStatus::Refund).or(status
-                .eq(TransactionStatus::Confirmed)
-                .and(reported.eq(true))),
+            status
+                .eq(TransactionStatus::Refund)
+                .or(status.eq(TransactionStatus::RefundedManually))
+                .or(status
+                    .eq(TransactionStatus::Confirmed)
+                    .and(reported.eq(true))),
         )
         .filter(transaction_type.eq(TransactionType::Payment))
         .first::<Option<BigDecimal>>(conn)
@@ -559,4 +533,117 @@ pub fn get_balance(merch_id: &str, conn: &PgConnection) -> Result<i64, Error> {
         .unwrap_or(0);
 
     Ok(payments - payouts)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::errors::Error;
+    use crate::test_utils::{get_test_pool, run_migrations};
+    use diesel::Connection;
+    use diesel::{self, prelude::*};
+
+    #[test]
+    fn balance_test() {
+        let pool = get_test_pool();
+
+        let conn = pool.get().unwrap();
+        conn.test_transaction::<(), Error, _>(|| {
+            run_migrations(&conn);
+            create_merchant(
+                CreateMerchant {
+                    id: s!("user"),
+                    ..Default::default()
+                },
+                &conn,
+            )
+            .unwrap();
+            assert!(get_balance("user", &conn).unwrap() == 0);
+            let mut rates = HashMap::new();
+            rates.insert(s!("grin"), 1.0);
+            register_rate(rates, &conn).unwrap();
+            create_transaction(
+                CreateTransaction {
+                    merchant_id: s!("user"),
+                    external_id: s!("1"),
+                    amount: Money::from_grin(1),
+                    ..Default::default()
+                },
+                &conn,
+            )
+            .unwrap();
+            assert!(get_balance("user", &conn).unwrap() == 0);
+
+            // Test that payment doesn't appear on balance during processing
+            let tx = create_transaction(
+                CreateTransaction {
+                    merchant_id: s!("user"),
+                    external_id: s!("2"),
+                    amount: Money::from_grin(1),
+                    ..Default::default()
+                },
+                &conn,
+            )
+            .unwrap();
+            assert!(get_balance("user", &conn).unwrap() == 0);
+
+            update_transaction_status(tx.id, TransactionStatus::Pending, &conn).unwrap();
+            assert!(get_balance("user", &conn).unwrap() == 0);
+            update_transaction_status(tx.id, TransactionStatus::Rejected, &conn).unwrap();
+            assert!(get_balance("user", &conn).unwrap() == 0);
+            update_transaction_status(tx.id, TransactionStatus::InChain, &conn).unwrap();
+            assert!(get_balance("user", &conn).unwrap() == 0);
+
+            // test that Confirmed payment increases balance only if reported
+            update_transaction_status(tx.id, TransactionStatus::Confirmed, &conn).unwrap();
+            assert!(get_balance("user", &conn).unwrap() == 0);
+
+            use crate::schema::transactions::dsl::*;
+            diesel::update(transactions.filter(id.eq(tx.id)))
+                .set(reported.eq(true))
+                .get_result::<Transaction>(&conn)
+                .unwrap();
+
+            assert!(get_balance("user", &conn).unwrap() == 1);
+
+            //text that Refund added to balance
+            let tx2 = create_transaction(
+                CreateTransaction {
+                    merchant_id: s!("user"),
+                    external_id: s!("3"),
+                    amount: Money::from_grin(1),
+                    ..Default::default()
+                },
+                &conn,
+            )
+            .unwrap();
+            assert!(get_balance("user", &conn).unwrap() == 1);
+
+            update_transaction_status(tx2.id, TransactionStatus::Refund, &conn).unwrap();
+            assert!(get_balance("user", &conn).unwrap() == 2);
+
+            // test that payouts reduces balance
+            let payout = create_transaction(
+                CreateTransaction {
+                    merchant_id: s!("user"),
+                    external_id: s!("-"),
+                    transaction_type: TransactionType::Payout,
+                    amount: Money::from_grin(1),
+                    ..Default::default()
+                },
+                &conn,
+            )
+            .unwrap();
+            assert!(get_balance("user", &conn).unwrap() == 1);
+
+            update_transaction_status(payout.id, TransactionStatus::Confirmed, &conn).unwrap();
+            assert!(get_balance("user", &conn).unwrap() == 1);
+
+            // test that Rejected payouts ignored
+            update_transaction_status(payout.id, TransactionStatus::Rejected, &conn).unwrap();
+            assert!(get_balance("user", &conn).unwrap() == 2);
+
+            Ok(())
+        });
+    }
 }
