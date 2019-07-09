@@ -50,9 +50,8 @@ actix-session = "0.1.1"
 rustls = "0.15"
 bigdecimal = { version = "0.0.14"}
 actix-identity = "0.1.0"
+diesel_migrations = "1.4.0"
 
 [build-dependencies]
 askama = "0.6"
 
-[dev-dependencies]
-diesel_migrations = "1.4.0"

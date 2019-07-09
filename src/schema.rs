@@ -43,6 +43,19 @@ table! {
     use crate::models::Transaction_status;
     use crate::models::Transaction_type;
 
+    status_changes (id) {
+        id -> Uuid,
+        transaction_id -> Uuid,
+        status -> Transaction_status,
+        updated_at -> Timestamp,
+    }
+}
+
+table! {
+    use diesel::sql_types::*;
+    use crate::models::Transaction_status;
+    use crate::models::Transaction_type;
+
     transactions (id) {
         id -> Uuid,
         external_id -> Text,
@@ -91,6 +104,7 @@ table! {
     }
 }
 
+joinable!(status_changes -> transactions (transaction_id));
 joinable!(transactions -> merchants (merchant_id));
 joinable!(txs -> transactions (order_id));
 
@@ -98,6 +112,7 @@ allow_tables_to_appear_in_same_query!(
     current_height,
     merchants,
     rates,
+    status_changes,
     transactions,
     txs,
 );

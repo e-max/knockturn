@@ -10,6 +10,8 @@ use actix_web::web;
 use diesel::pg::PgConnection;
 use diesel::r2d2::{ConnectionManager, Pool};
 
+embed_migrations!();
+
 #[derive(Debug, Clone)]
 pub struct AppCfg {
     pub node_url: String,
@@ -35,6 +37,9 @@ impl AppState {
         let pool = r2d2::Pool::builder()
             .build(manager)
             .expect("Failed to create pool.");
+
+        let conn = &pool.get().unwrap();
+        embedded_migrations::run_with_output(conn, &mut std::io::stdout());
         let pool_clone = pool.clone();
         let db: Addr<DbExecutor> = SyncArbiter::start(10, move || DbExecutor(pool_clone.clone()));
         let wallet = Wallet::new(&cfg.wallet_url, &cfg.wallet_user, &cfg.wallet_pass);
@@ -132,6 +137,10 @@ pub fn routing(cfg: &mut web::ServiceConfig) {
         .service(
             web::resource("/transactions/{id}")
                 .route(web::get().to_async(transaction::get_transaction)),
+        )
+        .service(
+            web::resource("/transactions/{id}/status_history")
+                .route(web::get().to_async(transaction::get_transaction_status_changes)),
         )
         .service(
             web::resource("/transactions/{id}/manually_refunded")

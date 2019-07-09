@@ -9,9 +9,9 @@
 	<table class="table">
 		<tr><td>Id:</td><td>{{transaction.id}}</td></tr>
 		<tr><td>Type:</td><td id="type">{{transaction.transaction_type}}</td></tr>
-		<tr><td>Status:</td><td id="status" class="table-{{transaction.color()}}">{{transaction.status}}</td></tr>
+        <tr><td>Status:</td><td id="status" class="table-{{transaction.color()}}">{{transaction.status}} <button id="status_history" type="button" class="btn btn-link" onclick="loadHistory()">history</button></td></tr>
 		<tr><td>Amount: </td><td>{{transaction.amount}}</td></tr>
-		<tr><td>Create at: </td><td>{{transaction.created_at|pretty_date }}</td></tr>
+        <tr><td>Create at: </td><td>{{transaction.created_at|pretty_date }} </td></tr>
 		<tr><td>Last updated: </td><td>{{transaction.updated_at|pretty_date}}</td></tr>
 		<tr><td>Message: </td><td>{{transaction.message}}</td></tr>
 		{% if transaction.status == TransactionStatus::InChain -%}
@@ -45,6 +45,13 @@ about it.  If you dealt with this payment, you can manually resolve this transac
 {%- endif %}
 
 
+  <script>
+    function loadHistory() {
+      $.get(window.location.pathname + '/status_history', function(data, status){
+        $('#status_history').replaceWith(data);
+      });
+    }
+  </script>
 
 
 
