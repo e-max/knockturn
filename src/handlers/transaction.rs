@@ -196,6 +196,12 @@ pub fn get_transaction(
     .and_then(move |html| Ok(HttpResponse::Ok().content_type("text/html").body(html)))
 }
 
+#[derive(Template)]
+#[template(path = "_status_history.html")]
+pub struct StatusHistoryTemplate {
+    pub history: Vec<StatusChange>,
+}
+
 pub fn get_transaction_status_changes(
     merchant: User<Merchant>,
     transaction_id: Path<Uuid>,
@@ -226,7 +232,14 @@ pub fn get_transaction_status_changes(
         }
     })
     .from_err()
-    .and_then(move |history| Ok(HttpResponse::Ok().json(history)))
+    .and_then(move |history| {
+        let html = StatusHistoryTemplate { history }
+            .render()
+            .map_err(|e| Error::from(e))?;
+        Ok(HttpResponse::Ok().content_type("text/html").body(html))
+    })
+
+    //.and_then(move |history| Ok(HttpResponse::Ok().json(history)))
 }
 
 pub fn manually_refunded(
