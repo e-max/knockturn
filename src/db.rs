@@ -43,11 +43,6 @@ pub struct GetMerchant {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct GetTransaction {
-    pub transaction_id: Uuid,
-}
-
-#[derive(Debug, Deserialize)]
 pub struct GetTransactions {
     pub merchant_id: String,
     pub offset: i64,
@@ -103,17 +98,10 @@ pub struct Reset2FA {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct GetCurrentHeight;
-
-#[derive(Debug, Deserialize)]
 pub struct RejectExpiredPayments;
 
 impl Message for GetMerchant {
     type Result = Result<Merchant, Error>;
-}
-
-impl Message for GetTransaction {
-    type Result = Result<Transaction, Error>;
 }
 
 impl Message for GetPayment {
@@ -154,10 +142,6 @@ impl Message for Reset2FA {
 
 impl Message for RejectExpiredPayments {
     type Result = Result<(), Error>;
-}
-
-impl Message for GetCurrentHeight {
-    type Result = Result<i64, Error>;
 }
 
 pub fn create_merchant(m: CreateMerchant, conn: &PgConnection) -> Result<Merchant, Error> {
@@ -204,17 +188,12 @@ impl Handler<GetMerchant> for DbExecutor {
     }
 }
 
-impl Handler<GetTransaction> for DbExecutor {
-    type Result = Result<Transaction, Error>;
-
-    fn handle(&mut self, msg: GetTransaction, _: &mut Self::Context) -> Self::Result {
-        use crate::schema::transactions::dsl::*;
-        let conn: &PgConnection = &self.0.get().unwrap();
-        transactions
-            .find(msg.transaction_id)
-            .get_result(conn)
-            .map_err(|e| e.into())
-    }
+pub fn get_transaction(transaction_id: Uuid, conn: &PgConnection) -> Result<Transaction, Error> {
+    use crate::schema::transactions::dsl::*;
+    transactions
+        .find(transaction_id)
+        .get_result(conn)
+        .map_err(|e| e.into())
 }
 
 impl Handler<GetPayment> for DbExecutor {
@@ -475,17 +454,12 @@ impl Handler<RejectExpiredPayments> for DbExecutor {
         })
     }
 }
-impl Handler<GetCurrentHeight> for DbExecutor {
-    type Result = Result<i64, Error>;
-
-    fn handle(&mut self, _: GetCurrentHeight, _: &mut Self::Context) -> Self::Result {
-        use crate::schema::current_height::dsl::*;
-        let conn: &PgConnection = &self.0.get().unwrap();
-        current_height
-            .select(height)
-            .first(conn)
-            .map_err(|e| e.into())
-    }
+pub fn get_current_height(conn: &PgConnection) -> Result<i64, Error> {
+    use crate::schema::current_height::dsl::*;
+    current_height
+        .select(height)
+        .first(conn)
+        .map_err(|e| e.into())
 }
 
 //
