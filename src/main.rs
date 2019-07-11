@@ -1,6 +1,8 @@
 use actix_identity::{CookieIdentityPolicy, IdentityService};
 use actix_session::CookieSession;
 use actix_web::{middleware, App, HttpServer};
+use diesel::pg::PgConnection;
+use diesel::r2d2::{ConnectionManager, Pool};
 use dotenv::dotenv;
 use env_logger;
 use knockturn::app::{routing, AppCfg, AppState};
@@ -12,6 +14,11 @@ use sentry_actix::SentryMiddleware;
 use std::env;
 use std::fs::File;
 use std::io::BufReader;
+
+#[macro_use]
+extern crate diesel_migrations;
+
+embed_migrations!();
 
 fn main() {
     dotenv().ok();
@@ -49,28 +56,38 @@ fn main() {
     };
 
     info!("Starting");
+    let manager = ConnectionManager::<PgConnection>::new(cfg.database_url.as_str());
+    let pool = r2d2::Pool::builder()
+        .build(manager)
+        .expect("Failed to create pool.");
 
-    let mut srv = HttpServer::new(move || {
-        let mut app = App::new()
-            .data(AppState::new(cfg.clone()))
-            .configure(routing)
-            .wrap(middleware::Logger::new("\"%r\" %s %b %Dms"))
-            .wrap(IdentityService::new(
-                CookieIdentityPolicy::new(cookie_secret.as_bytes())
-                    .name("auth-example")
-                    .secure(false),
-            ))
-            .wrap(CookieSession::private(cookie_secret.as_bytes()).secure(false));
+    let conn: &PgConnection = &pool.get().unwrap();
+    embedded_migrations::run_with_output(conn, &mut std::io::stdout());
 
-        /*
-         * doesn't work yet with actix 1.0
-         * https://github.com/getsentry/sentry-rust/issues/143
-         *
-        if sentry_url != "" {
-            app = app.wrap(SentryMiddleware::new());
+    let mut srv = HttpServer::new({
+        let pool = pool.clone();
+        move || {
+            let mut app = App::new()
+                .data(AppState::new(cfg.clone(), pool.clone()))
+                .configure(routing)
+                .wrap(middleware::Logger::new("\"%r\" %s %b %Dms"))
+                .wrap(IdentityService::new(
+                    CookieIdentityPolicy::new(cookie_secret.as_bytes())
+                        .name("auth-example")
+                        .secure(false),
+                ))
+                .wrap(CookieSession::private(cookie_secret.as_bytes()).secure(false));
+
+            /*
+             * doesn't work yet with actix 1.0
+             * https://github.com/getsentry/sentry-rust/issues/143
+             *
+            if sentry_url != "" {
+                app = app.wrap(SentryMiddleware::new());
+            }
+            */
+            app
         }
-        */
-        app
     });
 
     if let Ok(folder) = env::var("TLS_FOLDER") {

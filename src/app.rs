@@ -10,8 +10,6 @@ use actix_web::web;
 use diesel::pg::PgConnection;
 use diesel::r2d2::{ConnectionManager, Pool};
 
-embed_migrations!();
-
 #[derive(Debug, Clone)]
 pub struct AppCfg {
     pub node_url: String,
@@ -32,14 +30,7 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(cfg: AppCfg) -> Self {
-        let manager = ConnectionManager::<PgConnection>::new(cfg.database_url.as_str());
-        let pool = r2d2::Pool::builder()
-            .build(manager)
-            .expect("Failed to create pool.");
-
-        let conn = &pool.get().unwrap();
-        embedded_migrations::run_with_output(conn, &mut std::io::stdout());
+    pub fn new(cfg: AppCfg, pool: r2d2::Pool<ConnectionManager<PgConnection>>) -> Self {
         let pool_clone = pool.clone();
         let db: Addr<DbExecutor> = SyncArbiter::start(10, move || DbExecutor(pool_clone.clone()));
         let wallet = Wallet::new(&cfg.wallet_url, &cfg.wallet_user, &cfg.wallet_pass);
