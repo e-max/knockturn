@@ -1,0 +1,7 @@
+<table class="table">
+  {% for change in history %}
+    <tr>
+      <td>{{change.status}}</td><td>{{change.updated_at|pretty_date}}</td>
+    </tr>
+  {% endfor %}
+</table>
