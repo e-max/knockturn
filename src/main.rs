@@ -147,24 +147,5 @@ fn main() {
             .start();
     }
 
-    sys.run();
-
-    /*
-     *
-     * replace me with a proper TLS implementation
-    srv = if let Ok(folder) = env::var("TLS_FOLDER") {
-        let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
-        builder
-            .set_private_key_file(format!("{}/privkey.pem", folder), SslFiletype::PEM)
-            .unwrap();
-        builder
-            .set_certificate_chain_file(format!("{}/fullchain.pem", folder))
-            .unwrap();
-        srv.bind_ssl(&host, builder)
-            .expect(&format!("Can not bind_ssl to '{}'", &host))
-    } else {
-        srv.bind(&host)
-            .expect(&format!("Can not bind to '{}'", &host))
-    };
-    */
+    sys.run().unwrap();
 }
