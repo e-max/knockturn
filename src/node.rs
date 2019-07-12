@@ -8,6 +8,7 @@ use std::str::from_utf8;
 use std::time::Duration;
 
 const CHAIN_OUTPUTS_BY_HEIGHT: &'static str = "v1/chain/outputs/byheight";
+const GET_STATUS_URL: &'static str = "v1/status";
 
 #[derive(Clone)]
 pub struct Node {
@@ -67,6 +68,44 @@ impl Node {
                     })
             })
     }
+    pub fn current_height(&self) -> impl Future<Item = i64, Error = Error> {
+        let url = format!("{}/{}", self.url, GET_STATUS_URL);
+        debug!("Get current height from the node {}", url);
+        self.client
+            .get(&url) // <- Create request builder
+            .basic_auth(&self.username, Some(&self.password))
+            .send() // <- Send http request
+            .map_err(|e| Error::NodeAPIError(s!(e)))
+            .and_then(|resp| {
+                if !resp.status().is_success() {
+                    Err(Error::NodeAPIError(format!("Error status: {:?}", resp)))
+                } else {
+                    Ok(resp)
+                }
+            })
+            .and_then(|mut resp| {
+                // <- server http response
+                resp.body()
+                    .limit(10 * 1024 * 1024)
+                    .map_err(|e| Error::NodeAPIError(s!(e)))
+                    .and_then(move |bytes| {
+                        let status: Status = from_slice(&bytes).map_err(|e| {
+                            error!(
+                                "Cannot decode json {:?}:\n with error {} ",
+                                from_utf8(&bytes),
+                                e
+                            );
+                            Error::NodeAPIError(format!("Cannot decode json {}", e))
+                        })?;
+                        Ok(status.height)
+                    })
+            })
+    }
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Status {
+    pub height: i64,
 }
 
 #[derive(Deserialize, Debug)]
