@@ -31,36 +31,28 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(cfg: AppCfg, pool: r2d2::Pool<ConnectionManager<PgConnection>>) -> Self {
-        let pool_clone = pool.clone();
-        let db: Addr<DbExecutor> = SyncArbiter::start(10, move || DbExecutor(pool_clone.clone()));
+        let db: Addr<DbExecutor> = SyncArbiter::start(10, {
+            let pool = pool.clone();
+            move || DbExecutor(pool.clone())
+        });
         let wallet = Wallet::new(&cfg.wallet_url, &cfg.wallet_user, &cfg.wallet_pass);
         let node = Node::new(&cfg.node_url, &cfg.node_user, &cfg.node_pass);
-        let cron_db = db.clone();
-        let fsm: Addr<Fsm> = {
-            let wallet = wallet.clone();
-            let db = db.clone();
-            let pool = pool.clone();
-            Fsm { db, wallet, pool }.start()
-        };
+        let fsm: Addr<Fsm> = Fsm {
+            db: db.clone(),
+            wallet: wallet.clone(),
+            pool: pool.clone(),
+        }
+        .start();
 
-        let fsm_payout: Addr<FsmPayout> = {
-            let wallet = wallet.clone();
-            let db = db.clone();
-            let pool = pool.clone();
-            FsmPayout { db, wallet, pool }.start()
-        };
-        let _cron = {
-            let fsm = fsm.clone();
-            let pool = pool.clone();
-            let cron_db = cron_db.clone();
-            cron::Cron::new(cron_db, fsm, node, pool)
+        let fsm_payout: Addr<FsmPayout> = FsmPayout {
+            db: db.clone(),
+            wallet: wallet.clone(),
+            pool: pool.clone(),
         }
         .start();
-        let _cron_payout = {
-            let fsm = fsm_payout.clone();
-            cron_payout::CronPayout::new(cron_db.clone(), fsm, pool.clone())
-        }
-        .start();
+
+        cron::Cron::new(db.clone(), fsm.clone(), node, pool.clone()).start();
+        cron_payout::CronPayout::new(db.clone(), fsm_payout.clone(), pool.clone()).start();
         AppState {
             db,
             wallet,
