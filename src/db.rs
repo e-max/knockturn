@@ -9,10 +9,9 @@ use bigdecimal::{BigDecimal, ToPrimitive};
 use chrono::NaiveDateTime;
 use chrono::{Duration, Local, Utc};
 use data_encoding::BASE32;
-use diesel::dsl::{sql, sum};
+use diesel::dsl::sum;
 use diesel::pg::PgConnection;
 use diesel::r2d2::{ConnectionManager, Pool};
-use diesel::sql_types::BigInt;
 use diesel::{self, prelude::*};
 use log::info;
 use rand::seq::SliceRandom;
@@ -166,6 +165,8 @@ pub fn create_merchant(m: CreateMerchant, conn: &PgConnection) -> Result<Merchan
     const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ\
     abcdefghijklmnopqrstuvwxyz\
     0123456789";
+    let password =
+        bcrypt::hash(&m.password, bcrypt::DEFAULT_COST).map_err(|e| Error::General(s!(e)))?;
 
     let mut rng = thread_rng();
     let new_token: Option<String> = (0..64)
@@ -175,7 +176,7 @@ pub fn create_merchant(m: CreateMerchant, conn: &PgConnection) -> Result<Merchan
     let new_merchant = Merchant {
         id: m.id,
         email: m.email,
-        password: m.password,
+        password: password,
         wallet_url: m.wallet_url,
         created_at: Local::now().naive_local() + Duration::hours(24),
         callback_url: m.callback_url,
