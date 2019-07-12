@@ -1,6 +1,6 @@
 use crate::errors::Error;
 use crate::ser;
-use actix_web::client::{Client, Connector};
+use actix_web::client::Client;
 use chrono::{DateTime, Utc};
 use futures::Future;
 use log::{debug, error};
@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::from_slice;
 use std::iter::Iterator;
 use std::str::from_utf8;
-use std::time::Duration;
 use uuid::Uuid;
 
 #[derive(Clone)]

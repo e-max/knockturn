@@ -3,22 +3,21 @@ use actix_identity::{CookieIdentityPolicy, IdentityService};
 use actix_session::CookieSession;
 use actix_web::{middleware, App, HttpServer};
 use diesel::pg::PgConnection;
-use diesel::r2d2::{ConnectionManager, Pool};
+use diesel::r2d2::ConnectionManager;
 use dotenv::dotenv;
 use env_logger;
 use knockturn::app::{routing, AppCfg, AppState};
 use knockturn::db::DbExecutor;
 use knockturn::fsm::Fsm;
 use knockturn::fsm_payout::FsmPayout;
-use knockturn::handlers::*;
 use knockturn::node::Node;
 use knockturn::wallet::Wallet;
 use knockturn::{cron, cron_payout};
 use log::info;
 use rustls::internal::pemfile::{certs, pkcs8_private_keys};
 use rustls::{NoClientAuth, ServerConfig};
-use sentry;
-use sentry_actix::SentryMiddleware;
+//use sentry;
+//use sentry_actix::SentryMiddleware;
 use std::env;
 use std::fs::File;
 use std::io::BufReader;
@@ -72,7 +71,7 @@ fn main() {
         .expect("Failed to create pool.");
 
     let conn: &PgConnection = &pool.get().unwrap();
-    embedded_migrations::run_with_output(conn, &mut std::io::stdout());
+    embedded_migrations::run_with_output(conn, &mut std::io::stdout()).unwrap();
 
     let db: Addr<DbExecutor> = SyncArbiter::start(10, {
         let pool = pool.clone();
@@ -95,12 +94,12 @@ fn main() {
     .start();
 
     cron::Cron::new(db.clone(), fsm.clone(), node, pool.clone()).start();
-    cron_payout::CronPayout::new(db.clone(), fsm_payout.clone(), pool.clone()).start();
+    cron_payout::CronPayout::new(fsm_payout.clone(), pool.clone()).start();
 
-    let mut srv = HttpServer::new({
+    let srv = HttpServer::new({
         let pool = pool.clone();
         move || {
-            let mut app = App::new()
+            let app = App::new()
                 .data(AppState {
                     db: db.clone(),
                     wallet: wallet.clone(),

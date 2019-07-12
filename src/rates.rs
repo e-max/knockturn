@@ -1,6 +1,5 @@
-use crate::db::{register_rate, DbExecutor};
+use crate::db::{register_rate};
 use crate::errors::Error;
-use actix::prelude::*;
 use actix_web::client::Client;
 use actix_web::web::block;
 use diesel::pg::PgConnection;
@@ -19,17 +18,15 @@ struct Rates {
 }
 
 pub struct RatesFetcher {
-    db: Addr<DbExecutor>,
     pool: Pool<ConnectionManager<PgConnection>>,
 }
 
 impl RatesFetcher {
-    pub fn new(db: Addr<DbExecutor>, pool: Pool<ConnectionManager<PgConnection>>) -> Self {
-        RatesFetcher { db, pool }
+    pub fn new(pool: Pool<ConnectionManager<PgConnection>>) -> Self {
+        RatesFetcher { pool }
     }
 
     pub fn fetch(&self) {
-        let db = self.db.clone();
         let pool = self.pool.clone();
         let f = Client::default().get(
             "https://api.coingecko.com/api/v3/simple/price?ids=grin&vs_currencies=btc%2Cusd%2Ceur",

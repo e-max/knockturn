@@ -2,9 +2,7 @@ use crate::db::DbExecutor;
 use crate::fsm::Fsm;
 use crate::fsm_payout::FsmPayout;
 use crate::handlers::*;
-use crate::node::Node;
 use crate::wallet::Wallet;
-use crate::{cron, cron_payout};
 use actix::prelude::*;
 use actix_web::web;
 use diesel::pg::PgConnection;
@@ -27,41 +25,6 @@ pub struct AppState {
     pub pool: Pool<ConnectionManager<PgConnection>>,
     pub fsm: Addr<Fsm>,
     pub fsm_payout: Addr<FsmPayout>,
-}
-
-impl AppState {
-    pub fn new(cfg: AppCfg, pool: r2d2::Pool<ConnectionManager<PgConnection>>) -> Self {
-        let db: Addr<DbExecutor> = SyncArbiter::start(10, {
-            let pool = pool.clone();
-            move || DbExecutor(pool.clone())
-        });
-        let wallet = Wallet::new(&cfg.wallet_url, &cfg.wallet_user, &cfg.wallet_pass);
-        let node = Node::new(&cfg.node_url, &cfg.node_user, &cfg.node_pass);
-        let fsm: Addr<Fsm> = Fsm {
-            db: db.clone(),
-            wallet: wallet.clone(),
-            pool: pool.clone(),
-        }
-        .start();
-
-        let fsm_payout: Addr<FsmPayout> = FsmPayout {
-            db: db.clone(),
-            wallet: wallet.clone(),
-            pool: pool.clone(),
-        }
-        .start();
-
-        cron::Cron::new(db.clone(), fsm.clone(), node, pool.clone()).start();
-        cron_payout::CronPayout::new(db.clone(), fsm_payout.clone(), pool.clone()).start();
-
-        AppState {
-            db,
-            wallet,
-            pool,
-            fsm,
-            fsm_payout,
-        }
-    }
 }
 
 pub fn routing(cfg: &mut web::ServiceConfig) {
