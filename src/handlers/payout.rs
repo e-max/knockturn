@@ -10,7 +10,6 @@ use crate::fsm_payout::{
 };
 use crate::handlers::check_2fa_code;
 use crate::handlers::BootstrapColor;
-use crate::handlers::TemplateIntoResponse;
 use crate::models::{Merchant, Money, Transaction, TransactionStatus};
 use crate::wallet::Slate;
 use actix_identity::Identity;
@@ -19,7 +18,7 @@ use actix_web::{HttpRequest, HttpResponse};
 use diesel::pg::PgConnection;
 
 use askama::Template;
-use futures::future::{ok, result, Either, Future};
+use futures::future::{ok, Either, Future};
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -39,7 +38,6 @@ pub fn withdraw(
     data: Data<AppState>,
 ) -> impl Future<Item = HttpResponse, Error = Error> {
     block::<_, _, Error>({
-        let merch_id = merchant.id.clone();
         let pool = data.pool.clone();
         move || {
             let conn: &PgConnection = &pool.get().unwrap();

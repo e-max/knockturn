@@ -5,10 +5,9 @@ use crate::filters;
 use crate::handlers::paginator::{Pages, Paginate, Paginator};
 use crate::handlers::BootstrapColor;
 use crate::models::{Merchant, StatusChange, Transaction, TransactionStatus, TransactionType};
-use actix_web::web::{block, Data, Form, Path, Query};
-use actix_web::{HttpRequest, HttpResponse};
+use actix_web::web::{block, Data, Path, Query};
+use actix_web::HttpResponse;
 use askama::Template;
-use chrono::NaiveDateTime;
 use chrono::Utc;
 use diesel::pg::PgConnection;
 use diesel::{self, prelude::*};
@@ -256,7 +255,7 @@ pub fn manually_refunded(
             use crate::schema::transactions::dsl::*;
             let conn: &PgConnection = &pool.get().unwrap();
 
-            let tx: Transaction = diesel::update(
+            diesel::update(
                 transactions
                     .filter(id.eq(transaction_id))
                     .filter(merchant_id.eq(merch_id))
@@ -266,7 +265,7 @@ pub fn manually_refunded(
                 status.eq(TransactionStatus::RefundedManually),
                 updated_at.eq(Utc::now().naive_utc()),
             ))
-            .get_result(conn)
+            .get_result::<Transaction>(conn)
             .map_err::<Error, _>(|e| e.into())?;
             Ok(())
         }

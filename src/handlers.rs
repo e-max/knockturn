@@ -7,11 +7,9 @@ use crate::totp::Totp;
 use actix_web::web::{block, Data, Path};
 use actix_web::HttpResponse;
 use askama::Template;
-use bcrypt;
 use diesel::pg::PgConnection;
 use futures::future::{ok, Future};
 use mime_guess::get_mime_type;
-use serde::Deserialize;
 
 pub mod mfa;
 pub mod paginator;
@@ -24,12 +22,10 @@ pub fn create_merchant(
     create_merchant: SimpleJson<CreateMerchant>,
     state: Data<AppState>,
 ) -> impl Future<Item = HttpResponse, Error = Error> {
-    let mut create_merchant = create_merchant.into_inner();
+    let create_merchant = create_merchant.into_inner();
     block::<_, _, Error>({
         let pool = state.pool.clone();
         move || {
-            let password = bcrypt::hash(&create_merchant.password, bcrypt::DEFAULT_COST)
-                .map_err(|e| Error::General(s!(e)))?;
             let conn: &PgConnection = &pool.get().unwrap();
             let merchant = db::create_merchant(create_merchant, conn)?;
             Ok(merchant)

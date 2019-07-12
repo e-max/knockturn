@@ -1,17 +1,31 @@
+use actix::prelude::*;
 use actix_identity::{CookieIdentityPolicy, IdentityService};
 use actix_session::CookieSession;
 use actix_web::{middleware, App, HttpServer};
+use diesel::pg::PgConnection;
+use diesel::r2d2::ConnectionManager;
 use dotenv::dotenv;
 use env_logger;
 use knockturn::app::{routing, AppCfg, AppState};
+use knockturn::db::DbExecutor;
+use knockturn::fsm::Fsm;
+use knockturn::fsm_payout::FsmPayout;
+use knockturn::node::Node;
+use knockturn::wallet::Wallet;
+use knockturn::{cron, cron_payout};
 use log::info;
 use rustls::internal::pemfile::{certs, pkcs8_private_keys};
 use rustls::{NoClientAuth, ServerConfig};
-use sentry;
-use sentry_actix::SentryMiddleware;
+//use sentry;
+//use sentry_actix::SentryMiddleware;
 use std::env;
 use std::fs::File;
 use std::io::BufReader;
+
+#[macro_use]
+extern crate diesel_migrations;
+
+embed_migrations!();
 
 fn main() {
     dotenv().ok();
@@ -49,28 +63,69 @@ fn main() {
     };
 
     info!("Starting");
+    let sys = System::new("knockturn-server");
 
-    let mut srv = HttpServer::new(move || {
-        let mut app = App::new()
-            .data(AppState::new(cfg.clone()))
-            .configure(routing)
-            .wrap(middleware::Logger::new("\"%r\" %s %b %Dms"))
-            .wrap(IdentityService::new(
-                CookieIdentityPolicy::new(cookie_secret.as_bytes())
-                    .name("auth-example")
-                    .secure(false),
-            ))
-            .wrap(CookieSession::private(cookie_secret.as_bytes()).secure(false));
+    let manager = ConnectionManager::<PgConnection>::new(cfg.database_url.as_str());
+    let pool = r2d2::Pool::builder()
+        .build(manager)
+        .expect("Failed to create pool.");
 
-        /*
-         * doesn't work yet with actix 1.0
-         * https://github.com/getsentry/sentry-rust/issues/143
-         *
-        if sentry_url != "" {
-            app = app.wrap(SentryMiddleware::new());
+    let conn: &PgConnection = &pool.get().unwrap();
+    embedded_migrations::run_with_output(conn, &mut std::io::stdout()).unwrap();
+
+    let db: Addr<DbExecutor> = SyncArbiter::start(10, {
+        let pool = pool.clone();
+        move || DbExecutor(pool.clone())
+    });
+    let wallet = Wallet::new(&cfg.wallet_url, &cfg.wallet_user, &cfg.wallet_pass);
+    let node = Node::new(&cfg.node_url, &cfg.node_user, &cfg.node_pass);
+    let fsm: Addr<Fsm> = Fsm {
+        db: db.clone(),
+        wallet: wallet.clone(),
+        pool: pool.clone(),
+    }
+    .start();
+
+    let fsm_payout: Addr<FsmPayout> = FsmPayout {
+        db: db.clone(),
+        wallet: wallet.clone(),
+        pool: pool.clone(),
+    }
+    .start();
+
+    cron::Cron::new(db.clone(), fsm.clone(), node, pool.clone()).start();
+    cron_payout::CronPayout::new(fsm_payout.clone(), pool.clone()).start();
+
+    let srv = HttpServer::new({
+        let pool = pool.clone();
+        move || {
+            let app = App::new()
+                .data(AppState {
+                    db: db.clone(),
+                    wallet: wallet.clone(),
+                    pool: pool.clone(),
+                    fsm: fsm.clone(),
+                    fsm_payout: fsm_payout.clone(),
+                })
+                .configure(routing)
+                .wrap(middleware::Logger::new("\"%r\" %s %b %Dms"))
+                .wrap(IdentityService::new(
+                    CookieIdentityPolicy::new(cookie_secret.as_bytes())
+                        .name("auth-example")
+                        .secure(false),
+                ))
+                .wrap(CookieSession::private(cookie_secret.as_bytes()).secure(false));
+
+            /*
+             * doesn't work yet with actix 1.0
+             * https://github.com/getsentry/sentry-rust/issues/143
+             *
+            if sentry_url != "" {
+                app = app.wrap(SentryMiddleware::new());
+            }
+            */
+            app
         }
-        */
-        app
     });
 
     if let Ok(folder) = env::var("TLS_FOLDER") {
@@ -84,29 +139,12 @@ fn main() {
         config.set_single_cert(cert_chain, keys.remove(0)).unwrap();
         srv.bind_rustls(&host, config)
             .expect(&format!("Can not TLS  bind to '{}'", &host))
-            .run();
+            .start();
     } else {
         srv.bind(&host)
             .expect(&format!("Can not bind to '{}'", &host))
-            .run();
+            .start();
     }
 
-    /*
-     *
-     * replace me with a proper TLS implementation
-    srv = if let Ok(folder) = env::var("TLS_FOLDER") {
-        let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
-        builder
-            .set_private_key_file(format!("{}/privkey.pem", folder), SslFiletype::PEM)
-            .unwrap();
-        builder
-            .set_certificate_chain_file(format!("{}/fullchain.pem", folder))
-            .unwrap();
-        srv.bind_ssl(&host, builder)
-            .expect(&format!("Can not bind_ssl to '{}'", &host))
-    } else {
-        srv.bind(&host)
-            .expect(&format!("Can not bind to '{}'", &host))
-    };
-    */
+    sys.run().unwrap();
 }

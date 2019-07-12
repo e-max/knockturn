@@ -11,7 +11,6 @@ use crate::wallet::Slate;
 use actix_web::web::{Data, Path};
 use actix_web::HttpResponse;
 use askama::Template;
-use chrono_humanize::{Accuracy, HumanTime, Tense};
 use data_encoding::BASE64;
 use futures::future::Future;
 use futures::future::{err, ok, Either};

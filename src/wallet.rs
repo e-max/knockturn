@@ -1,6 +1,6 @@
 use crate::errors::Error;
 use crate::ser;
-use actix_web::client::{Client, Connector};
+use actix_web::client::Client;
 use chrono::{DateTime, Utc};
 use futures::Future;
 use log::{debug, error};
@@ -8,12 +8,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::from_slice;
 use std::iter::Iterator;
 use std::str::from_utf8;
-use std::time::Duration;
 use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct Wallet {
-    client: Client,
+    //    client: Client,
     username: String,
     password: String,
     url: String,
@@ -28,23 +27,27 @@ const POST_TX_URL: &'static str = "/v1/wallet/owner/post_tx?fluff";
 
 impl Wallet {
     pub fn new(url: &str, username: &str, password: &str) -> Self {
-        let connector = Connector::new()
-            .conn_lifetime(Duration::from_secs(300))
-            .conn_keep_alive(Duration::from_secs(300))
-            .finish();
+        //let connector = Connector::new()
+        //.conn_lifetime(Duration::from_secs(300))
+        //.conn_keep_alive(Duration::from_secs(300))
+        //.finish();
         Wallet {
             url: url.trim_end_matches('/').to_owned(),
             username: username.to_owned(),
             password: password.to_owned(),
-            client: Client::build().connector(connector).finish(),
+            //client: Client::build().connector(connector).finish(),
         }
+    }
+
+    fn client(&self) -> Client {
+        Client::new()
     }
 
     pub fn get_tx(&self, tx_id: &str) -> impl Future<Item = TxLogEntry, Error = Error> {
         let tx_id = tx_id.to_owned();
         let url = format!("{}/{}?tx_id={}&refresh", self.url, RETRIEVE_TXS_URL, tx_id);
         debug!("Get transaction from wallet {}", url);
-        self.client
+        self.client()
             .get(&url) // <- Create request builder
             .basic_auth(&self.username, Some(&self.password))
             .send() // <- Send http request
@@ -91,7 +94,7 @@ impl Wallet {
     pub fn receive(&self, slate: &Slate) -> impl Future<Item = Slate, Error = Error> {
         let url = format!("{}/{}", self.url, RECEIVE_URL);
         debug!("Receive slate by wallet  {}", url);
-        self.client
+        self.client()
             .post(&url)
             .basic_auth(&self.username, Some(&self.password))
             .send_json(slate)
@@ -124,7 +127,7 @@ impl Wallet {
     pub fn finalize(&self, slate: &Slate) -> impl Future<Item = Slate, Error = Error> {
         let url = format!("{}/{}", self.url, FINALIZE_URL);
         debug!("Finalize slate by wallet {}", url);
-        self.client
+        self.client()
             .post(&url)
             .basic_auth(&self.username, Some(&self.password))
             .send_json(slate)
@@ -156,7 +159,7 @@ impl Wallet {
     pub fn cancel_tx(&self, tx_slate_id: &str) -> impl Future<Item = (), Error = Error> {
         let url = format!("{}/{}?tx_id={}", self.url, CANCEL_TX_URL, tx_slate_id);
         debug!("Cancel transaction in wallet {}", url);
-        self.client
+        self.client()
             .post(&url)
             .basic_auth(&self.username, Some(&self.password))
             .send()
@@ -173,7 +176,7 @@ impl Wallet {
     pub fn post_tx(&self) -> impl Future<Item = (), Error = Error> {
         let url = format!("{}/{}", self.url, POST_TX_URL);
         debug!("Post transaction in chain by wallet as {}", url);
-        self.client
+        self.client()
             .post(&url)
             .basic_auth(&self.username, Some(&self.password))
             .send()
@@ -204,7 +207,7 @@ impl Wallet {
             selection_strategy_is_use_all: false,
             message: Some(message),
         };
-        self.client
+        self.client()
             .post(&url)
             .basic_auth(&self.username, Some(&self.password))
             .send_json(&payment)
