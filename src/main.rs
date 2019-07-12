@@ -1,3 +1,4 @@
+use actix::prelude::*;
 use actix_identity::{CookieIdentityPolicy, IdentityService};
 use actix_session::CookieSession;
 use actix_web::{middleware, App, HttpServer};
@@ -6,6 +7,13 @@ use diesel::r2d2::{ConnectionManager, Pool};
 use dotenv::dotenv;
 use env_logger;
 use knockturn::app::{routing, AppCfg, AppState};
+use knockturn::db::DbExecutor;
+use knockturn::fsm::Fsm;
+use knockturn::fsm_payout::FsmPayout;
+use knockturn::handlers::*;
+use knockturn::node::Node;
+use knockturn::wallet::Wallet;
+use knockturn::{cron, cron_payout};
 use log::info;
 use rustls::internal::pemfile::{certs, pkcs8_private_keys};
 use rustls::{NoClientAuth, ServerConfig};
@@ -56,6 +64,8 @@ fn main() {
     };
 
     info!("Starting");
+    let sys = System::new("knockturn-server");
+
     let manager = ConnectionManager::<PgConnection>::new(cfg.database_url.as_str());
     let pool = r2d2::Pool::builder()
         .build(manager)
@@ -64,11 +74,40 @@ fn main() {
     let conn: &PgConnection = &pool.get().unwrap();
     embedded_migrations::run_with_output(conn, &mut std::io::stdout());
 
+    let db: Addr<DbExecutor> = SyncArbiter::start(10, {
+        let pool = pool.clone();
+        move || DbExecutor(pool.clone())
+    });
+    let wallet = Wallet::new(&cfg.wallet_url, &cfg.wallet_user, &cfg.wallet_pass);
+    let node = Node::new(&cfg.node_url, &cfg.node_user, &cfg.node_pass);
+    let fsm: Addr<Fsm> = Fsm {
+        db: db.clone(),
+        wallet: wallet.clone(),
+        pool: pool.clone(),
+    }
+    .start();
+
+    let fsm_payout: Addr<FsmPayout> = FsmPayout {
+        db: db.clone(),
+        wallet: wallet.clone(),
+        pool: pool.clone(),
+    }
+    .start();
+
+    cron::Cron::new(db.clone(), fsm.clone(), node, pool.clone()).start();
+    cron_payout::CronPayout::new(db.clone(), fsm_payout.clone(), pool.clone()).start();
+
     let mut srv = HttpServer::new({
         let pool = pool.clone();
         move || {
             let mut app = App::new()
-                .data(AppState::new(cfg.clone(), pool.clone()))
+                .data(AppState {
+                    db: db.clone(),
+                    wallet: wallet.clone(),
+                    pool: pool.clone(),
+                    fsm: fsm.clone(),
+                    fsm_payout: fsm_payout.clone(),
+                })
                 .configure(routing)
                 .wrap(middleware::Logger::new("\"%r\" %s %b %Dms"))
                 .wrap(IdentityService::new(
@@ -101,12 +140,14 @@ fn main() {
         config.set_single_cert(cert_chain, keys.remove(0)).unwrap();
         srv.bind_rustls(&host, config)
             .expect(&format!("Can not TLS  bind to '{}'", &host))
-            .run();
+            .start();
     } else {
         srv.bind(&host)
             .expect(&format!("Can not bind to '{}'", &host))
-            .run();
+            .start();
     }
+
+    sys.run();
 
     /*
      *

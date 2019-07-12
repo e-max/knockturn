@@ -53,6 +53,7 @@ impl AppState {
 
         cron::Cron::new(db.clone(), fsm.clone(), node, pool.clone()).start();
         cron_payout::CronPayout::new(db.clone(), fsm_payout.clone(), pool.clone()).start();
+
         AppState {
             db,
             wallet,
