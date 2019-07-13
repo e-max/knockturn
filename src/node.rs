@@ -97,15 +97,20 @@ impl Node {
                             );
                             Error::NodeAPIError(format!("Cannot decode json {}", e))
                         })?;
-                        Ok(status.height)
+                        Ok(status.tip.height)
                     })
             })
     }
 }
 
 #[derive(Deserialize, Debug)]
-pub struct Status {
+pub struct Tip {
     pub height: i64,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Status {
+    pub tip: Tip,
 }
 
 #[derive(Deserialize, Debug)]

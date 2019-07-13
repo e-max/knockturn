@@ -13,7 +13,7 @@ use diesel::{self, prelude::*};
 use futures::future::Future;
 use log::*;
 
-const HORIZON_HEIGHT: i64 = 60 * 60 * 24 * 5; // approximate number of blocks generated in 5 days
+const HORIZON_HEIGHT: i64 = 60 * 24 * 5; // approximate number of blocks generated in 5 days
 
 #[derive(Debug, Clone)]
 pub struct AppCfg {
@@ -49,6 +49,10 @@ pub fn check_node_horizon(
                     Error::EntityNotFound(_) => Ok(0),
                     _ => Err(e),
                 })?;
+                info!(
+                    "Node height: {}, local height: {}",
+                    node_height, last_height
+                );
                 if node_height - last_height > HORIZON_HEIGHT {
                     warn!(
                         "Current height {} is outdated! Reset to current node height {}",
