@@ -17,7 +17,6 @@ use log::*;
 use std::collections::HashMap;
 
 const REQUEST_BLOCKS_FROM_NODE: i64 = 10;
-const HORIZON_HEIGHT: i64 = 60 * 60 * 24 * 5; // approximate number of blocks generated in 5 days
 
 pub struct Cron {
     db: Addr<DbExecutor>,
@@ -72,40 +71,6 @@ impl Cron {
             pool,
         }
     }
-}
-
-pub fn check_node_horizon(
-    node: &Node,
-    pool: &Pool<ConnectionManager<PgConnection>>,
-) -> impl Future<Item = (), Error = Error> {
-    info!("Try to check how differ height on node and in DB");
-    let pool = pool.clone();
-    node.current_height().and_then(move |node_height| {
-        block::<_, _, Error>({
-            let pool = pool.clone();
-            move || {
-                let conn: &PgConnection = &pool.get().unwrap();
-                let last_height = get_current_height(conn).or_else(|e| match e {
-                    Error::EntityNotFound(_) => Ok(0),
-                    _ => Err(e),
-                })?;
-                if node_height - last_height > HORIZON_HEIGHT {
-                    warn!(
-                        "Current height {} is outdated! Reset to current node height {}",
-                        last_height, node_height
-                    );
-                    use crate::schema::current_height::dsl::*;
-                    diesel::update(current_height)
-                        .set(height.eq(node_height as i64))
-                        .execute(conn)
-                        .map(|_| ())
-                        .map_err::<Error, _>(|e| e.into())?;
-                }
-                Ok(())
-            }
-        })
-        .from_err()
-    })
 }
 
 fn reject_expired_payments(cron: &mut Cron, _: &mut Context<Cron>) {

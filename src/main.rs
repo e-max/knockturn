@@ -6,7 +6,7 @@ use diesel::pg::PgConnection;
 use diesel::r2d2::ConnectionManager;
 use dotenv::dotenv;
 use env_logger;
-use knockturn::app::{routing, AppCfg, AppState};
+use knockturn::app::{check_node_horizon, routing, AppCfg, AppState};
 use knockturn::db::DbExecutor;
 use knockturn::fsm::Fsm;
 use knockturn::fsm_payout::FsmPayout;
@@ -97,12 +97,8 @@ fn main() {
     cron::Cron::new(db.clone(), fsm.clone(), node.clone(), pool.clone()).start();
     cron_payout::CronPayout::new(fsm_payout.clone(), pool.clone()).start();
 
-    //cron::check_node_horizon(&node, &pool);
-    //
-    //
-
     actix::spawn(lazy(move || {
-        cron::check_node_horizon(&node, &pool)
+        check_node_horizon(&node, &pool)
             .map_err(|e| {
                 error!("Cannot check horizon: {}", e);
                 System::current().stop();

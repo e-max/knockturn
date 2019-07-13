@@ -1,12 +1,19 @@
-use crate::db::DbExecutor;
+use crate::db::{get_current_height, DbExecutor};
+use crate::errors::Error;
 use crate::fsm::Fsm;
 use crate::fsm_payout::FsmPayout;
 use crate::handlers::*;
+use crate::node::Node;
 use crate::wallet::Wallet;
 use actix::prelude::*;
 use actix_web::web;
 use diesel::pg::PgConnection;
 use diesel::r2d2::{ConnectionManager, Pool};
+use diesel::{self, prelude::*};
+use futures::future::Future;
+use log::*;
+
+const HORIZON_HEIGHT: i64 = 60 * 60 * 24 * 5; // approximate number of blocks generated in 5 days
 
 #[derive(Debug, Clone)]
 pub struct AppCfg {
@@ -25,6 +32,40 @@ pub struct AppState {
     pub pool: Pool<ConnectionManager<PgConnection>>,
     pub fsm: Addr<Fsm>,
     pub fsm_payout: Addr<FsmPayout>,
+}
+
+pub fn check_node_horizon(
+    node: &Node,
+    pool: &Pool<ConnectionManager<PgConnection>>,
+) -> impl Future<Item = (), Error = Error> {
+    info!("Try to check how differ height on node and in DB");
+    let pool = pool.clone();
+    node.current_height().and_then(move |node_height| {
+        web::block::<_, _, Error>({
+            let pool = pool.clone();
+            move || {
+                let conn: &PgConnection = &pool.get().unwrap();
+                let last_height = get_current_height(conn).or_else(|e| match e {
+                    Error::EntityNotFound(_) => Ok(0),
+                    _ => Err(e),
+                })?;
+                if node_height - last_height > HORIZON_HEIGHT {
+                    warn!(
+                        "Current height {} is outdated! Reset to current node height {}",
+                        last_height, node_height
+                    );
+                    use crate::schema::current_height::dsl::*;
+                    diesel::update(current_height)
+                        .set(height.eq(node_height as i64))
+                        .execute(conn)
+                        .map(|_| ())
+                        .map_err::<Error, _>(|e| e.into())?;
+                }
+                Ok(())
+            }
+        })
+        .from_err()
+    })
 }
 
 pub fn routing(cfg: &mut web::ServiceConfig) {
