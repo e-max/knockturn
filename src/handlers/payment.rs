@@ -1,5 +1,5 @@
 use crate::app::AppState;
-use crate::db::{GetCurrentHeight, GetTransaction};
+use crate::db::{get_current_height, get_transaction};
 use crate::errors::*;
 use crate::extractor::{BasicAuth, SimpleJson};
 use crate::filters::{self, ForHuman};
@@ -8,14 +8,16 @@ use crate::handlers::BootstrapColor;
 use crate::models::{Merchant, Money, Transaction, TransactionStatus};
 use crate::qrcode;
 use crate::wallet::Slate;
-use actix_web::web::{Data, Path};
+use actix_web::web::{block, Data, Path};
 use actix_web::HttpResponse;
 use askama::Template;
 use data_encoding::BASE64;
+use diesel::pg::PgConnection;
 use futures::future::Future;
 use futures::future::{err, ok, Either};
 use serde::{Deserialize, Serialize};
 use std::env;
+use uuid::Uuid;
 
 #[derive(Debug, Deserialize)]
 pub struct CreatePaymentRequest {
@@ -71,85 +73,70 @@ struct PaymentStatus {
 }
 
 pub fn get_payment_status(
-    get_transaction: Path<GetTransaction>,
+    transaction_id: Path<Uuid>,
     state: Data<AppState>,
 ) -> impl Future<Item = HttpResponse, Error = Error> {
-    state
-        .db
-        .send(GetCurrentHeight)
-        .from_err()
-        .and_then(|db_response| {
-            let height = db_response?;
-            Ok(height)
-        })
-        .and_then({
-            let db = state.db.clone();
-            move |current_height| {
-                db.send(get_transaction.into_inner())
-                    .from_err()
-                    .and_then(move |db_response| {
-                        let tx = db_response?;
-                        let payment_status = PaymentStatus {
-                            transaction_id: tx.id.to_string(),
-                            status: tx.status.to_string(),
-                            seconds_until_expired: tx.time_until_expired().map(|d| d.num_seconds()),
+    block::<_, _, Error>({
+        let pool = state.pool.clone();
+        let transaction_id = transaction_id.into_inner();
+        move || {
+            let conn: &PgConnection = &pool.get().unwrap();
+            let current_height = get_current_height(conn)?;
+            let tx = get_transaction(transaction_id, conn)?;
+            let payment_status = PaymentStatus {
+                transaction_id: tx.id.to_string(),
+                status: tx.status.to_string(),
+                seconds_until_expired: tx.time_until_expired().map(|d| d.num_seconds()),
 
-                            expired_in: tx.time_until_expired().map(|d| d.for_human()),
-                            current_confirmations: tx.current_confirmations(current_height),
-                            required_confirmations: tx.confirmations,
-                            reported: tx.reported,
-                        };
-                        Ok(HttpResponse::Ok().json(payment_status))
-                    })
-            }
-        })
+                expired_in: tx.time_until_expired().map(|d| d.for_human()),
+                current_confirmations: tx.current_confirmations(current_height),
+                required_confirmations: tx.confirmations,
+                reported: tx.reported,
+            };
+            Ok(payment_status)
+        }
+    })
+    .from_err()
+    .and_then(|payment_status| Ok(HttpResponse::Ok().json(payment_status)))
 }
 
 pub fn get_payment(
-    get_transaction: Path<GetTransaction>,
+    transaction_id: Path<Uuid>,
     state: Data<AppState>,
 ) -> impl Future<Item = HttpResponse, Error = Error> {
-    state
-        .db
-        .send(GetCurrentHeight)
-        .from_err()
-        .and_then(|db_response| {
-            let height = db_response?;
-            Ok(height)
-        })
-        .and_then({
-            let db = state.db.clone();
-            move |current_height| {
-                db.send(get_transaction.into_inner())
-                    .from_err()
-                    .and_then(move |db_response| {
-                        let transaction = db_response?;
-
-                        let payment_url = format!(
-                            "{}/merchants/{}/payments/{}",
-                            env::var("DOMAIN").unwrap().trim_end_matches('/'),
-                            transaction.merchant_id,
-                            transaction.id.to_string()
-                        );
-                        let ironbelly_link = format!(
-                            "grin://send?amount={}&destination={}&message={}",
-                            transaction.grin_amount,
-                            payment_url,
-                            BASE64.encode(transaction.message.as_bytes())
-                        );
-                        let html = PaymentTemplate {
-                            payment: &transaction,
-                            payment_url: payment_url,
-                            current_height: current_height,
-                            ironbelly_link: &ironbelly_link,
-                            ironbelly_qrcode: &BASE64.encode(&qrcode::as_png(&ironbelly_link)?),
-                        }
-                        .render()
-                        .map_err(|e| Error::from(e))?;
-                        Ok(HttpResponse::Ok().content_type("text/html").body(html))
-                    })
+    block::<_, _, Error>({
+        let pool = state.pool.clone();
+        let transaction_id = transaction_id.into_inner();
+        move || {
+            let conn: &PgConnection = &pool.get().unwrap();
+            let current_height = get_current_height(conn)?;
+            let transaction = get_transaction(transaction_id, conn)?;
+            let payment_url = format!(
+                "{}/merchants/{}/payments/{}",
+                env::var("DOMAIN").unwrap().trim_end_matches('/'),
+                transaction.merchant_id,
+                transaction.id.to_string()
+            );
+            let ironbelly_link = format!(
+                "grin://send?amount={}&destination={}&message={}",
+                transaction.grin_amount,
+                payment_url,
+                BASE64.encode(transaction.message.as_bytes())
+            );
+            let html = PaymentTemplate {
+                payment: &transaction,
+                payment_url: payment_url,
+                current_height: current_height,
+                ironbelly_link: &ironbelly_link,
+                ironbelly_qrcode: &BASE64.encode(&qrcode::as_png(&ironbelly_link)?),
             }
-        })
+            .render()
+            .map_err(|e| Error::from(e))?;
+            Ok(html)
+        }
+    })
+    .from_err()
+    .and_then(|html| Ok(HttpResponse::Ok().content_type("text/html").body(html)))
 }
 
 #[derive(Template)]

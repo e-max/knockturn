@@ -1,4 +1,4 @@
-use crate::db::{DbExecutor, RejectExpiredPayments};
+use crate::db::{get_current_height, DbExecutor, RejectExpiredPayments};
 use crate::errors::Error;
 use crate::fsm::{
     Fsm, GetPendingPayments, GetUnreportedConfirmedPayments, GetUnreportedRejectedPayments,
@@ -16,7 +16,7 @@ use futures::future::{join_all, Future};
 use log::*;
 use std::collections::HashMap;
 
-const REQUST_BLOCKS_FROM_NODE: i64 = 10;
+const REQUEST_BLOCKS_FROM_NODE: i64 = 10;
 
 pub struct Cron {
     db: Addr<DbExecutor>,
@@ -72,6 +72,7 @@ impl Cron {
         }
     }
 }
+
 fn reject_expired_payments(cron: &mut Cron, _: &mut Context<Cron>) {
     debug!("run process_expired_payments");
     let res = cron
@@ -217,15 +218,14 @@ fn sync_with_node(cron: &mut Cron, _: &mut Context<Cron>) {
     let res = block::<_, _, Error>({
         let pool = pool.clone();
         move || {
-            use crate::schema::current_height::dsl::*;
             let conn: &PgConnection = &pool.get().unwrap();
-            let last_height: i64 = current_height.select(height).first(conn)?;
+            let last_height = get_current_height(conn)?;
             Ok(last_height)
         }
     })
     .map_err(|e| e.into())
     .and_then(move |last_height| {
-        node.blocks(last_height + 1, last_height + 1 + REQUST_BLOCKS_FROM_NODE)
+        node.blocks(last_height + 1, last_height + 1 + REQUEST_BLOCKS_FROM_NODE)
             .and_then(move |blocks| {
                 let new_height = blocks
                     .iter()

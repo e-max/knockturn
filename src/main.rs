@@ -6,18 +6,19 @@ use diesel::pg::PgConnection;
 use diesel::r2d2::ConnectionManager;
 use dotenv::dotenv;
 use env_logger;
-use knockturn::app::{routing, AppCfg, AppState};
+use knockturn::app::{check_node_horizon, routing, AppCfg, AppState};
 use knockturn::db::DbExecutor;
 use knockturn::fsm::Fsm;
 use knockturn::fsm_payout::FsmPayout;
 use knockturn::node::Node;
 use knockturn::wallet::Wallet;
 use knockturn::{cron, cron_payout};
-use log::info;
+use log::*;
 use rustls::internal::pemfile::{certs, pkcs8_private_keys};
 use rustls::{NoClientAuth, ServerConfig};
 //use sentry;
 //use sentry_actix::SentryMiddleware;
+use futures::future::{lazy, ok};
 use std::env;
 use std::fs::File;
 use std::io::BufReader;
@@ -93,58 +94,72 @@ fn main() {
     }
     .start();
 
-    cron::Cron::new(db.clone(), fsm.clone(), node, pool.clone()).start();
+    cron::Cron::new(db.clone(), fsm.clone(), node.clone(), pool.clone()).start();
     cron_payout::CronPayout::new(fsm_payout.clone(), pool.clone()).start();
 
-    let srv = HttpServer::new({
-        let pool = pool.clone();
-        move || {
-            let app = App::new()
-                .data(AppState {
-                    db: db.clone(),
-                    wallet: wallet.clone(),
-                    pool: pool.clone(),
-                    fsm: fsm.clone(),
-                    fsm_payout: fsm_payout.clone(),
-                })
-                .configure(routing)
-                .wrap(middleware::Logger::new("\"%r\" %s %b %Dms"))
-                .wrap(IdentityService::new(
-                    CookieIdentityPolicy::new(cookie_secret.as_bytes())
-                        .name("auth-example")
-                        .secure(false),
-                ))
-                .wrap(CookieSession::private(cookie_secret.as_bytes()).secure(false));
+    actix::spawn(lazy(move || {
+        check_node_horizon(&node, &pool)
+            .map_err(|e| {
+                error!("Cannot check horizon: {}", e);
+                System::current().stop();
+                ()
+            })
+            .and_then(move |_| {
+                let srv = HttpServer::new({
+                    let pool = pool.clone();
+                    move || {
+                        let app = App::new()
+                            .data(AppState {
+                                db: db.clone(),
+                                wallet: wallet.clone(),
+                                pool: pool.clone(),
+                                fsm: fsm.clone(),
+                                fsm_payout: fsm_payout.clone(),
+                            })
+                            .configure(routing)
+                            .wrap(middleware::Logger::new("\"%r\" %s %b %Dms"))
+                            .wrap(IdentityService::new(
+                                CookieIdentityPolicy::new(cookie_secret.as_bytes())
+                                    .name("auth-example")
+                                    .secure(false),
+                            ))
+                            .wrap(CookieSession::private(cookie_secret.as_bytes()).secure(false));
 
-            /*
-             * doesn't work yet with actix 1.0
-             * https://github.com/getsentry/sentry-rust/issues/143
-             *
-            if sentry_url != "" {
-                app = app.wrap(SentryMiddleware::new());
-            }
-            */
-            app
-        }
-    });
+                        /*
+                         * doesn't work yet with actix 1.0
+                         * https://github.com/getsentry/sentry-rust/issues/143
+                         *
+                        if sentry_url != "" {
+                            app = app.wrap(SentryMiddleware::new());
+                        }
+                        */
+                        app
+                    }
+                });
 
-    if let Ok(folder) = env::var("TLS_FOLDER") {
-        // load ssl keys
-        let mut config = ServerConfig::new(NoClientAuth::new());
-        let cert_file =
-            &mut BufReader::new(File::open(format!("{}/fullchain.pem", folder)).unwrap());
-        let key_file = &mut BufReader::new(File::open(format!("{}/privkey.pem", folder)).unwrap());
-        let cert_chain = certs(cert_file).unwrap();
-        let mut keys = pkcs8_private_keys(key_file).unwrap();
-        config.set_single_cert(cert_chain, keys.remove(0)).unwrap();
-        srv.bind_rustls(&host, config)
-            .expect(&format!("Can not TLS  bind to '{}'", &host))
-            .start();
-    } else {
-        srv.bind(&host)
-            .expect(&format!("Can not bind to '{}'", &host))
-            .start();
-    }
+                if let Ok(folder) = env::var("TLS_FOLDER") {
+                    // load ssl keys
+                    let mut config = ServerConfig::new(NoClientAuth::new());
+                    let cert_file = &mut BufReader::new(
+                        File::open(format!("{}/fullchain.pem", folder)).unwrap(),
+                    );
+                    let key_file =
+                        &mut BufReader::new(File::open(format!("{}/privkey.pem", folder)).unwrap());
+                    let cert_chain = certs(cert_file).unwrap();
+                    let mut keys = pkcs8_private_keys(key_file).unwrap();
+                    config.set_single_cert(cert_chain, keys.remove(0)).unwrap();
+                    srv.bind_rustls(&host, config)
+                        .expect(&format!("Can not TLS  bind to '{}'", &host))
+                        .start();
+                } else {
+                    srv.bind(&host)
+                        .expect(&format!("Can not bind to '{}'", &host))
+                        .start();
+                }
+
+                ok(())
+            })
+    }));
 
     sys.run().unwrap();
 }
