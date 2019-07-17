@@ -3,6 +3,7 @@ use crate::models::{
     Currency, Merchant, Money, Rate, Transaction, TransactionStatus, TransactionType,
     NEW_PAYMENT_TTL_SECONDS,
 };
+use crate::Pool;
 use actix::{Actor, SyncContext};
 use actix::{Handler, Message};
 use bigdecimal::{BigDecimal, ToPrimitive};
@@ -11,7 +12,6 @@ use chrono::{Duration, Local, Utc};
 use data_encoding::BASE32;
 use diesel::dsl::sum;
 use diesel::pg::PgConnection;
-use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::{self, prelude::*};
 use log::info;
 use rand::seq::SliceRandom;
@@ -20,9 +20,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use uuid::Uuid;
 
-const MAX_REPORT_ATTEMPTS: i32 = 10; //Number or attemps we try to run merchant's callback
-
-pub struct DbExecutor(pub Pool<ConnectionManager<PgConnection>>);
+pub struct DbExecutor(pub Pool);
 
 impl Actor for DbExecutor {
     type Context = SyncContext<Self>;
@@ -40,13 +38,6 @@ pub struct CreateMerchant {
 #[derive(Debug, Deserialize)]
 pub struct GetMerchant {
     pub id: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct GetTransactions {
-    pub merchant_id: String,
-    pub offset: i64,
-    pub limit: i64,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -68,14 +59,6 @@ pub struct ConvertCurrency {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct GetPayment {
-    pub transaction_id: Uuid,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct GetPaymentsByStatus(pub TransactionStatus);
-
-#[derive(Debug, Deserialize)]
 pub struct GetPayoutsByStatus(pub TransactionStatus);
 
 #[derive(Debug, Deserialize)]
@@ -83,9 +66,6 @@ pub struct ReportAttempt {
     pub transaction_id: Uuid,
     pub next_attempt: Option<NaiveDateTime>,
 }
-
-#[derive(Debug, Deserialize)]
-pub struct GetUnreportedPaymentsByStatus(pub TransactionStatus);
 
 #[derive(Debug, Deserialize)]
 pub struct Confirm2FA {
@@ -104,19 +84,7 @@ impl Message for GetMerchant {
     type Result = Result<Merchant, Error>;
 }
 
-impl Message for GetPayment {
-    type Result = Result<Transaction, Error>;
-}
-
-impl Message for GetPaymentsByStatus {
-    type Result = Result<Vec<Transaction>, Error>;
-}
-
 impl Message for GetPayoutsByStatus {
-    type Result = Result<Vec<Transaction>, Error>;
-}
-
-impl Message for GetTransactions {
     type Result = Result<Vec<Transaction>, Error>;
 }
 
@@ -126,10 +94,6 @@ impl Message for ConvertCurrency {
 
 impl Message for ReportAttempt {
     type Result = Result<(), Error>;
-}
-
-impl Message for GetUnreportedPaymentsByStatus {
-    type Result = Result<Vec<Transaction>, Error>;
 }
 
 impl Message for Confirm2FA {
@@ -196,34 +160,6 @@ pub fn get_transaction(transaction_id: Uuid, conn: &PgConnection) -> Result<Tran
         .map_err(|e| e.into())
 }
 
-impl Handler<GetPayment> for DbExecutor {
-    type Result = Result<Transaction, Error>;
-
-    fn handle(&mut self, msg: GetPayment, _: &mut Self::Context) -> Self::Result {
-        use crate::schema::transactions::dsl::*;
-        let conn: &PgConnection = &self.0.get().unwrap();
-        transactions
-            .filter(id.eq(msg.transaction_id))
-            .filter(transaction_type.eq(TransactionType::Payment))
-            .get_result(conn)
-            .map_err(|e| e.into())
-    }
-}
-
-impl Handler<GetPaymentsByStatus> for DbExecutor {
-    type Result = Result<Vec<Transaction>, Error>;
-
-    fn handle(&mut self, msg: GetPaymentsByStatus, _: &mut Self::Context) -> Self::Result {
-        use crate::schema::transactions::dsl::*;
-        let conn: &PgConnection = &self.0.get().unwrap();
-        transactions
-            .filter(transaction_type.eq(TransactionType::Payment))
-            .filter(status.eq(msg.0))
-            .load::<Transaction>(conn)
-            .map_err(|e| e.into())
-    }
-}
-
 impl Handler<GetPayoutsByStatus> for DbExecutor {
     type Result = Result<Vec<Transaction>, Error>;
 
@@ -233,21 +169,6 @@ impl Handler<GetPayoutsByStatus> for DbExecutor {
         transactions
             .filter(transaction_type.eq(TransactionType::Payout))
             .filter(status.eq(msg.0))
-            .load::<Transaction>(conn)
-            .map_err(|e| e.into())
-    }
-}
-
-impl Handler<GetTransactions> for DbExecutor {
-    type Result = Result<Vec<Transaction>, Error>;
-
-    fn handle(&mut self, msg: GetTransactions, _: &mut Self::Context) -> Self::Result {
-        use crate::schema::transactions::dsl::*;
-        let conn: &PgConnection = &self.0.get().unwrap();
-        transactions
-            .filter(merchant_id.eq(msg.merchant_id))
-            .offset(msg.offset)
-            .limit(msg.limit)
             .load::<Transaction>(conn)
             .map_err(|e| e.into())
     }
@@ -363,36 +284,6 @@ impl Handler<ReportAttempt> for DbExecutor {
             .get_result(conn)
             .map_err(|e| e.into())
             .map(|_: Transaction| ())
-    }
-}
-
-impl Handler<GetUnreportedPaymentsByStatus> for DbExecutor {
-    type Result = Result<Vec<Transaction>, Error>;
-
-    fn handle(
-        &mut self,
-        msg: GetUnreportedPaymentsByStatus,
-        _: &mut Self::Context,
-    ) -> Self::Result {
-        use crate::schema::transactions::dsl::*;
-        let conn: &PgConnection = &self.0.get().unwrap();
-
-        let query = transactions
-            .filter(reported.ne(true))
-            .filter(status.eq(msg.0))
-            .filter(transaction_type.eq(TransactionType::Payment))
-            .filter(report_attempts.lt(MAX_REPORT_ATTEMPTS))
-            .filter(
-                next_report_attempt
-                    .le(Utc::now().naive_utc())
-                    .or(next_report_attempt.is_null()),
-            );
-
-        let payments = query
-            .load::<Transaction>(conn)
-            .map_err(|e| Error::Db(s!(e)))?;
-
-        Ok(payments)
     }
 }
 

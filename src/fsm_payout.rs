@@ -6,12 +6,12 @@ use crate::models::{NEW_PAYOUT_TTL_SECONDS, PENDING_PAYOUT_TTL_SECONDS};
 use crate::ser;
 use crate::wallet::TxLogEntry;
 use crate::wallet::Wallet;
+use crate::Pool;
 use actix::{Actor, Addr, Context, Handler, Message, ResponseFuture};
 use actix_web::web::block;
 use chrono::{Duration, Utc};
 use derive_deref::Deref;
 use diesel::pg::PgConnection;
-use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::{self, prelude::*};
 use futures::future::Future;
 use log::warn;
@@ -25,7 +25,7 @@ pub const TRANSFER_FEE: i64 = 8_000_000;
 pub struct FsmPayout {
     pub db: Addr<DbExecutor>,
     pub wallet: Wallet,
-    pub pool: Pool<ConnectionManager<PgConnection>>,
+    pub pool: Pool,
 }
 
 impl Actor for FsmPayout {

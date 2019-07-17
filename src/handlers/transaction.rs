@@ -8,7 +8,6 @@ use crate::models::{Merchant, StatusChange, Transaction, TransactionStatus, Tran
 use actix_web::web::{block, Data, Path, Query};
 use actix_web::HttpResponse;
 use askama::Template;
-use chrono::Utc;
 use diesel::pg::PgConnection;
 use diesel::{self, prelude::*};
 use futures::future::Future;
