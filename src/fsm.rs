@@ -75,6 +75,9 @@ pub struct RejectedPayment(Transaction);
 #[derive(Debug, Deserialize, Clone, Deref)]
 pub struct RefundPayment(Transaction);
 
+#[derive(Debug, Deserialize, Clone, Deref)]
+pub struct ManuallyRefundedPayment(Transaction);
+
 #[derive(Debug, Deserialize)]
 pub struct CreatePayment {
     pub merchant_id: String,
@@ -148,6 +151,16 @@ impl Message for ReportPayment<ConfirmedPayment> {
 
 impl Message for ReportPayment<RejectedPayment> {
     type Result = Result<(), Error>;
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ManuallyRefundPayment {
+    pub payment: RefundPayment,
+    pub merchant_id: String,
+}
+
+impl Message for ManuallyRefundPayment {
+    type Result = Result<ManuallyRefundedPayment, Error>;
 }
 
 impl Handler<CreatePayment> for Fsm {
@@ -268,6 +281,13 @@ impl Payment for PendingPayment {
 
 impl Payment for ConfirmedPayment {
     const STATUS: TransactionStatus = TransactionStatus::Confirmed;
+    fn new(tx: Transaction) -> Self {
+        Self(tx)
+    }
+}
+
+impl Payment for RefundPayment {
+    const STATUS: TransactionStatus = TransactionStatus::Refund;
     fn new(tx: Transaction) -> Self {
         Self(tx)
     }
@@ -475,6 +495,39 @@ fn run_callback<'a>(
 }
 
 */
+
+impl Handler<ManuallyRefundPayment> for Fsm {
+    type Result = ResponseFuture<ManuallyRefundedPayment, Error>;
+
+    fn handle(&mut self, msg: ManuallyRefundPayment, _: &mut Self::Context) -> Self::Result {
+        Box::new(
+            block::<_, _, Error>({
+                let merch_id = msg.merchant_id.clone();
+                let pool = self.pool.clone();
+                let transaction_id = msg.payment.id.clone();
+                move || {
+                    use crate::schema::transactions::dsl::*;
+                    let conn: &PgConnection = &pool.get().unwrap();
+
+                    diesel::update(
+                        transactions
+                            .filter(id.eq(transaction_id))
+                            .filter(merchant_id.eq(merch_id))
+                            .filter(status.eq(TransactionStatus::Refund)),
+                    )
+                    .set((
+                        status.eq(TransactionStatus::RefundedManually),
+                        updated_at.eq(Utc::now().naive_utc()),
+                    ))
+                    .get_result::<Transaction>(conn)
+                    .map_err::<Error, _>(|e| e.into())
+                    .map(ManuallyRefundedPayment)
+                }
+            })
+            .from_err(),
+        )
+    }
+}
 
 impl Handler<RejectPayment<NewPayment>> for Fsm {
     type Result = ResponseFuture<RejectedPayment, Error>;

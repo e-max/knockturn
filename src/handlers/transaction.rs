@@ -2,6 +2,7 @@ use crate::app::AppState;
 use crate::errors::*;
 use crate::extractor::User;
 use crate::filters;
+use crate::fsm::{ManuallyRefundPayment, Payment, RefundPayment};
 use crate::handlers::paginator::{Pages, Paginate, Paginator};
 use crate::handlers::BootstrapColor;
 use crate::models::{Merchant, StatusChange, Transaction, TransactionStatus, TransactionType};
@@ -245,38 +246,28 @@ pub fn manually_refunded(
     data: Data<AppState>,
     transaction_id: Path<Uuid>,
 ) -> impl Future<Item = HttpResponse, Error = Error> {
-    let merchant = merchant.into_inner();
-    block::<_, _, Error>({
-        let merch_id = merchant.id.clone();
-        let pool = data.pool.clone();
-        let transaction_id = transaction_id.clone();
-        move || {
-            use crate::schema::transactions::dsl::*;
-            let conn: &PgConnection = &pool.get().unwrap();
-
-            diesel::update(
-                transactions
-                    .filter(id.eq(transaction_id))
-                    .filter(merchant_id.eq(merch_id))
-                    .filter(status.eq(TransactionStatus::Refund)),
-            )
-            .set((
-                status.eq(TransactionStatus::RefundedManually),
-                updated_at.eq(Utc::now().naive_utc()),
-            ))
-            .get_result::<Transaction>(conn)
-            .map_err::<Error, _>(|e| e.into())?;
-            Ok(())
-        }
-    })
-    .from_err()
-    .and_then(move |_| {
-        Ok(HttpResponse::Found()
-            .header(
-                http::header::LOCATION,
-                format!("/transactions/{}", transaction_id),
-            )
-            .finish()
-            .into_body())
-    })
+    let merchant_id = merchant.into_inner().id;
+    let fsm = data.fsm.clone();
+    Payment::get(transaction_id.clone(), data.pool.clone())
+        .and_then(move |payment: RefundPayment| {
+            fsm.send(ManuallyRefundPayment {
+                payment,
+                merchant_id,
+            })
+            .from_err()
+            .and_then(|db_response| {
+                db_response?;
+                Ok(())
+            })
+        })
+        .from_err()
+        .and_then(move |_| {
+            Ok(HttpResponse::Found()
+                .header(
+                    http::header::LOCATION,
+                    format!("/transactions/{}", transaction_id),
+                )
+                .finish()
+                .into_body())
+        })
 }
