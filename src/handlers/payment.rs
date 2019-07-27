@@ -5,6 +5,7 @@ use crate::extractor::{BasicAuth, SimpleJson};
 use crate::filters::{self, ForHuman};
 use crate::fsm::{CreatePayment, MakePayment, NewPayment, Payment};
 use crate::handlers::BootstrapColor;
+use crate::jsonrpc;
 use crate::models::{Merchant, Money, Transaction, TransactionStatus};
 use crate::qrcode;
 use crate::wallet::Slate;
@@ -15,7 +16,9 @@ use data_encoding::BASE64;
 use diesel::pg::PgConnection;
 use futures::future::Future;
 use futures::future::{err, ok, Either};
+use log::*;
 use serde::{Deserialize, Serialize};
+use serde_json;
 use std::env;
 use uuid::Uuid;
 
@@ -155,13 +158,107 @@ struct PaymentTemplate<'a> {
     ironbelly_qrcode: &'a str,
 }
 
-pub fn make_payment(
-    slate: SimpleJson<Slate>,
-    payment_id: Path<Uuid>,
+//quick and dirty implementaion of JSONRPC for wallet client
+pub fn wallet_jsonrpc(
+    req: jsonrpc::Request,
+    payment_data: Path<(String, Uuid)>,
     state: Data<AppState>,
-) -> impl Future<Item = HttpResponse, Error = Error> {
+) -> impl Future<Item = HttpResponse, Error = ()> {
+    let (merchant_id, payment_id) = payment_data.into_inner();
+
+    let res: Box<dyn Future<Item = serde_json::Value, Error = jsonrpc::ErrorData>> =
+        match req.method.as_ref() {
+            "check_version" => {
+                //For some reason wallet expect in result field type Result
+                let res: Result<APIVersion, ()> = Ok(check_version());
+                Box::new(ok(serde_json::to_value(res).unwrap()))
+            }
+            "receive_tx" => Box::new(
+                ok(())
+                    .and_then({
+                        let params = req.params.clone();
+                        println!("\x1B[31;1m params\x1B[0m = {:?}", params);
+                        move |_| {
+                            if params.len() != 3 {
+                                return Err(jsonrpc::ErrorData::std(-32602));
+                            }
+                            let slate: Slate =
+                                serde_json::from_value(params[0].clone()).map_err(|e| {
+                                    error!("Cannot parse slate: {}", e);
+                                    jsonrpc::ErrorData::std(-32602)
+                                })?;
+                            println!("\x1B[31;1m OK\x1B[0m");
+                            Ok(slate)
+                        }
+                    })
+                    .and_then(move |slate| {
+                        pay_slate(slate, merchant_id, payment_id, state)
+                            .and_then(|slate| {
+                                let res: Result<Slate, ()> = Ok(slate);
+                                serde_json::to_value(res).map_err(|e| Error::General(s!(e)))
+                            })
+                            .map_err(|e| {
+                                error!("Error in pay_slate {}", e);
+                                jsonrpc::ErrorData {
+                                    code: 32000,
+                                    message: format!("{}", e),
+                                    data: serde_json::Value::Null,
+                                }
+                            })
+                    }),
+            ),
+            _ => Box::new(err(jsonrpc::ErrorData::std(-32601))),
+        };
+    res.and_then({
+        let req_id = req.id.clone();
+        |res| {
+            let mut resp = jsonrpc::Response::with_id(req_id);
+            resp.result = res;
+            Ok(resp)
+        }
+    })
+    .or_else({
+        let req_id = req.id.clone();
+        |e| {
+            error!("Got jsonrpc error {}", e);
+            let mut resp = jsonrpc::Response::with_id(req_id);
+            resp.error = Some(e);
+            Ok(resp)
+        }
+    })
+    .and_then(|resp| {
+        HttpResponse::Ok()
+            .content_type("application/json")
+            .body(resp.dump())
+    })
+    .map_err(|e| ()) //ignore an error because we converted it to response anyway
+}
+
+#[derive(Debug, Serialize)]
+pub struct APIVersion {
+    foreign_api_version: u16,
+    supported_slate_versions: Vec<String>,
+}
+impl Default for APIVersion {
+    fn default() -> Self {
+        APIVersion {
+            foreign_api_version: 2,
+            supported_slate_versions: vec![s!("V1"), s!("V2")],
+        }
+    }
+}
+
+pub fn check_version() -> APIVersion {
+    APIVersion::default()
+}
+
+pub fn pay_slate(
+    slate: Slate,
+    merchant_id: String,
+    payment_id: Uuid,
+    state: Data<AppState>,
+) -> impl Future<Item = Slate, Error = Error> {
     let slate_amount = slate.amount;
-    let payment_id = payment_id.into_inner();
     Payment::get(payment_id, state.pool.clone())
         .and_then(move |new_payment: NewPayment| {
             let payment_amount = new_payment.grin_amount as u64;
@@ -195,5 +292,15 @@ pub fn make_payment(
                 })
             }
         })
+}
+
+pub fn make_payment(
+    slate: SimpleJson<Slate>,
+    payment_data: Path<(String, Uuid)>,
+    state: Data<AppState>,
+) -> impl Future<Item = HttpResponse, Error = Error> {
+    let slate_amount = slate.amount;
+    let (merchant_id, payment_id) = payment_data.into_inner();
+    pay_slate(slate.into_inner(), merchant_id, payment_id, state)
         .and_then(|slate| Ok(HttpResponse::Ok().json(slate)))
 }

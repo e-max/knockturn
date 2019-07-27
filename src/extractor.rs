@@ -1,6 +1,7 @@
 use crate::app::AppState;
 use crate::db::GetMerchant;
 use crate::errors::*;
+use crate::jsonrpc;
 use crate::models::Merchant;
 use actix_identity::Identity;
 use actix_session::Session as ActixSession;
@@ -200,6 +201,35 @@ where
                 .and_then(|body| {
                     let obj = serde_json::from_slice::<T>(&body)?;
                     Ok(SimpleJson(obj))
+                }),
+        )
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct JsonRPCConfig {}
+
+impl FromRequest for jsonrpc::Request {
+    type Config = JsonRPCConfig;
+    type Error = Error;
+    type Future = Box<dyn Future<Item = Self, Error = Self::Error>>;
+
+    fn from_request(_: &HttpRequest, payload: &mut dev::Payload) -> Self::Future {
+        Box::new(
+            payload
+                .take()
+                .map_err(|e| Error::Internal(format!("Payload error: {:?}", e)))
+                .fold(BytesMut::new(), move |mut body, chunk| {
+                    if (body.len() + chunk.len()) > MAX_SIZE {
+                        Err(Error::Internal("overflow".to_owned()))
+                    } else {
+                        body.extend_from_slice(&chunk);
+                        Ok(body)
+                    }
+                })
+                .and_then(|body| {
+                    let req = serde_json::from_slice::<jsonrpc::Request>(&body)?;
+                    Ok(req)
                 }),
         )
     }

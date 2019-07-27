@@ -11,6 +11,7 @@ pub mod filters;
 pub mod fsm;
 pub mod fsm_payout;
 pub mod handlers;
+pub mod jsonrpc;
 pub mod models;
 pub mod node;
 pub mod qrcode;
