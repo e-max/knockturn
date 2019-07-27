@@ -25,3 +25,9 @@ pub mod wallet;
 
 #[macro_use]
 extern crate diesel;
+
+use diesel::pg::PgConnection;
+use diesel::r2d2;
+pub use errors::Error;
+
+pub type Pool = r2d2::Pool<r2d2::ConnectionManager<PgConnection>>;

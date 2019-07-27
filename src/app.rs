@@ -5,10 +5,10 @@ use crate::fsm_payout::FsmPayout;
 use crate::handlers::*;
 use crate::node::Node;
 use crate::wallet::Wallet;
+use crate::Pool;
 use actix::prelude::*;
 use actix_web::web;
 use diesel::pg::PgConnection;
-use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::{self, prelude::*};
 use futures::future::Future;
 use log::*;
@@ -29,15 +29,12 @@ pub struct AppCfg {
 pub struct AppState {
     pub db: Addr<DbExecutor>,
     pub wallet: Wallet,
-    pub pool: Pool<ConnectionManager<PgConnection>>,
+    pub pool: Pool,
     pub fsm: Addr<Fsm>,
     pub fsm_payout: Addr<FsmPayout>,
 }
 
-pub fn check_node_horizon(
-    node: &Node,
-    pool: &Pool<ConnectionManager<PgConnection>>,
-) -> impl Future<Item = (), Error = Error> {
+pub fn check_node_horizon(node: &Node, pool: &Pool) -> impl Future<Item = (), Error = Error> {
     info!("Try to check how differ height on node and in DB");
     let pool = pool.clone();
     node.current_height().and_then(move |node_height| {

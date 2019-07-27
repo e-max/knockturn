@@ -3,7 +3,7 @@ use crate::errors::Error;
 use actix_web::client::Client;
 use actix_web::web::block;
 use diesel::pg::PgConnection;
-use diesel::r2d2::{ConnectionManager, Pool};
+use crate::Pool;
 use futures;
 use futures::future::{err, ok, result, Future};
 use log::*;
@@ -18,11 +18,11 @@ struct Rates {
 }
 
 pub struct RatesFetcher {
-    pool: Pool<ConnectionManager<PgConnection>>,
+    pool: Pool,
 }
 
 impl RatesFetcher {
-    pub fn new(pool: Pool<ConnectionManager<PgConnection>>) -> Self {
+    pub fn new(pool: Pool) -> Self {
         RatesFetcher { pool }
     }
 

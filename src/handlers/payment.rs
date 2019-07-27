@@ -3,7 +3,7 @@ use crate::db::{get_current_height, get_transaction};
 use crate::errors::*;
 use crate::extractor::{BasicAuth, SimpleJson};
 use crate::filters::{self, ForHuman};
-use crate::fsm::{CreatePayment, GetNewPayment, MakePayment};
+use crate::fsm::{CreatePayment, MakePayment, NewPayment, Payment};
 use crate::handlers::BootstrapColor;
 use crate::models::{Merchant, Money, Transaction, TransactionStatus};
 use crate::qrcode;
@@ -151,16 +151,13 @@ struct PaymentTemplate<'a> {
 
 pub fn make_payment(
     slate: SimpleJson<Slate>,
-    payment: Path<GetNewPayment>,
+    payment_id: Path<Uuid>,
     state: Data<AppState>,
 ) -> impl Future<Item = HttpResponse, Error = Error> {
     let slate_amount = slate.amount;
-    state
-        .fsm
-        .send(payment.into_inner())
-        .from_err()
-        .and_then(move |db_response| {
-            let new_payment = db_response?;
+    let payment_id = payment_id.into_inner();
+    Payment::get(payment_id, state.pool.clone())
+        .and_then(move |new_payment: NewPayment| {
             let payment_amount = new_payment.grin_amount as u64;
             if new_payment.is_invalid_amount(slate_amount) {
                 return Err(Error::WrongAmount(payment_amount, slate_amount));

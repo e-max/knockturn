@@ -3,19 +3,18 @@ use crate::fsm_payout::{
     FsmPayout, GetExpiredInitializedPayouts, GetExpiredNewPayouts, GetPendingPayouts, RejectPayout,
 };
 use crate::rates::RatesFetcher;
+use crate::Pool;
 use actix::prelude::*;
-use diesel::pg::PgConnection;
-use diesel::r2d2::{ConnectionManager, Pool};
 use futures::future::{join_all, Future};
 use log::*;
 
 pub struct CronPayout {
     fsm: Addr<FsmPayout>,
-    pool: Pool<ConnectionManager<PgConnection>>,
+    pool: Pool,
 }
 
 impl CronPayout {
-    pub fn new(fsm: Addr<FsmPayout>, pool: Pool<ConnectionManager<PgConnection>>) -> Self {
+    pub fn new(fsm: Addr<FsmPayout>, pool: Pool) -> Self {
         CronPayout { fsm, pool }
     }
 }
