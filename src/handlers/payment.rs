@@ -73,16 +73,19 @@ struct PaymentStatus {
 }
 
 pub fn get_payment_status(
-    transaction_id: Path<Uuid>,
+    transaction_data: Path<(String, Uuid)>,
     state: Data<AppState>,
 ) -> impl Future<Item = HttpResponse, Error = Error> {
     block::<_, _, Error>({
         let pool = state.pool.clone();
-        let transaction_id = transaction_id.into_inner();
+        let (merchant_id, transaction_id) = transaction_data.into_inner();
         move || {
             let conn: &PgConnection = &pool.get().unwrap();
             let current_height = get_current_height(conn)?;
             let tx = get_transaction(transaction_id, conn)?;
+            if tx.merchant_id != merchant_id {
+                return Err(Error::General(format!("Wrong merchant: {}", merchant_id)));
+            }
             let payment_status = PaymentStatus {
                 transaction_id: tx.id.to_string(),
                 status: tx.status.to_string(),
@@ -101,16 +104,19 @@ pub fn get_payment_status(
 }
 
 pub fn get_payment(
-    transaction_id: Path<Uuid>,
+    transaction_data: Path<(String, Uuid)>,
     state: Data<AppState>,
 ) -> impl Future<Item = HttpResponse, Error = Error> {
     block::<_, _, Error>({
         let pool = state.pool.clone();
-        let transaction_id = transaction_id.into_inner();
+        let (merchant_id, transaction_id) = transaction_data.into_inner();
         move || {
             let conn: &PgConnection = &pool.get().unwrap();
             let current_height = get_current_height(conn)?;
             let transaction = get_transaction(transaction_id, conn)?;
+            if transaction.merchant_id != merchant_id {
+                return Err(Error::General(format!("Wrong merchant: {}", merchant_id)));
+            }
             let payment_url = format!(
                 "{}/merchants/{}/payments/{}",
                 env::var("DOMAIN").unwrap().trim_end_matches('/'),
