@@ -351,10 +351,6 @@ pub struct ParticipantData {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Slate {
-    /// Versioning info
-    pub version_info: VersionCompatInfo,
-    /// The number of participants intended to take part in this transaction
-    pub num_participants: usize,
     /// Unique transaction ID, selected by sender
     pub id: Uuid,
     /// The core transaction data:
@@ -363,129 +359,12 @@ pub struct Slate {
     /// base amount (excluding fee)
     #[serde(with = "ser::string_or_u64")]
     pub amount: u64,
-    /// fee amount
-    #[serde(with = "ser::string_or_u64")]
-    pub fee: u64,
-    /// Block height for the transaction
-    #[serde(with = "ser::string_or_u64")]
-    pub height: u64,
-    /// Lock height
-    #[serde(with = "ser::string_or_u64")]
-    pub lock_height: u64,
-    /// Participant data, each participant in the transaction will
-    /// insert their public data here. For now, 0 is sender and 1
-    /// is receiver, though this will change for multi-party
-    pub participant_data: Vec<ParticipantData>,
-}
-
-/// Versioning and compatibility info about this slate
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct VersionCompatInfo {
-    /// The current version of the slate format
-    pub version: u16,
-    /// Original version this slate was converted from
-    pub orig_version: u16,
-    /// The grin block header version this slate is intended for
-    pub block_header_version: u16,
-}
-
-fn no_version() -> u64 {
-    0
-}
-
-/// A range proof. Typically much larger in memory that the above (~5k).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RangeProof {
-    /// The proof itself, at most 5134 bytes long
-    pub proof: Vec<u8>,
-    /// The length of the proof
-    pub plen: usize,
-}
-
-/// Output for a transaction, defining the new ownership of coins that are being
-/// transferred. The commitment is a blinded value for the output while the
-/// range proof guarantees the commitment includes a positive value without
-/// overflow and the ownership of the private key. The switch commitment hash
-/// provides future-proofing against quantum-based attacks, as well as providing
-/// wallet implementations with a way to identify their outputs for wallet
-/// reconstruction.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Output {
-    /// Options for an output's structure or use
-    pub features: OutputFeatures,
-    /// The homomorphic commitment representing the output amount
-    pub commit: Vec<u8>,
-    /// A proof that the commitment is in the right range
-    pub proof: Vec<u8>,
-}
-
-/// A transaction input.
-///
-/// Primarily a reference to an output being spent by the transaction.
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct Input {
-    /// The features of the output being spent.
-    /// We will check maturity for coinbase output.
-    pub features: OutputFeatures,
-    /// The commit referencing the output being spent.
-    pub commit: Vec<u8>,
-}
-
-/// Enum of various supported kernel "features".
-/// Various flavors of tx kernel.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[repr(u8)]
-pub enum KernelFeatures {
-    /// Plain kernel (the default for Grin txs).
-    Plain = 0,
-    /// A coinbase kernel.
-    Coinbase = 1,
-    /// A kernel with an expicit lock height.
-    HeightLocked = 2,
-}
-
-/// A proof that a transaction sums to zero. Includes both the transaction's
-/// Pedersen commitment and the signature, that guarantees that the commitments
-/// amount to zero.
-/// The signature signs the fee and the lock_height, which are retained for
-/// signature validation.
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct TxKernel {
-    /// Options for a kernel's structure or use
-    pub features: KernelFeatures,
-    /// Fee originally included in the transaction this proof is for.
-    pub fee: u64,
-    /// This kernel is not valid earlier than lock_height blocks
-    /// The max lock_height of all *inputs* to this transaction
-    pub lock_height: u64,
-    /// Remainder of the sum of all transaction commitments. If the transaction
-    /// is well formed, amounts components should sum to zero and the excess
-    /// is hence a valid public key.
-    pub excess: Vec<u8>,
-    /// The signature proving the excess is a valid public key, which signs
-    /// the transaction fee.
-    pub excess_sig: Vec<u8>,
-}
-
-/// TransactionBody is a common abstraction for transaction and block
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct TransactionBody {
-    /// List of inputs spent by the transaction.
-    pub inputs: Vec<Input>,
-    /// List of outputs the transaction produces.
-    pub outputs: Vec<Output>,
-    /// List of kernels that make up this transaction (usually a single kernel).
-    pub kernels: Vec<TxKernel>,
 }
 
 /// A transaction
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Transaction {
-    /// The kernel "offset" k2
-    /// excess is k1G after splitting the key k = k1 + k2
-    pub offset: Vec<u8>,
-    /// The transaction body - inputs/outputs/kernels
-    body: TransactionBody,
+    pub body: TransactionBody,
 }
 
 impl Transaction {
@@ -494,15 +373,24 @@ impl Transaction {
     }
 }
 
-/// Enum of various supported kernel "features".
-/// Various flavors of tx kernel.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[repr(u8)]
-pub enum OutputFeatures {
-    /// Plain output (the default for Grin txs).
-    Plain = 0,
-    /// A coinbase output.
-    Coinbase = 1,
+/// TransactionBody is a common abstraction for transaction and block
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct TransactionBody {
+    /// List of outputs the transaction produces.
+    pub outputs: Vec<Output>,
+}
+
+/// Output for a transaction, defining the new ownership of coins that are being
+/// transferred. The commitment is a blinded value for the output while the
+/// range proof guarantees the commitment includes a positive value without
+/// overflow and the ownership of the private key.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Output {
+    #[serde(
+        serialize_with = "ser::as_hex",
+        deserialize_with = "ser::commitment_from_hex"
+    )]
+    pub commit: Vec<u8>,
 }
 
 #[derive(Debug, Serialize)]

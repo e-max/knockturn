@@ -1,4 +1,51 @@
 #![allow(dead_code)]
+use serde::{de, Deserialize, Deserializer, Serializer};
+use std::num;
+
+/// Seralizes a byte string into hex
+pub fn as_hex<T, S>(bytes: T, serializer: S) -> Result<S::Ok, S::Error>
+where
+    T: AsRef<[u8]>,
+    S: Serializer,
+{
+    serializer.serialize_str(&to_hex(bytes.as_ref().to_vec()))
+}
+
+/// Creates a Pedersen Commitment from a hex string
+pub fn commitment_from_hex<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    use serde::de::Error;
+    String::deserialize(deserializer)
+        .and_then(|string| from_hex(string).map_err(|err| Error::custom(err.to_string())))
+}
+
+/// Decode a hex string into bytes.
+pub fn from_hex(hex_str: String) -> Result<Vec<u8>, num::ParseIntError> {
+    if hex_str.len() % 2 == 1 {
+        // TODO: other way to instantiate a ParseIntError?
+        let err = ("QQQ").parse::<u64>();
+        if let Err(e) = err {
+            return Err(e);
+        }
+    }
+    let hex_trim = if &hex_str[..2] == "0x" {
+        hex_str[2..].to_owned()
+    } else {
+        hex_str.clone()
+    };
+    split_n(&hex_trim.trim()[..], 2)
+        .iter()
+        .map(|b| u8::from_str_radix(b, 16))
+        .collect::<Result<Vec<u8>, _>>()
+}
+
+fn split_n(s: &str, n: usize) -> Vec<&str> {
+    (0..(s.len() - n + 1) / 2 + 1)
+        .map(|i| &s[2 * i..2 * i + n])
+        .collect()
+}
 
 use std::fmt::Write;
 pub fn to_hex(bytes: Vec<u8>) -> String {

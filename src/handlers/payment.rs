@@ -299,7 +299,6 @@ pub fn make_payment(
     payment_data: Path<(String, Uuid)>,
     state: Data<AppState>,
 ) -> impl Future<Item = HttpResponse, Error = Error> {
-    let slate_amount = slate.amount;
     let (merchant_id, payment_id) = payment_data.into_inner();
     pay_slate(slate.into_inner(), merchant_id, payment_id, state)
         .and_then(|slate| Ok(HttpResponse::Ok().json(slate)))
