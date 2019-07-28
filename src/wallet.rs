@@ -351,6 +351,8 @@ pub struct ParticipantData {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Slate {
+    /// Versioning info
+    pub version_info: VersionCompatInfo,
     /// The number of participants intended to take part in this transaction
     pub num_participants: usize,
     /// Unique transaction ID, selected by sender
@@ -359,20 +361,32 @@ pub struct Slate {
     /// inputs, outputs, kernels, kernel offset
     pub tx: Transaction,
     /// base amount (excluding fee)
+    #[serde(with = "ser::string_or_u64")]
     pub amount: u64,
     /// fee amount
+    #[serde(with = "ser::string_or_u64")]
     pub fee: u64,
     /// Block height for the transaction
+    #[serde(with = "ser::string_or_u64")]
     pub height: u64,
     /// Lock height
+    #[serde(with = "ser::string_or_u64")]
     pub lock_height: u64,
     /// Participant data, each participant in the transaction will
     /// insert their public data here. For now, 0 is sender and 1
     /// is receiver, though this will change for multi-party
     pub participant_data: Vec<ParticipantData>,
-    /// Slate format version
-    #[serde(default = "no_version")]
-    pub version: u64,
+}
+
+/// Versioning and compatibility info about this slate
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct VersionCompatInfo {
+    /// The current version of the slate format
+    pub version: u16,
+    /// Original version this slate was converted from
+    pub orig_version: u16,
+    /// The grin block header version this slate is intended for
+    pub block_header_version: u16,
 }
 
 fn no_version() -> u64 {
