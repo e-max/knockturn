@@ -169,13 +169,6 @@ pub fn wallet_jsonrpc(
 
     let res: Box<dyn Future<Item = jsonrpc::Response, Error = jsonrpc::ErrorData>> =
         match req.method.as_ref() {
-            "check_version" => {
-                //For some reason wallet expect in result field type Result
-                let res: Result<APIVersion, ()> = Ok(check_version());
-                let mut resp = jsonrpc::Response::with_id(req_id.clone());
-                resp.result = serde_json::to_value(res).unwrap();
-                Box::new(ok(resp))
-            }
             "receive_tx" => Box::new(
                 ok(())
                     .and_then({
@@ -203,7 +196,14 @@ pub fn wallet_jsonrpc(
                         })
                     }),
             ),
-            _ => Box::new(err(jsonrpc::ErrorData::std(-32601))),
+            _ => Box::new(state.wallet.raw_request(req, false).map_err(|e| {
+                error!("Error while proxying request {}", e);
+                jsonrpc::ErrorData {
+                    code: 32000,
+                    message: format!("{}", e),
+                    data: serde_json::Value::Null,
+                }
+            })),
         };
     res.or_else({
         let req_id = req_id.clone();
@@ -283,12 +283,13 @@ pub fn pay_slate2(
         })
 }
 
-pub fn pay_slate(
-    slate: Slate,
-    merchant_id: String,
-    payment_id: Uuid,
+pub fn make_payment(
+    slate: SimpleJson<Slate>,
+    payment_data: Path<(String, Uuid)>,
     state: Data<AppState>,
-) -> impl Future<Item = Slate, Error = Error> {
+) -> impl Future<Item = HttpResponse, Error = Error> {
+    let (merchant_id, payment_id) = payment_data.into_inner();
+
     let slate_amount = slate.amount;
     Payment::get(payment_id, state.pool.clone())
         .and_then(move |new_payment: NewPayment| {
@@ -323,14 +324,5 @@ pub fn pay_slate(
                 })
             }
         })
-}
-
-pub fn make_payment(
-    slate: SimpleJson<Slate>,
-    payment_data: Path<(String, Uuid)>,
-    state: Data<AppState>,
-) -> impl Future<Item = HttpResponse, Error = Error> {
-    let (merchant_id, payment_id) = payment_data.into_inner();
-    pay_slate(slate.into_inner(), merchant_id, payment_id, state)
         .and_then(|slate| Ok(HttpResponse::Ok().json(slate)))
 }
