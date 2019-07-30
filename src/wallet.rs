@@ -47,7 +47,7 @@ impl Wallet {
         Client::new()
     }
 
-    pub fn raw_request(
+    pub fn jsonrpc_request(
         &self,
         req: jsonrpc::Request,
         owner: bool,
@@ -103,7 +103,7 @@ impl Wallet {
                 serde_json::to_value(&tx_id).unwrap(),
             ],
         );
-        self.raw_request(req, true).and_then(move |mut resp| {
+        self.jsonrpc_request(req, true).and_then(move |mut resp| {
             debug!("Response: {:?}", resp);
             let res: Result<(bool, Vec<TxLogEntry>), String> =
                 serde_json::from_value(resp.result.clone()).map_err(|e| {

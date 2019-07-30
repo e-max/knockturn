@@ -196,7 +196,7 @@ pub fn wallet_jsonrpc(
                         })
                     }),
             ),
-            _ => Box::new(state.wallet.raw_request(req, false).map_err(|e| {
+            _ => Box::new(state.wallet.jsonrpc_request(req, false).map_err(|e| {
                 error!("Error while proxying request {}", e);
                 jsonrpc::ErrorData {
                     code: 32000,
@@ -261,7 +261,7 @@ pub fn pay_slate2(
             let fsm = state.fsm.clone();
             let req = req.clone();
             move |new_payment| {
-                wallet.raw_request(req, false).and_then(move |resp| {
+                wallet.jsonrpc_request(req, false).and_then(move |resp| {
                     let commit = slate.tx.output_commitments()[0].clone();
                     wallet
                         .get_tx(&slate.id.hyphenated().to_string())
