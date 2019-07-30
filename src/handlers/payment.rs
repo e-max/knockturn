@@ -180,7 +180,6 @@ pub fn wallet_jsonrpc(
                 ok(())
                     .and_then({
                         let params = req.params.clone();
-                        println!("\x1B[31;1m params\x1B[0m = {:?}", params);
                         move |_| {
                             if params.len() != 3 {
                                 return Err(jsonrpc::ErrorData::std(-32602));
@@ -190,7 +189,6 @@ pub fn wallet_jsonrpc(
                                     error!("Cannot parse slate: {}", e);
                                     jsonrpc::ErrorData::std(-32602)
                                 })?;
-                            println!("\x1B[31;1m OK\x1B[0m");
                             Ok(slate)
                         }
                     })
@@ -265,7 +263,6 @@ pub fn pay_slate2(
             move |new_payment| {
                 wallet.raw_request(req, false).and_then(move |resp| {
                     let commit = slate.tx.output_commitments()[0].clone();
-                    println!("\x1B[33;1m commit\x1B[0m = {:?}", commit);
                     wallet
                         .get_tx(&slate.id.hyphenated().to_string())
                         .and_then(move |wallet_tx| {
