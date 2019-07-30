@@ -4,7 +4,7 @@ use std::error;
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 pub static JSONRPC_VERSION: &str = "2.0";
 
@@ -77,7 +77,7 @@ impl fmt::Display for ErrorData {
 }
 
 /// A rpc call is represented by sending a Request object to a Server.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Request {
     /// A String specifying the version of the JSON-RPC protocol. MUST be exactly "2.0".
     pub jsonrpc: String,
@@ -98,6 +98,15 @@ pub struct Request {
 }
 
 impl Request {
+    pub fn new(method: &str, params: Vec<Value>) -> Self {
+        Request {
+            jsonrpc: JSONRPC_VERSION.into(),
+            method: method.to_owned(),
+            params: params,
+            id: json!(1),
+        }
+    }
+
     /// Prints out the value as JSON string.
     pub fn dump(&self) -> String {
         serde_json::to_string(self).expect("Should never failed")

@@ -165,13 +165,16 @@ pub fn wallet_jsonrpc(
     state: Data<AppState>,
 ) -> impl Future<Item = HttpResponse, Error = ()> {
     let (merchant_id, payment_id) = payment_data.into_inner();
+    let req_id = req.id.clone();
 
-    let res: Box<dyn Future<Item = serde_json::Value, Error = jsonrpc::ErrorData>> =
+    let res: Box<dyn Future<Item = jsonrpc::Response, Error = jsonrpc::ErrorData>> =
         match req.method.as_ref() {
             "check_version" => {
                 //For some reason wallet expect in result field type Result
                 let res: Result<APIVersion, ()> = Ok(check_version());
-                Box::new(ok(serde_json::to_value(res).unwrap()))
+                let mut resp = jsonrpc::Response::with_id(req_id.clone());
+                resp.result = serde_json::to_value(res).unwrap();
+                Box::new(ok(resp))
             }
             "receive_tx" => Box::new(
                 ok(())
@@ -192,33 +195,20 @@ pub fn wallet_jsonrpc(
                         }
                     })
                     .and_then(move |slate| {
-                        pay_slate(slate, merchant_id, payment_id, state)
-                            .and_then(|slate| {
-                                let res: Result<Slate, ()> = Ok(slate);
-                                serde_json::to_value(res).map_err(|e| Error::General(s!(e)))
-                            })
-                            .map_err(|e| {
-                                error!("Error in pay_slate {}", e);
-                                jsonrpc::ErrorData {
-                                    code: 32000,
-                                    message: format!("{}", e),
-                                    data: serde_json::Value::Null,
-                                }
-                            })
+                        pay_slate2(req, slate, merchant_id, payment_id, state).map_err(|e| {
+                            error!("Error in pay_slate {}", e);
+                            jsonrpc::ErrorData {
+                                code: 32000,
+                                message: format!("{}", e),
+                                data: serde_json::Value::Null,
+                            }
+                        })
                     }),
             ),
             _ => Box::new(err(jsonrpc::ErrorData::std(-32601))),
         };
-    res.and_then({
-        let req_id = req.id.clone();
-        |res| {
-            let mut resp = jsonrpc::Response::with_id(req_id);
-            resp.result = res;
-            Ok(resp)
-        }
-    })
-    .or_else({
-        let req_id = req.id.clone();
+    res.or_else({
+        let req_id = req_id.clone();
         |e| {
             error!("Got jsonrpc error {}", e);
             let mut resp = jsonrpc::Response::with_id(req_id);
@@ -250,6 +240,50 @@ impl Default for APIVersion {
 
 pub fn check_version() -> APIVersion {
     APIVersion::default()
+}
+
+pub fn pay_slate2(
+    req: jsonrpc::Request,
+    slate: Slate,
+    merchant_id: String,
+    payment_id: Uuid,
+    state: Data<AppState>,
+) -> impl Future<Item = jsonrpc::Response, Error = Error> {
+    let slate_amount = slate.amount;
+    Payment::get(payment_id, state.pool.clone())
+        .and_then(move |new_payment: NewPayment| {
+            let payment_amount = new_payment.grin_amount as u64;
+            if new_payment.is_invalid_amount(slate_amount) {
+                return Err(Error::WrongAmount(payment_amount, slate_amount));
+            }
+            Ok(new_payment)
+        })
+        .and_then({
+            let wallet = state.wallet.clone();
+            let fsm = state.fsm.clone();
+            let req = req.clone();
+            move |new_payment| {
+                wallet.raw_request(req, false).and_then(move |resp| {
+                    let commit = slate.tx.output_commitments()[0].clone();
+                    println!("\x1B[33;1m commit\x1B[0m = {:?}", commit);
+                    wallet
+                        .get_tx(&slate.id.hyphenated().to_string())
+                        .and_then(move |wallet_tx| {
+                            fsm.send(MakePayment {
+                                new_payment,
+                                wallet_tx,
+                                commit,
+                            })
+                            .from_err()
+                            .and_then(|db_response| {
+                                db_response?;
+                                Ok(())
+                            })
+                        })
+                        .and_then(|_| ok(resp))
+                })
+            }
+        })
 }
 
 pub fn pay_slate(

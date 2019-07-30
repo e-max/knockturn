@@ -1,10 +1,12 @@
 use crate::errors::Error;
+use crate::jsonrpc;
 use crate::ser;
 use actix_web::client::Client;
 use chrono::{DateTime, Utc};
 use futures::Future;
 use log::{debug, error};
 use serde::{Deserialize, Serialize};
+use serde_json;
 use serde_json::from_slice;
 use std::iter::Iterator;
 use std::str::from_utf8;
@@ -24,6 +26,8 @@ const SEND_URL: &'static str = "/v1/wallet/owner/issue_send_tx";
 const FINALIZE_URL: &'static str = "/v1/wallet/owner/finalize_tx";
 const CANCEL_TX_URL: &'static str = "/v1/wallet/owner/cancel_tx";
 const POST_TX_URL: &'static str = "/v1/wallet/owner/post_tx?fluff";
+const JSONRPC_FOREIGN_URL: &'static str = "v2/foreign";
+const JSONRPC_OWNER_URL: &'static str = "v2/owner";
 
 impl Wallet {
     pub fn new(url: &str, username: &str, password: &str) -> Self {
@@ -43,14 +47,24 @@ impl Wallet {
         Client::new()
     }
 
-    pub fn get_tx(&self, tx_id: &str) -> impl Future<Item = TxLogEntry, Error = Error> {
-        let tx_id = tx_id.to_owned();
-        let url = format!("{}/{}?tx_id={}&refresh", self.url, RETRIEVE_TXS_URL, tx_id);
-        debug!("Get transaction from wallet {}", url);
+    pub fn raw_request(
+        &self,
+        req: jsonrpc::Request,
+        owner: bool,
+    ) -> impl Future<Item = jsonrpc::Response, Error = Error> {
+        let url: String;
+
+        if (owner) {
+            url = format!("{}/{}", self.url, JSONRPC_OWNER_URL);
+        } else {
+            url = format!("{}/{}", self.url, JSONRPC_FOREIGN_URL);
+        }
+
+        debug!("Send raw jsonrpc request {}", url);
         self.client()
-            .get(&url) // <- Create request builder
+            .post(&url) // <- Create request builder
             .basic_auth(&self.username, Some(&self.password))
-            .send() // <- Send http request
+            .send_json(&req)
             .map_err(|e| Error::WalletAPIError(s!(e)))
             .and_then(|resp| {
                 if !resp.status().is_success() {
@@ -65,7 +79,7 @@ impl Wallet {
                 resp.body()
                     .map_err(|e| Error::WalletAPIError(s!(e)))
                     .and_then(move |bytes| {
-                        let txs: TxListResp = from_slice(&bytes).map_err(|e| {
+                        let resp: jsonrpc::Response = from_slice(&bytes).map_err(|e| {
                             error!(
                                 "Cannot decode json {:?}:\n with error {} ",
                                 from_utf8(&bytes),
@@ -73,22 +87,46 @@ impl Wallet {
                             );
                             Error::WalletAPIError(format!("Cannot decode json {}", e))
                         })?;
-                        if txs.txs.len() == 0 {
-                            return Err(Error::WalletAPIError(format!(
-                                "Transaction with slate_id {} not found",
-                                tx_id
-                            )));
-                        }
-                        if txs.txs.len() > 1 {
-                            return Err(Error::WalletAPIError(format!(
-                                "Wallet returned more than one transaction with slate_id {}",
-                                tx_id
-                            )));
-                        }
-                        let tx = txs.txs.into_iter().next().unwrap();
-                        Ok(tx)
+                        Ok(resp)
                     })
             })
+    }
+
+    pub fn get_tx(&self, tx_id: &str) -> impl Future<Item = TxLogEntry, Error = Error> {
+        debug!("Get transaction from wallet");
+        let tx_id = tx_id.to_owned();
+        let req = jsonrpc::Request::new(
+            "retrieve_txs",
+            vec![
+                serde_json::to_value(true).unwrap(),
+                serde_json::Value::Null,
+                serde_json::to_value(&tx_id).unwrap(),
+            ],
+        );
+        self.raw_request(req, true).and_then(move |mut resp| {
+            debug!("Response: {:?}", resp);
+            let res: Result<(bool, Vec<TxLogEntry>), String> =
+                serde_json::from_value(resp.result.clone()).map_err(|e| {
+                    error!("Cannot decode json {:?}:\n with error {} ", resp.result, e);
+                    Error::WalletAPIError(format!("Cannot decode json {}", e))
+                })?;
+
+            let (updated, txs) = res.map_err(|e| Error::General(s!(e)))?;
+            if txs.len() == 0 {
+                return Err(Error::WalletAPIError(format!(
+                    "Transaction with slate_id {} not found",
+                    tx_id
+                )));
+            }
+            if txs.len() > 1 {
+                return Err(Error::WalletAPIError(format!(
+                    "Wallet returned more than one transaction with slate_id {}",
+                    tx_id
+                )));
+            }
+            let tx = txs.into_iter().next().unwrap();
+            Ok(tx)
+        })
     }
 
     pub fn receive(&self, slate: &Slate) -> impl Future<Item = Slate, Error = Error> {
@@ -236,12 +274,6 @@ impl Wallet {
                     })
             })
     }
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct TxListResp {
-    pub updated: bool,
-    pub txs: Vec<TxLogEntry>,
 }
 
 /// Optional transaction information, recorded when an event happens
