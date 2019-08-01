@@ -4,7 +4,7 @@ use crate::ser;
 use actix_web::client::Client;
 use chrono::{DateTime, Utc};
 use futures::Future;
-use log::{debug, error};
+use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
 use serde_json;
 use serde_json::from_slice;
@@ -28,6 +28,57 @@ const CANCEL_TX_URL: &'static str = "/v1/wallet/owner/cancel_tx";
 const POST_TX_URL: &'static str = "/v1/wallet/owner/post_tx?fluff";
 const JSONRPC_FOREIGN_URL: &'static str = "v2/foreign";
 const JSONRPC_OWNER_URL: &'static str = "v2/owner";
+
+/// V2 Init / Send TX API Args
+#[derive(Clone, Serialize, Deserialize)]
+pub struct InitTxArgs {
+    /// The human readable account name from which to draw outputs
+    /// for the transaction, overriding whatever the active account is as set via the
+    /// [`set_active_account`](../grin_wallet_api/owner/struct.Owner.html#method.set_active_account) method.
+    pub src_acct_name: Option<String>,
+    #[serde(with = "ser::string_or_u64")]
+    /// The amount to send, in nanogrins. (`1 G = 1_000_000_000nG`)
+    pub amount: u64,
+    #[serde(with = "ser::string_or_u64")]
+    /// The minimum number of confirmations an output
+    /// should have in order to be included in the transaction.
+    pub minimum_confirmations: u64,
+    /// By default, the wallet selects as many inputs as possible in a
+    /// transaction, to reduce the Output set and the fees. The wallet will attempt to spend
+    /// include up to `max_outputs` in a transaction, however if this is not enough to cover
+    /// the whole amount, the wallet will include more outputs. This parameter should be considered
+    /// a soft limit.
+    pub max_outputs: u32,
+    /// The target number of change outputs to create in the transaction.
+    /// The actual number created will be `num_change_outputs` + whatever remainder is needed.
+    pub num_change_outputs: u32,
+    /// If `true`, attempt to use up as many outputs as
+    /// possible to create the transaction, up the 'soft limit' of `max_outputs`. This helps
+    /// to reduce the size of the UTXO set and the amount of data stored in the wallet, and
+    /// minimizes fees. This will generally result in many inputs and a large change output(s),
+    /// usually much larger than the amount being sent. If `false`, the transaction will include
+    /// as many outputs as are needed to meet the amount, (and no more) starting with the smallest
+    /// value outputs.
+    pub selection_strategy_is_use_all: bool,
+    /// An optional participant message to include alongside the sender's public
+    /// ParticipantData within the slate. This message will include a signature created with the
+    /// sender's private excess value, and will be publically verifiable. Note this message is for
+    /// the convenience of the participants during the exchange; it is not included in the final
+    /// transaction sent to the chain. The message will be truncated to 256 characters.
+    pub message: Option<String>,
+    /// Optionally set the output target slate version (acceptable
+    /// down to the minimum slate version compatible with the current. If `None` the slate
+    /// is generated with the latest version.
+    pub target_slate_version: Option<u16>,
+    /// If true, just return an estimate of the resulting slate, containing fees and amounts
+    /// locked without actually locking outputs or creating the transaction. Note if this is set to
+    /// 'true', the amount field in the slate will contain the total amount locked, not the provided
+    /// transaction amount
+    pub estimate_only: Option<bool>,
+    /// Sender arguments. If present, the underlying function will also attempt to send the
+    /// transaction to a destination and optionally finalize the result
+    pub send_args: Option<()>,
+}
 
 impl Wallet {
     pub fn new(url: &str, username: &str, password: &str) -> Self {
@@ -232,47 +283,29 @@ impl Wallet {
         &self,
         amount: u64,
         message: String,
-    ) -> impl Future<Item = Slate, Error = Error> {
+    ) -> impl Future<Item = jsonrpc::TypedResponse<Slate>, Error = Error> {
         let url = format!("{}/{}", self.url, SEND_URL);
+        info!("Try to create payout slate");
         debug!("Receive as {} {}: {}", self.username, self.password, url);
-        let payment = SendTx {
-            amount: amount,
+        let payment = InitTxArgs {
+            src_acct_name: None,
+            amount,
             minimum_confirmations: 10,
-            method: "file",
-            dest: "./gpp_always_pays.grinslate",
             max_outputs: 10,
             num_change_outputs: 1,
             selection_strategy_is_use_all: false,
             message: Some(message),
+            target_slate_version: None,
+            estimate_only: None,
+            send_args: None,
         };
-        self.client()
-            .post(&url)
-            .basic_auth(&self.username, Some(&self.password))
-            .send_json(&payment)
-            .map_err(|e| Error::WalletAPIError(s!(e)))
-            .and_then(|resp| {
-                if !resp.status().is_success() {
-                    Err(Error::WalletAPIError(format!("Error status: {:?}", resp)))
-                } else {
-                    Ok(resp)
-                }
-            })
-            .and_then(|mut resp| {
-                debug!("Response: {:?}", resp);
-                resp.body()
-                    .map_err(|e| Error::WalletAPIError(s!(e)))
-                    .and_then(move |bytes| {
-                        let slate_resp: Slate = from_slice(&bytes).map_err(|e| {
-                            error!(
-                                "Cannot decode json {:?}:\n with error {} ",
-                                from_utf8(&bytes),
-                                e
-                            );
-                            Error::WalletAPIError(format!("Cannot decode json {}", e))
-                        })?;
-                        Ok(slate_resp)
-                    })
-            })
+
+        let req =
+            jsonrpc::Request::new("init_send_tx", vec![serde_json::to_value(payment).unwrap()]);
+
+        self.jsonrpc_request(req, true)
+            .map_err(|e| Error::WalletAPIError(format!("Cannot create slate in wallet: {}", e)))
+            .map(|req| jsonrpc::TypedResponse::new(req))
     }
 }
 

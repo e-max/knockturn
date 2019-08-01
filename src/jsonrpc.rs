@@ -177,6 +177,12 @@ impl<T> TypedResponse<T>
 where
     T: DeserializeOwned,
 {
+    pub fn new(response: Response) -> Self {
+        TypedResponse {
+            response,
+            _priv: PhantomData,
+        }
+    }
     pub fn into_inner(self) -> Response {
         self.response
     }
