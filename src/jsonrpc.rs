@@ -1,8 +1,13 @@
 //! JSON-RPC 2.0 Specification
 //! See: https://www.jsonrpc.org/specification
+use crate::errors;
+use log::*;
 use std::error;
 use std::fmt;
+use std::marker::PhantomData;
+use std::ops::Deref;
 
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -137,6 +142,11 @@ pub struct Response {
     pub id: Value,
 }
 
+pub struct TypedResponse<T> {
+    pub response: Response,
+    _priv: PhantomData<T>,
+}
+
 impl Response {
     pub fn with_id(id: Value) -> Self {
         Response {
@@ -160,5 +170,34 @@ impl Default for Response {
             error: None,
             id: Value::Null,
         }
+    }
+}
+
+impl<T> TypedResponse<T>
+where
+    T: DeserializeOwned,
+{
+    pub fn into_inner(self) -> Response {
+        self.response
+    }
+    pub fn into_result(&self) -> Result<T, errors::Error> {
+        if let Some(e) = &self.response.error {
+            return Err(errors::Error::WalletAPIError(s!(e)));
+        }
+        serde_json::from_value(self.response.result.clone()).map_err(|e| {
+            error!(
+                "Cannot decode json {:?}:\n with error {} ",
+                self.response.result, e
+            );
+            errors::Error::WalletAPIError(format!("Cannot decode json {}", e))
+        })
+    }
+}
+
+impl<T> Deref for TypedResponse<T> {
+    type Target = Response;
+
+    fn deref(&self) -> &Self::Target {
+        &self.response
     }
 }
