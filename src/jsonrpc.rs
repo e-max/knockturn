@@ -190,13 +190,22 @@ where
         if let Some(e) = &self.response.error {
             return Err(errors::Error::WalletAPIError(s!(e)));
         }
-        serde_json::from_value(self.response.result.clone()).map_err(|e| {
-            error!(
-                "Cannot decode json {:?}:\n with error {} ",
-                self.response.result, e
-            );
-            errors::Error::WalletAPIError(format!("Cannot decode json {}", e))
-        })
+        serde_json::from_value::<Result<T, _>>(self.response.result.clone())
+            .map_err(|e| e.into())
+            .and_then(|res: Result<T, String>| match res {
+                Ok(r) => Ok(r),
+                Err(e) => Err(errors::Error::WalletAPIError(format!(
+                    "Wallet return an error {}",
+                    e
+                ))),
+            })
+            .map_err(|e| {
+                error!(
+                    "Cannot decode json {:?}:\n with error {} ",
+                    self.response.result, e
+                );
+                errors::Error::WalletAPIError(format!("Cannot decode json {}", e))
+            })
     }
 }
 
