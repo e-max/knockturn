@@ -317,8 +317,10 @@ impl Wallet {
                             resp.result.clone(),
                         ) {
                             Ok(val) => {
-                                let req =
-                                    jsonrpc::Request::new("tx_lock_outputs", vec![val.unwrap()]);
+                                let req = jsonrpc::Request::new(
+                                    "tx_lock_outputs",
+                                    vec![val.unwrap(), serde_json::json!(0)],
+                                );
                                 Either::A(
                                     newself
                                         .jsonrpc_request(req, true)
@@ -350,68 +352,20 @@ impl Wallet {
             })
     }
 }
-
 /// Optional transaction information, recorded when an event happens
 /// to add or remove funds from a wallet. One Transaction log entry
 /// maps to one or many outputs
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct TxLogEntry {
-    /// BIP32 account path used for creating this tx
-    pub parent_key_id: Identifier,
     /// Local id for this transaction (distinct from a slate transaction id)
     pub id: u32,
     /// Slate transaction this entry is associated with, if any
     pub tx_slate_id: Option<String>,
-    /// Transaction type (as above)
-    pub tx_type: TxLogEntryType,
-    /// Time this tx entry was created
-    /// #[serde(with = "tx_date_format")]
-    pub creation_ts: DateTime<Utc>,
-    /// Time this tx was confirmed (by this wallet)
-    /// #[serde(default, with = "opt_tx_date_format")]
-    pub confirmation_ts: Option<DateTime<Utc>>,
-    /// Whether the inputs+outputs involved in this transaction have been
-    /// confirmed (In all cases either all outputs involved in a tx should be
-    /// confirmed, or none should be; otherwise there's a deeper problem)
-    pub confirmed: bool,
-    /// number of inputs involved in TX
-    pub num_inputs: usize,
-    /// number of outputs involved in TX
-    pub num_outputs: usize,
-    /// Amount credited via this transaction
-    #[serde(with = "ser::string_or_u64")]
-    pub amount_credited: u64,
-    /// Amount debited via this transaction
-    #[serde(with = "ser::string_or_u64")]
-    pub amount_debited: u64,
     /// Fee
+    #[serde(with = "ser::opt_string_or_u64")]
     pub fee: Option<u64>,
     /// Message data, stored as json
     pub messages: Option<ParticipantMessages>,
-    /// Location of the store transaction, (reference or resending)
-    pub stored_tx: Option<String>,
-}
-
-pub type Identifier = String;
-
-/*
-#[derive(Clone, PartialEq, Eq, Ord, Hash, PartialOrd)]
-pub struct Identifier([u8; IDENTIFIER_SIZE]);
-*/
-
-/// Types of transactions that can be contained within a TXLog entry
-#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
-pub enum TxLogEntryType {
-    /// A coinbase transaction becomes confirmed
-    ConfirmedCoinbase,
-    /// Outputs created when a transaction is received
-    TxReceived,
-    /// Inputs locked + change outputs when a transaction is created
-    TxSent,
-    /// Received transaction that was rolled back by user
-    TxReceivedCancelled,
-    /// Sent transaction that was rolled back by user
-    TxSentCancelled,
 }
 
 /// Helper just to facilitate serialization
