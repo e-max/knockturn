@@ -247,20 +247,30 @@ impl Wallet {
             })
     }
     pub fn cancel_tx(&self, tx_slate_id: &str) -> impl Future<Item = (), Error = Error> {
-        let url = format!("{}/{}?tx_id={}", self.url, CANCEL_TX_URL, tx_slate_id);
-        debug!("Cancel transaction in wallet {}", url);
-        self.client()
-            .post(&url)
-            .basic_auth(&self.username, Some(&self.password))
-            .send()
-            .map_err(|e| Error::WalletAPIError(s!(e)))
-            .and_then(|resp| {
-                if !resp.status().is_success() {
-                    Err(Error::WalletAPIError(format!("Error status: {:?}", resp)))
-                } else {
-                    Ok(())
-                }
-            })
+        let tx_slate_id = tx_slate_id.to_owned();
+        let req = jsonrpc::Request::new(
+            "cancel_tx",
+            vec![
+                serde_json::Value::Null,
+                serde_json::to_value(&tx_slate_id).unwrap(),
+            ],
+        );
+        self.jsonrpc_request(req, true).and_then(move |mut resp| {
+            if let Some(err) = resp.error {
+                return Err(Error::WalletAPIError(format!(
+                    "Cannot cancel tx {}: {}",
+                    tx_slate_id, err
+                )));
+            }
+            let res = serde_json::from_value::<Result<(), String>>(resp.result)?;
+            if let Err(err) = res {
+                return Err(Error::WalletAPIError(format!(
+                    "Cannot cancel tx {}: {}",
+                    tx_slate_id, err
+                )));
+            }
+            Ok(())
+        })
     }
 
     pub fn post_tx(&self) -> impl Future<Item = (), Error = Error> {
