@@ -3,6 +3,7 @@ use crate::jsonrpc;
 use crate::ser;
 use actix_web::client::Client;
 use chrono::{DateTime, Utc};
+use futures::future::{err, ok, Either};
 use futures::Future;
 use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
@@ -303,9 +304,50 @@ impl Wallet {
         let req =
             jsonrpc::Request::new("init_send_tx", vec![serde_json::to_value(payment).unwrap()]);
 
+        let newself = self.clone();
         self.jsonrpc_request(req, true)
             .map_err(|e| Error::WalletAPIError(format!("Cannot create slate in wallet: {}", e)))
-            .map(|req| jsonrpc::TypedResponse::new(req))
+            .and_then(move |resp| {
+                if let Some(err) = resp.error.as_ref() {
+                    error!("Cannot create slate in wallet: {}", err);
+                    Either::A(ok(jsonrpc::TypedResponse::new(resp)))
+                } else {
+                    Either::B({
+                        match serde_json::from_value::<Result<serde_json::Value, String>>(
+                            resp.result.clone(),
+                        ) {
+                            Ok(val) => {
+                                let req =
+                                    jsonrpc::Request::new("tx_lock_outputs", vec![val.unwrap()]);
+                                Either::A(
+                                    newself
+                                        .jsonrpc_request(req, true)
+                                        .and_then(move |lock_resp| {
+                                            if let Some(err) = lock_resp.error {
+                                                error!("Cannot lock outputs in wallet: {}", err);
+                                                return Err(Error::WalletAPIError(format!(
+                                                    "Cannon lock outputs in wallet: {}",
+                                                    err
+                                                )));
+                                            }
+                                            Ok(jsonrpc::TypedResponse::new(resp))
+                                        })
+                                        .map_err(|e| {
+                                            Error::WalletAPIError(format!(
+                                                "Cannon lock outputs in wallet: {}",
+                                                e
+                                            ))
+                                        }),
+                                )
+                            }
+                            Err(e) => Either::B(err(Error::WalletAPIError(format!(
+                                "Cannon parse slate: {}",
+                                e
+                            )))),
+                        }
+                    })
+                }
+            })
     }
 }
 
