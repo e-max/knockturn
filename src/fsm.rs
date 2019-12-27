@@ -15,7 +15,8 @@ use chrono::{Duration, Utc};
 use derive_deref::Deref;
 use diesel::pg::PgConnection;
 use diesel::{self, prelude::*};
-use futures::future::{ok, Either, Future};
+use std::future::Future;
+use futures::future::{ok, Either};
 use log::{debug, error};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -47,10 +48,10 @@ where
 {
     const STATUS: TransactionStatus;
     fn new(tx: Transaction) -> Self;
-    fn get(tx_id: Uuid, pool: Pool) -> Box<dyn Future<Item = Self, Error = Error>> {
+    fn get(tx_id: Uuid, pool: Pool) -> Box<dyn Future<Output = Result<Self, Error>>> {
         Box::new(get_payment(tx_id, Self::STATUS, pool).map(Self::new))
     }
-    fn list(pool: Pool) -> Box<dyn Future<Item = Vec<Self>, Error = Error>> {
+    fn list(pool: Pool) -> Box<dyn Future<Output = Result<Vec<Self>, Error>>> {
         Box::new(
             get_payments(Self::STATUS, pool).map(|list| list.into_iter().map(Self::new).collect()),
         )
@@ -189,12 +190,12 @@ impl Handler<CreatePayment> for Fsm {
     }
 }
 
-fn get_payment(
+async fn get_payment(
     tx_id: Uuid,
     required_status: TransactionStatus,
     pool: Pool,
-) -> impl Future<Item = Transaction, Error = Error> {
-    block::<_, _, Error>(move || {
+) -> Result<Transaction, Error> {
+     block::<_, _, Error>(move || {
         use crate::schema::transactions::dsl::*;
         let conn: &PgConnection = &pool.get().unwrap();
         transactions
@@ -208,28 +209,27 @@ fn get_payment(
                 }
                 Ok(tx)
             })
-    })
-    .from_err()
+    }).await.map_err(|e| e.into())
 }
 
-pub fn get_unreported_confirmed_payments(
+pub async fn get_unreported_confirmed_payments(
     pool: Pool,
-) -> impl Future<Item = Vec<ConfirmedPayment>, Error = Error> {
-    get_unreported_payments(TransactionStatus::Confirmed, pool)
+) -> Result<Vec<ConfirmedPayment>, Error> {
+    get_unreported_payments(TransactionStatus::Confirmed, pool).await
         .map(|list| list.into_iter().map(ConfirmedPayment).collect())
 }
 
-pub fn get_unreported_rejected_payments(
+pub async fn get_unreported_rejected_payments(
     pool: Pool,
-) -> impl Future<Item = Vec<RejectedPayment>, Error = Error> {
-    get_unreported_payments(TransactionStatus::Confirmed, pool)
+) -> Result<Vec<RejectedPayment>, Error> {
+    get_unreported_payments(TransactionStatus::Confirmed, pool).await
         .map(|list| list.into_iter().map(RejectedPayment).collect())
 }
 
-fn get_unreported_payments(
+async fn get_unreported_payments(
     tx_status: TransactionStatus,
     pool: Pool,
-) -> impl Future<Item = Vec<Transaction>, Error = Error> {
+) -> Result<Vec<Transaction>, Error> {
     block::<_, _, Error>(move || {
         use crate::schema::transactions::dsl::*;
         let conn: &PgConnection = &pool.get().unwrap();
@@ -246,13 +246,14 @@ fn get_unreported_payments(
             .load::<Transaction>(conn)
             .map_err(|e| e.into())
     })
-    .from_err()
+    .await
+    .map_err(|e| e.into())
 }
 
-fn get_payments(
+async fn get_payments(
     tx_status: TransactionStatus,
     pool: Pool,
-) -> impl Future<Item = Vec<Transaction>, Error = Error> {
+) -> Result<Vec<Transaction>, Error> {
     block::<_, _, Error>(move || {
         use crate::schema::transactions::dsl::*;
         let conn: &PgConnection = &pool.get().unwrap();
@@ -262,7 +263,7 @@ fn get_payments(
             .load::<Transaction>(conn)
             .map_err(|e| e.into())
     })
-    .from_err()
+    .await.map_err(|e| e.into())
 }
 
 impl Payment for NewPayment {
@@ -413,11 +414,11 @@ impl Handler<ConfirmPayment> for Fsm {
     }
 }
 
-fn run_callback(
+async fn run_callback(
     callback_url: &str,
     token: &str,
     transaction: &Transaction,
-) -> impl Future<Item = (), Error = Error> {
+) -> Result<(), Error> {
     let confirmation = Confirmation {
         id: transaction.id.clone(),
         external_id: transaction.external_id.clone(),
@@ -428,29 +429,26 @@ fn run_callback(
         confirmations: transaction.confirmations.clone(),
         token: token.to_owned(),
     };
-    Client::default()
+    let resp = Client::default()
         .post(callback_url)
         .send_json(&confirmation)
+        .await
         .map_err({
             let callback_url = callback_url.to_owned();
             move |e| Error::MerchantCallbackError {
                 callback_url: callback_url,
                 error: s!(e),
             }
+        })?;
+
+    if resp.status().is_success() {
+        Ok(())
+    } else {
+        Err(Error::MerchantCallbackError {
+            callback_url: callback_url.to_owned(),
+            error: s!("aaa"),
         })
-        .and_then({
-            let callback_url = callback_url.to_owned();
-            |resp| {
-                if resp.status().is_success() {
-                    Ok(())
-                } else {
-                    Err(Error::MerchantCallbackError {
-                        callback_url: callback_url,
-                        error: s!("aaa"),
-                    })
-                }
-            }
-        })
+    }
 }
 
 /*
@@ -549,13 +547,14 @@ impl Handler<RejectPayment<PendingPayment>> for Fsm {
     }
 }
 
-fn reject_transaction(pool: Pool, id: &Uuid) -> impl Future<Item = Transaction, Error = Error> {
+async fn reject_transaction(pool: Pool, id: &Uuid) -> Result<Transaction, Error> {
     let id = id.clone();
     block::<_, _, Error>(move || {
         let conn: &PgConnection = &pool.get().unwrap();
         update_transaction_status(id, TransactionStatus::Rejected, conn)
     })
-    .from_err()
+    .await
+    .map_err(|e| e.into())
 }
 
 impl Handler<ReportPayment<ConfirmedPayment>> for Fsm {
@@ -621,50 +620,47 @@ impl Handler<ReportPayment<RejectedPayment>> for Fsm {
     }
 }
 
-fn report_transaction(
+async fn report_transaction(
     db: Addr<DbExecutor>,
     transaction: Transaction,
-) -> impl Future<Item = (), Error = Error> {
+) -> Result<(), Error> {
     debug!("Try to report transaction {}", transaction.id);
-    db.send(GetMerchant {
+
+    let merchant = db.send(GetMerchant {
         id: transaction.merchant_id.clone(),
-    })
-    .from_err()
-    .and_then(|res| {
-        let merchant = res?;
-        Ok(merchant)
-    })
-    .and_then(move |merchant| {
-        if let Some(callback_url) = merchant.callback_url.clone() {
-            debug!("Run callback for merchant {}", merchant.email);
-            let res = run_callback(&callback_url, &merchant.token, &transaction).or_else({
-                let db = db.clone();
-                let report_attempts = transaction.report_attempts.clone();
-                let transaction_id = transaction.id.clone();
-                move |callback_err| {
-                    // try call ReportAttempt but ignore errors and return
-                    // error from callback
-                    let next_attempt = Utc::now().naive_utc()
-                        + Duration::seconds(10 * (report_attempts + 1).pow(2) as i64);
-                    db.send(ReportAttempt {
-                        transaction_id: transaction_id,
-                        next_attempt: Some(next_attempt),
-                    })
-                    .map_err(|e| Error::General(s!(e)))
-                    .and_then(|db_response| {
-                        db_response?;
-                        Ok(())
-                    })
-                    .or_else(|e| {
-                        error!("Get error in ReportAttempt {}", e);
-                        Ok(())
-                    })
-                    .and_then(|_| Err(callback_err))
-                }
+    }).await??;
+
+
+    if let Some(callback_url) = merchant.callback_url.clone() {
+        debug!("Run callback for merchant {}", merchant.email);
+
+        if let Err(callback_err) = run_callback(&callback_url, &merchant.token, &transaction).await {
+
+            let report_attempts = transaction.report_attempts.clone();
+            let transaction_id = transaction.id.clone();
+            let next_attempt = Utc::now().naive_utc()
+                + Duration::seconds(10 * (report_attempts + 1).pow(2) as i64);
+            let dbres = db.send(ReportAttempt {
+                transaction_id: transaction_id,
+                next_attempt: Some(next_attempt),
+            })
+            .await
+            .map_err(|e| Error::General(s!(e)))
+            .and_then(|db_response| {
+                db_response?;
+                Ok(())
             });
-            Either::A(res)
-        } else {
-            Either::B(ok(()))
+
+            if let Err(e) = dbres {
+                error!("Get error in ReportAttempt {}", e);
+            };
+
+
+            return Err(callback_err)
         }
-    })
+
+    };
+
+    Ok(())
+
 }
