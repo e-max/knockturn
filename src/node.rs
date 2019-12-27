@@ -1,6 +1,5 @@
 use crate::errors::Error;
 use actix_web::client::{Client, Connector};
-use futures::Future;
 use log::{debug, error};
 use serde::Deserialize;
 use serde_json::from_slice;
@@ -32,74 +31,69 @@ impl Node {
         }
     }
 
-    pub fn blocks(&self, start: i64, end: i64) -> impl Future<Item = Vec<Block>, Error = Error> {
+    pub async fn blocks(&self, start: i64, end: i64) -> Result<Vec<Block>, Error> {
         let url = format!(
             "{}/{}?start_height={}&end_height={}",
             self.url, CHAIN_OUTPUTS_BY_HEIGHT, start, end
         );
         debug!("Get latest blocks from node {}", url);
-        self.client
+        let resp = self.client
             .get(&url) // <- Create request builder
             .basic_auth(&self.username, Some(&self.password))
             .send() // <- Send http request
-            .map_err(|e| Error::NodeAPIError(s!(e)))
-            .and_then(|resp| {
-                if !resp.status().is_success() {
-                    Err(Error::NodeAPIError(format!("Error status: {:?}", resp)))
-                } else {
-                    Ok(resp)
-                }
-            })
-            .and_then(|mut resp| {
-                // <- server http response
-                resp.body()
+            .await
+            .map_err(|e| Error::NodeAPIError(s!(e)))?;
+
+        if !resp.status().is_success() {
+            return Err(Error::NodeAPIError(format!("Error status: {:?}", resp)))
+        } 
+
+        let bytes = resp.body()
                     .limit(10 * 1024 * 1024)
-                    .map_err(|e| Error::NodeAPIError(s!(e)))
-                    .and_then(move |bytes| {
-                        let blocks: Vec<Block> = from_slice(&bytes).map_err(|e| {
-                            error!(
-                                "Cannot decode json {:?}:\n with error {} ",
-                                from_utf8(&bytes),
-                                e
-                            );
-                            Error::NodeAPIError(format!("Cannot decode json {}", e))
-                        })?;
-                        Ok(blocks)
-                    })
-            })
+                    .await
+                    .map_err(|e| Error::NodeAPIError(s!(e)))?;
+
+        let blocks: Vec<Block> = from_slice(&bytes).map_err(|e| {
+            error!(
+                "Cannot decode json {:?}:\n with error {} ",
+                from_utf8(&bytes),
+                e
+            );
+            Error::NodeAPIError(format!("Cannot decode json {}", e))
+        })?;
+        Ok(blocks)
     }
-    pub fn current_height(&self) -> impl Future<Item = i64, Error = Error> {
+
+    pub async fn current_height(&self) -> Result<i64, Error> {
         let url = format!("{}/{}", self.url, GET_STATUS_URL);
         debug!("Get current height from the node {}", url);
-        self.client
+
+        let resp  = self.client
             .get(&url) // <- Create request builder
             .basic_auth(&self.username, Some(&self.password))
             .send() // <- Send http request
-            .map_err(|e| Error::NodeAPIError(s!(e)))
-            .and_then(|resp| {
-                if !resp.status().is_success() {
-                    Err(Error::NodeAPIError(format!("Error status: {:?}", resp)))
-                } else {
-                    Ok(resp)
-                }
-            })
-            .and_then(|mut resp| {
-                // <- server http response
-                resp.body()
-                    .limit(10 * 1024 * 1024)
-                    .map_err(|e| Error::NodeAPIError(s!(e)))
-                    .and_then(move |bytes| {
-                        let status: Status = from_slice(&bytes).map_err(|e| {
-                            error!(
-                                "Cannot decode json {:?}:\n with error {} ",
-                                from_utf8(&bytes),
-                                e
-                            );
-                            Error::NodeAPIError(format!("Cannot decode json {}", e))
-                        })?;
-                        Ok(status.tip.height)
-                    })
-            })
+            .await
+            .map_err(|e| Error::NodeAPIError(s!(e)))?;
+
+        if !resp.status().is_success() {
+            return  Err(Error::NodeAPIError(format!("Error status: {:?}", resp)))
+        }
+
+        // <- server http response
+        let bytes = resp.body()
+            .limit(10 * 1024 * 1024)
+            .await
+            .map_err(|e| Error::NodeAPIError(s!(e)))?;
+
+        let status: Status = from_slice(&bytes).map_err(|e| {
+            error!(
+                "Cannot decode json {:?}:\n with error {} ",
+                from_utf8(&bytes),
+                e
+            );
+            Error::NodeAPIError(format!("Cannot decode json {}", e))
+        })?;
+        Ok(status.tip.height)
     }
 }
 
