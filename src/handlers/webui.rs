@@ -13,7 +13,6 @@ use actix_web::{HttpRequest, HttpResponse};
 use askama::Template;
 use diesel::pg::PgConnection;
 use diesel::{self, prelude::*};
-use futures::future::Future;
 use serde::Deserialize;
 
 #[derive(Template)]
@@ -26,12 +25,9 @@ struct IndexTemplate<'a> {
     current_height: i64,
 }
 
-pub fn index(
-    merchant: User<Merchant>,
-    data: Data<AppState>,
-) -> impl Future<Item = HttpResponse, Error = Error> {
+pub async fn index(merchant: User<Merchant>, data: Data<AppState>) -> Result<HttpResponse, Error> {
     let merchant = merchant.into_inner();
-    block::<_, _, Error>({
+    let html = block::<_, _, Error>({
         let merch_id = merchant.id.clone();
         let pool = data.pool.clone();
         move || {
@@ -75,8 +71,8 @@ pub fn index(
             .map_err(|e| Error::from(e))
         }
     })
-    .from_err()
-    .and_then(move |html| Ok(HttpResponse::Ok().content_type("text/html").body(html)))
+    .await?;
+    Ok(HttpResponse::Ok().content_type("text/html").body(html))
 }
 
 #[derive(Debug, Deserialize)]
@@ -84,36 +80,35 @@ pub struct LoginRequest {
     pub login: String,
     pub password: String,
 }
-pub fn login(
+pub async fn login(
     data: Data<AppState>,
     login_form: Form<LoginRequest>,
     session: Session,
-) -> impl Future<Item = HttpResponse, Error = Error> {
-    data.db
+) -> Result<HttpResponse, Error> {
+    let merchant = data
+        .db
         .send(GetMerchant {
             id: login_form.login.clone(),
         })
-        .from_err()
-        .and_then(move |db_response| {
-            let merchant = db_response?;
-            match bcrypt::verify(&login_form.password, &merchant.password) {
-                Ok(res) => {
-                    if res {
-                        session.set("merchant", merchant.id)?;
-                        if merchant.confirmed_2fa {
-                            Ok(HttpResponse::Found().header("location", "/2fa").finish())
-                        } else {
-                            Ok(HttpResponse::Found()
-                                .header("location", "/set_2fa")
-                                .finish())
-                        }
-                    } else {
-                        Ok(HttpResponse::Found().header("location", "/login").finish())
-                    }
+        .await??;
+
+    match bcrypt::verify(&login_form.password, &merchant.password) {
+        Ok(res) => {
+            if res {
+                session.set("merchant", merchant.id)?;
+                if merchant.confirmed_2fa {
+                    Ok(HttpResponse::Found().header("location", "/2fa").finish())
+                } else {
+                    Ok(HttpResponse::Found()
+                        .header("location", "/set_2fa")
+                        .finish())
                 }
-                Err(_) => Ok(HttpResponse::Found().header("location", "/login").finish()),
+            } else {
+                Ok(HttpResponse::Found().header("location", "/login").finish())
             }
-        })
+        }
+        Err(_) => Ok(HttpResponse::Found().header("location", "/login").finish()),
+    }
 }
 
 #[derive(Template)]
