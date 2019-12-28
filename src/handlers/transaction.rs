@@ -11,7 +11,6 @@ use actix_web::HttpResponse;
 use askama::Template;
 use diesel::pg::PgConnection;
 use diesel::{self, prelude::*};
-use futures::future::Future;
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -51,14 +50,14 @@ impl TxType {
     }
 }
 
-pub fn get_transactions(
+pub async fn get_transactions(
     merchant: User<Merchant>,
     data: Data<AppState>,
     paginate: Paginate,
     info: Query<Info>,
-) -> impl Future<Item = HttpResponse, Error = Error> {
+) -> Result<HttpResponse, Error> {
     let merchant = merchant.into_inner();
-    block::<_, _, Error>({
+    let html = block::<_, _, Error>({
         let merch_id = merchant.id.clone();
         let pool = data.pool.clone();
         let paginate = paginate.clone();
@@ -147,8 +146,8 @@ pub fn get_transactions(
             Ok(html)
         }
     })
-    .from_err()
-    .and_then(move |html| Ok(HttpResponse::Ok().content_type("text/html").body(html)))
+    .await?;
+    Ok(HttpResponse::Ok().content_type("text/html").body(html))
 }
 
 #[derive(Template)]
@@ -158,13 +157,13 @@ struct TransactionTemplate {
     current_height: i64,
 }
 
-pub fn get_transaction(
+pub async fn get_transaction(
     merchant: User<Merchant>,
     data: Data<AppState>,
     transaction_id: Path<Uuid>,
-) -> impl Future<Item = HttpResponse, Error = Error> {
+) -> Result<HttpResponse, Error> {
     let merchant = merchant.into_inner();
-    block::<_, _, Error>({
+    let html = block::<_, _, Error>({
         let merch_id = merchant.id.clone();
         let pool = data.pool.clone();
         let transaction_id = transaction_id.clone();
@@ -191,8 +190,8 @@ pub fn get_transaction(
             Ok(html)
         }
     })
-    .from_err()
-    .and_then(move |html| Ok(HttpResponse::Ok().content_type("text/html").body(html)))
+    .await?;
+    Ok(HttpResponse::Ok().content_type("text/html").body(html))
 }
 
 #[derive(Template)]
@@ -201,13 +200,13 @@ pub struct StatusHistoryTemplate {
     pub history: Vec<StatusChange>,
 }
 
-pub fn get_transaction_status_changes(
+pub async fn get_transaction_status_changes(
     merchant: User<Merchant>,
     transaction_id: Path<Uuid>,
     data: Data<AppState>,
-) -> impl Future<Item = HttpResponse, Error = Error> {
+) -> Result<HttpResponse, Error> {
     let merchant = merchant.into_inner();
-    block::<_, _, Error>({
+    let history = block::<_, _, Error>({
         let merch_id = merchant.id.clone();
         let pool = data.pool.clone();
         let tx_id = transaction_id.clone();
@@ -230,44 +229,34 @@ pub fn get_transaction_status_changes(
             Ok(history)
         }
     })
-    .from_err()
-    .and_then(move |history| {
-        let html = StatusHistoryTemplate { history }
-            .render()
-            .map_err(|e| Error::from(e))?;
-        Ok(HttpResponse::Ok().content_type("text/html").body(html))
-    })
-
-    //.and_then(move |history| Ok(HttpResponse::Ok().json(history)))
+    .await?;
+    let html = StatusHistoryTemplate { history }
+        .render()
+        .map_err(|e| Error::from(e))?;
+    Ok(HttpResponse::Ok().content_type("text/html").body(html))
 }
 
-pub fn manually_refunded(
+pub async fn manually_refunded(
     merchant: User<Merchant>,
     data: Data<AppState>,
     transaction_id: Path<Uuid>,
-) -> impl Future<Item = HttpResponse, Error = Error> {
+) -> Result<HttpResponse, Error> {
     let merchant_id = merchant.into_inner().id;
     let fsm = data.fsm.clone();
-    Payment::get(transaction_id.clone(), data.pool.clone())
-        .and_then(move |payment: RefundPayment| {
-            fsm.send(ManuallyRefundPayment {
-                payment,
-                merchant_id,
-            })
-            .from_err()
-            .and_then(|db_response| {
-                db_response?;
-                Ok(())
-            })
-        })
-        .from_err()
-        .and_then(move |_| {
-            Ok(HttpResponse::Found()
-                .header(
-                    http::header::LOCATION,
-                    format!("/transactions/{}", transaction_id),
-                )
-                .finish()
-                .into_body())
-        })
+
+    let payment: RefundPayment = Payment::get(transaction_id.clone(), data.pool.clone()).await?;
+
+    fsm.send(ManuallyRefundPayment {
+        payment,
+        merchant_id,
+    })
+    .await??;
+
+    Ok(HttpResponse::Found()
+        .header(
+            http::header::LOCATION,
+            format!("/transactions/{}", transaction_id),
+        )
+        .finish()
+        .into_body())
 }
