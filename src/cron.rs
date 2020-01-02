@@ -12,12 +12,14 @@ use actix::prelude::*;
 use actix_web::web::block;
 use diesel::pg::PgConnection;
 use diesel::{self, prelude::*};
-use futures::future::{join_all, Future};
+use futures::future::{join_all, Future, FutureExt, TryFutureExt};
+
 use log::*;
 use std::collections::HashMap;
 
 const REQUEST_BLOCKS_FROM_NODE: i64 = 10;
 
+#[derive(Clone)]
 pub struct Cron {
     db: Addr<DbExecutor>,
     node: Node,
@@ -38,7 +40,15 @@ impl Actor for Cron {
             },
         );
         ctx.run_interval(std::time::Duration::new(5, 0), reject_expired_payments);
-        ctx.run_interval(std::time::Duration::new(5, 0), process_pending_payments);
+        ctx.run_interval(
+            std::time::Duration::new(5, 0),
+            |cron: &mut Cron, _: &mut Context<Cron>| {
+                actix::spawn(
+                    process_pending_payments2(cron.pool.clone(), cron.fsm.clone()).map(|_| ()),
+                );
+            },
+        );
+
         ctx.run_interval(
             std::time::Duration::new(5, 0),
             process_unreported_confirmed_payments,
@@ -70,17 +80,54 @@ impl Cron {
 
 fn reject_expired_payments(cron: &mut Cron, _: &mut Context<Cron>) {
     debug!("run process_expired_payments");
-    let res = cron
-        .db
-        .send(RejectExpiredPayments)
-        .map_err(|e| Error::from(e))
-        .and_then(|db_response| {
-            db_response?;
-            Ok(())
-        });
-    actix::spawn(res.map_err(|e| error!("Got an error in rejecting exprired payments {}", e)));
+
+    let db = cron.db.clone();
+
+    let fut = async move {
+        db.send(RejectExpiredPayments)
+            .await
+            .map_err(|e| Error::from(e))
+            .and_then(|db_response| {
+                db_response?;
+                Ok(())
+            })
+            .map_err(|e| error!("Got an error in rejecting exprired payments {}", e));
+    };
+
+    actix::spawn(fut);
 }
 
+async fn process_pending_payments2(pool: Pool, fsm: Addr<Fsm>) -> Result<(), Error> {
+    debug!("run process_pending_payments");
+    let payments: Vec<PendingPayment> = Payment::list(pool).await?;
+    for payment in payments {
+        if payment.is_expired() {
+            debug!("payment {} expired: try to reject it", payment.id);
+            let res: Result<(), Error> = fsm
+                .send(RejectPayment {
+                    payment: payment.clone(),
+                })
+                .await
+                .map_err(|e| Error::General(s!(e)))
+                .and_then(|db_response| {
+                    db_response?;
+                    Ok(())
+                })
+                .or_else(move |e| {
+                    error!("Cannot reject payment {}: {}", payment.id, e);
+                    Ok(())
+                });
+            res?;
+        }
+    }
+    Ok(())
+}
+
+fn process_pending_payments(cron: &mut Cron, _: &mut Context<Cron>) {
+    actix::spawn(process_pending_payments2(cron.pool.clone(), cron.fsm.clone()).map(|_| ()));
+}
+
+/*
 fn process_pending_payments(cron: &mut Cron, _: &mut Context<Cron>) {
     debug!("run process_pending_payments");
     let fsm = cron.fsm.clone();
@@ -110,6 +157,7 @@ fn process_pending_payments(cron: &mut Cron, _: &mut Context<Cron>) {
     });
     actix::spawn(res.map_err(|e| error!("Got an error in processing penging payments {}", e)));
 }
+*/
 
 fn process_unreported_confirmed_payments(cron: &mut Cron, _: &mut Context<Cron>) {
     let res = get_unreported_confirmed_payments(cron.pool.clone()).and_then({
