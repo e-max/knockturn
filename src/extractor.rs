@@ -90,6 +90,7 @@ impl FromRequest for Session<Merchant> {
     type Future = Pin<Box<dyn Future<Output = Result<Self, Self::Error>>>>;
 
     fn from_request(req: &HttpRequest, _: &mut dev::Payload) -> Self::Future {
+        let req = req.clone();
         let mut tmp;
         let cfg = if let Some(cfg) = req.app_data::<SessionConfig>() {
             cfg
@@ -97,26 +98,34 @@ impl FromRequest for Session<Merchant> {
             tmp = SessionConfig::default();
             &tmp
         };
-        let session = match ActixSession::extract(req) {
-            Ok(v) => v,
-            _ => return Box::new(err(Error::NotAuthorizedInUI)),
-        };
-        let merchant_id = match session.get::<String>(&cfg.0) {
-            Ok(Some(v)) => v,
-            _ => return Box::new(err(Error::NotAuthorizedInUI)),
+
+        let res = async {
+            let r: Result<_, Error> = ActixSession::extract(&req).await.map_err(|e| e.into());
+
+            let res2: Result<Session<Merchant>, Error> = match r {
+                Ok(session) => {
+                    let merchant_id = match session.get::<String>(&cfg.0) {
+                        Ok(Some(v)) => v,
+                        _ => return Err(Error::NotAuthorizedInUI),
+                    };
+                    let data = req.app_data::<AppState>().unwrap();
+                    data.db
+                        .send(GetMerchant { id: merchant_id })
+                        .await
+                        .map_err(|e| e.into())
+                        .and_then(move |db_response| match db_response {
+                            Ok(m) => Ok(Session(m)),
+                            Err(_) => Err(Error::NotAuthorizedInUI),
+                        });
+
+                    Err(Error::NotAuthorized)
+                }
+                Err(e) => Err(e),
+            };
+            res2
         };
 
-        let data = req.app_data::<AppState>().unwrap();
-
-        Box::new(
-            data.db
-                .send(GetMerchant { id: merchant_id })
-                .from_err()
-                .and_then(move |db_response| match db_response {
-                    Ok(m) => ok(Session(m)),
-                    Err(_) => err(Error::NotAuthorizedInUI),
-                }),
-        )
+        Box::pin(res)
     }
 }
 
