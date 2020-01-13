@@ -10,10 +10,12 @@ use actix_web::{FromRequest, HttpRequest};
 use actix_web_httpauth::extractors::basic;
 use bytes::BytesMut;
 use derive_deref::Deref;
-use futures::future::{err, ok, Future};
+use futures::future::{err, ok};
+use futures::future::{Future, FutureExt, TryFutureExt};
 use futures::stream::Stream;
 use serde::de::DeserializeOwned;
 use std::default::Default;
+use std::pin::Pin;
 
 #[derive(Debug, Deref, Clone)]
 pub struct BasicAuth<T>(pub T);
@@ -28,32 +30,39 @@ impl Default for BasicAuthConfig {
 impl FromRequest for BasicAuth<Merchant> {
     type Config = BasicAuthConfig;
     type Error = Error;
-    type Future = Box<dyn Future<Item = Self, Error = Self::Error>>;
+    type Future = Pin<Box<dyn Future<Output = Result<Self, Self::Error>> + 'static>>;
 
     fn from_request(req: &HttpRequest, _: &mut dev::Payload) -> Self::Future {
-        let bauth = match basic::BasicAuth::extract(req) {
-            Ok(v) => v,
-            _ => return Box::new(err(Error::NotAuthorized)),
+        let req = req.clone();
+        let res = async {
+            match basic::BasicAuth::extract(&req).await {
+                Ok(bauth) => {
+                    let data = req.app_data::<AppState>().unwrap();
+                    let username = bauth.user_id().to_string();
+                    let password = bauth.password().map(|p| p.to_string()).unwrap_or(s!(""));
+                    let resp: Result<_, Error> = data
+                        .db
+                        .send(GetMerchant { id: username })
+                        .await
+                        .map_err(|e| e.into())
+                        .and_then(move |db_response| {
+                            let merchant = match db_response {
+                                Ok(m) => m,
+                                Err(_) => return Err(Error::NotAuthorized),
+                            };
+                            if merchant.token != password {
+                                Err(Error::NotAuthorized)
+                            } else {
+                                Ok(BasicAuth(merchant))
+                            }
+                        });
+                    resp
+                }
+                Err(e) => Err(Error::NotAuthorized),
+            }
         };
-        let data = req.app_data::<AppState>().unwrap();
-        let username = bauth.user_id().to_string();
-        let password = bauth.password().map(|p| p.to_string()).unwrap_or(s!(""));
-        Box::new(
-            data.db
-                .send(GetMerchant { id: username })
-                .from_err()
-                .and_then(move |db_response| {
-                    let merchant = match db_response {
-                        Ok(m) => m,
-                        Err(_) => return err(Error::NotAuthorized),
-                    };
-                    if merchant.token != password {
-                        err(Error::NotAuthorized)
-                    } else {
-                        ok(BasicAuth(merchant))
-                    }
-                }),
-        )
+
+        Box::pin(res)
     }
 }
 
@@ -78,7 +87,7 @@ impl Default for SessionConfig {
 impl FromRequest for Session<Merchant> {
     type Config = SessionConfig;
     type Error = Error;
-    type Future = Box<dyn Future<Item = Self, Error = Self::Error>>;
+    type Future = Pin<Box<dyn Future<Output = Result<Self, Self::Error>>>>;
 
     fn from_request(req: &HttpRequest, _: &mut dev::Payload) -> Self::Future {
         let mut tmp;
@@ -132,7 +141,7 @@ impl Default for IdentityConfig {
 impl FromRequest for User<Merchant> {
     type Config = IdentityConfig;
     type Error = Error;
-    type Future = Box<dyn Future<Item = Self, Error = Self::Error> + 'static>;
+    type Future = Pin<Box<dyn Future<Output = Result<Self, Self::Error>>>>;
 
     fn from_request(req: &HttpRequest, _: &mut dev::Payload) -> Self::Future {
         let id = match Identity::extract(req) {
@@ -183,7 +192,7 @@ where
 {
     type Config = SimpleJsonConfig;
     type Error = Error;
-    type Future = Box<dyn Future<Item = Self, Error = Self::Error>>;
+    type Future = Pin<Box<dyn Future<Output = Result<Self, Self::Error>>>>;
 
     fn from_request(_: &HttpRequest, payload: &mut dev::Payload) -> Self::Future {
         Box::new(
@@ -212,7 +221,7 @@ pub struct JsonRPCConfig {}
 impl FromRequest for jsonrpc::Request {
     type Config = JsonRPCConfig;
     type Error = Error;
-    type Future = Box<dyn Future<Item = Self, Error = Self::Error>>;
+    type Future = Pin<Box<dyn Future<Output = Result<Self, Self::Error>>>>;
 
     fn from_request(_: &HttpRequest, payload: &mut dev::Payload) -> Self::Future {
         Box::new(
