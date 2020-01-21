@@ -12,7 +12,7 @@ use bytes::BytesMut;
 use derive_deref::Deref;
 use futures::future::{err, ok};
 use futures::future::{Future, FutureExt, TryFutureExt};
-use futures::stream::Stream;
+use futures::stream::{Stream, StreamExt};
 use serde::de::DeserializeOwned;
 use std::default::Default;
 use std::pin::Pin;
@@ -116,9 +116,7 @@ impl FromRequest for Session<Merchant> {
                         .and_then(move |db_response| match db_response {
                             Ok(m) => Ok(Session(m)),
                             Err(_) => Err(Error::NotAuthorizedInUI),
-                        });
-
-                    Err(Error::NotAuthorized)
+                        })
                 }
                 Err(e) => Err(e),
             };
@@ -153,6 +151,30 @@ impl FromRequest for User<Merchant> {
     type Future = Pin<Box<dyn Future<Output = Result<Self, Self::Error>>>>;
 
     fn from_request(req: &HttpRequest, _: &mut dev::Payload) -> Self::Future {
+        let req = req.clone();
+        let res = async {
+            let r: Result<Identity, Error> = Identity::extract(&req).await.map_err(|e| e.into());
+            let id: Identity = match r {
+                Ok(v) => v,
+                _ => return Err::<User<Merchant>, Error>(Error::NotAuthorizedInUI),
+            };
+            let merchant_id = match id.identity() {
+                Some(v) => v,
+                _ => return Err::<User<Merchant>, Error>(Error::NotAuthorizedInUI),
+            };
+            let data = req.app_data::<AppState>().unwrap();
+            data.db
+                .send(GetMerchant { id: merchant_id })
+                .await
+                .map_err(|e| e.into())
+                .and_then(move |db_response| match db_response {
+                    Ok(m) => Ok(User(m)),
+                    Err(_) => Err(Error::NotAuthorizedInUI),
+                })
+        };
+        Box::pin(res)
+
+        /*
         let id = match Identity::extract(req) {
             Ok(v) => v,
             _ => return Box::new(err(Error::NotAuthorizedInUI)),
@@ -173,6 +195,7 @@ impl FromRequest for User<Merchant> {
                     Err(_) => err(Error::NotAuthorizedInUI),
                 }),
         )
+        */
     }
 }
 
@@ -204,23 +227,26 @@ where
     type Future = Pin<Box<dyn Future<Output = Result<Self, Self::Error>>>>;
 
     fn from_request(_: &HttpRequest, payload: &mut dev::Payload) -> Self::Future {
-        Box::new(
-            payload
-                .take()
-                .map_err(|e| Error::Internal(format!("Payload error: {:?}", e)))
-                .fold(BytesMut::new(), move |mut body, chunk| {
-                    if (body.len() + chunk.len()) > MAX_SIZE {
-                        Err(Error::Internal("overflow".to_owned()))
-                    } else {
-                        body.extend_from_slice(&chunk);
-                        Ok(body)
-                    }
-                })
-                .and_then(|body| {
-                    let obj = serde_json::from_slice::<T>(&body)?;
-                    Ok(SimpleJson(obj))
-                }),
-        )
+        let p = payload.take();
+        use futures::stream::TryStreamExt;
+
+        let res = async {
+            let body = BytesMut::new();
+            while let Some(chunk) = p
+                .try_next()
+                .await
+                .map_err(|e| Error::Internal(format!("Payload error: {:?}", e)))?
+            {
+                if (body.len() + chunk.len()) > MAX_SIZE {
+                    return Err(Error::Internal("overflow".to_owned()));
+                } else {
+                    body.extend_from_slice(&chunk);
+                }
+            }
+            let obj = serde_json::from_slice::<T>(&body)?;
+            Ok(SimpleJson(obj))
+        };
+        res.boxed_local()
     }
 }
 
@@ -233,22 +259,43 @@ impl FromRequest for jsonrpc::Request {
     type Future = Pin<Box<dyn Future<Output = Result<Self, Self::Error>>>>;
 
     fn from_request(_: &HttpRequest, payload: &mut dev::Payload) -> Self::Future {
-        Box::new(
-            payload
-                .take()
-                .map_err(|e| Error::Internal(format!("Payload error: {:?}", e)))
-                .fold(BytesMut::new(), move |mut body, chunk| {
-                    if (body.len() + chunk.len()) > MAX_SIZE {
-                        Err(Error::Internal("overflow".to_owned()))
-                    } else {
-                        body.extend_from_slice(&chunk);
-                        Ok(body)
-                    }
-                })
-                .and_then(|body| {
-                    let req = serde_json::from_slice::<jsonrpc::Request>(&body)?;
-                    Ok(req)
-                }),
-        )
+        let p = payload.take();
+        use futures::stream::TryStreamExt;
+
+        let res = async {
+            let body = BytesMut::new();
+            while let Some(chunk) = p
+                .try_next()
+                .await
+                .map_err(|e| Error::Internal(format!("Payload error: {:?}", e)))?
+            {
+                if (body.len() + chunk.len()) > MAX_SIZE {
+                    return Err(Error::Internal("overflow".to_owned()));
+                } else {
+                    body.extend_from_slice(&chunk);
+                }
+            }
+            let req = serde_json::from_slice::<jsonrpc::Request>(&body)?;
+            Ok(req)
+        };
+        res.boxed_local()
+
+        //Box::new(
+        //payload
+        //.take()
+        //.map_err(|e| Error::Internal(format!("Payload error: {:?}", e)))
+        //.fold(BytesMut::new(), move |mut body, chunk| {
+        //if (body.len() + chunk.len()) > MAX_SIZE {
+        //Err(Error::Internal("overflow".to_owned()))
+        //} else {
+        //body.extend_from_slice(&chunk);
+        //Ok(body)
+        //}
+        //})
+        //.and_then(|body| {
+        //let req = serde_json::from_slice::<jsonrpc::Request>(&body)?;
+        //Ok(req)
+        //}),
+        //)
     }
 }
