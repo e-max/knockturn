@@ -14,6 +14,7 @@ use derive_deref::Deref;
 use diesel::pg::PgConnection;
 use diesel::{self, prelude::*};
 use futures::future::Future;
+use futures::future::{FutureExt, TryFutureExt};
 use log::warn;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -165,10 +166,10 @@ impl Message for GetExpiredInitializedPayouts {
 }
 
 impl Handler<CreatePayout> for FsmPayout {
-    type Result = ResponseFuture<NewPayout, Error>;
+    type Result = ResponseFuture<Result<NewPayout, Error>>;
 
     fn handle(&mut self, msg: CreatePayout, _: &mut Self::Context) -> Self::Result {
-        let res = block::<_, _, Error>({
+        block::<_, _, Error>({
             let pool = self.pool.clone();
             let merchant_id = msg.merchant_id.clone();
             move || {
@@ -228,17 +229,16 @@ impl Handler<CreatePayout> for FsmPayout {
                 Ok(NewPayout(tx))
             }
         })
-        .from_err();
-
-        Box::new(res)
+        .map_err(|e| e.into())
+        .boxed()
     }
 }
 
 impl Handler<GetPayout> for FsmPayout {
-    type Result = ResponseFuture<Transaction, Error>;
+    type Result = ResponseFuture<Result<Transaction, Error>>;
 
     fn handle(&mut self, msg: GetPayout, _: &mut Self::Context) -> Self::Result {
-        let res = block::<_, _, Error>({
+        block::<_, _, Error>({
             let pool = self.pool.clone();
             move || {
                 use crate::schema::transactions::dsl::*;
@@ -252,14 +252,13 @@ impl Handler<GetPayout> for FsmPayout {
                 tx
             }
         })
-        .from_err();
-
-        Box::new(res)
+        .map_err(|e| e.into())
+        .boxed()
     }
 }
 
 impl Handler<InitializePayout> for FsmPayout {
-    type Result = ResponseFuture<InitializedPayout, Error>;
+    type Result = ResponseFuture<Result<InitializedPayout, Error>>;
 
     fn handle(&mut self, msg: InitializePayout, _: &mut Self::Context) -> Self::Result {
         let transaction_id = msg.new_payout.id.clone();
@@ -274,7 +273,7 @@ impl Handler<InitializePayout> for FsmPayout {
 
         let pool = self.pool.clone();
 
-        let res = block::<_, _, Error>(move || {
+        block::<_, _, Error>(move || {
             use crate::schema::transactions::dsl::*;
             let conn: &PgConnection = &pool.get().unwrap();
 
@@ -291,17 +290,16 @@ impl Handler<InitializePayout> for FsmPayout {
                 .map_err::<Error, _>(|e| e.into())?;
             Ok(InitializedPayout(transaction))
         })
-        .from_err();
-
-        Box::new(res)
+        .map_err(|e| e.into())
+        .boxed()
     }
 }
 
 impl Handler<GetNewPayout> for FsmPayout {
-    type Result = ResponseFuture<NewPayout, Error>;
+    type Result = ResponseFuture<Result<NewPayout, Error>>;
 
     fn handle(&mut self, msg: GetNewPayout, _: &mut Self::Context) -> Self::Result {
-        let res = block::<_, _, Error>({
+        block::<_, _, Error>({
             let pool = self.pool.clone();
             move || {
                 use crate::schema::transactions::dsl::*;
@@ -316,16 +314,16 @@ impl Handler<GetNewPayout> for FsmPayout {
                     .map(NewPayout)
             }
         })
-        .from_err();
-        Box::new(res)
+        .map_err(|e| e.into())
+        .boxed()
     }
 }
 
 impl Handler<GetInitializedPayout> for FsmPayout {
-    type Result = ResponseFuture<InitializedPayout, Error>;
+    type Result = ResponseFuture<Result<InitializedPayout, Error>>;
 
     fn handle(&mut self, msg: GetInitializedPayout, _: &mut Self::Context) -> Self::Result {
-        let res = block::<_, _, Error>({
+        block::<_, _, Error>({
             let pool = self.pool.clone();
             move || {
                 use crate::schema::transactions::dsl::*;
@@ -339,77 +337,75 @@ impl Handler<GetInitializedPayout> for FsmPayout {
                     .map(InitializedPayout)
             }
         })
-        .from_err();
-        Box::new(res)
+        .map_err(|e| e.into())
+        .boxed()
     }
 }
 
 impl Handler<FinalizePayout> for FsmPayout {
-    type Result = ResponseFuture<PendingPayout, Error>;
+    type Result = ResponseFuture<Result<PendingPayout, Error>>;
 
     fn handle(&mut self, msg: FinalizePayout, _: &mut Self::Context) -> Self::Result {
         let pool = self.pool.clone();
-        Box::new(
-            block::<_, _, Error>(move || {
-                let conn: &PgConnection = &pool.get().unwrap();
-                update_transaction_status(
-                    msg.initialized_payout.id.clone(),
-                    TransactionStatus::Pending,
-                    &conn,
-                )
-                .map(PendingPayout)
-            })
-            .from_err(),
-        )
+        block::<_, _, Error>(move || {
+            let conn: &PgConnection = &pool.get().unwrap();
+            update_transaction_status(
+                msg.initialized_payout.id.clone(),
+                TransactionStatus::Pending,
+                &conn,
+            )
+            .map(PendingPayout)
+        })
+        .map_err(|e| e.into())
+        .boxed()
     }
 }
 
 impl Handler<ConfirmPayout> for FsmPayout {
-    type Result = ResponseFuture<ConfirmedPayout, Error>;
+    type Result = ResponseFuture<Result<ConfirmedPayout, Error>>;
 
     fn handle(&mut self, msg: ConfirmPayout, _: &mut Self::Context) -> Self::Result {
-        Box::new(
-            block::<_, _, Error>({
-                let pool = self.pool.clone();
-                move || {
-                    use crate::schema::transactions::dsl::*;
-                    let conn: &PgConnection = &pool.get().unwrap();
+        block::<_, _, Error>({
+            let pool = self.pool.clone();
+            move || {
+                use crate::schema::transactions::dsl::*;
+                let conn: &PgConnection = &pool.get().unwrap();
 
-                    let tx = diesel::update(transactions.filter(id.eq(msg.payout.0.id)))
-                        .set((
-                            status.eq(TransactionStatus::Confirmed),
-                            updated_at.eq(Utc::now().naive_utc()),
-                        ))
-                        .get_result(conn)?;
-                    Ok(ConfirmedPayout(tx))
-                }
-            })
-            .from_err(),
-        )
+                let tx = diesel::update(transactions.filter(id.eq(msg.payout.0.id)))
+                    .set((
+                        status.eq(TransactionStatus::Confirmed),
+                        updated_at.eq(Utc::now().naive_utc()),
+                    ))
+                    .get_result(conn)?;
+                Ok(ConfirmedPayout(tx))
+            }
+        })
+        .map_err(|e| e.into())
+        .boxed()
     }
 }
 
 impl Handler<GetPendingPayouts> for FsmPayout {
-    type Result = ResponseFuture<Vec<PendingPayout>, Error>;
+    type Result = ResponseFuture<Result<Vec<PendingPayout>, Error>>;
 
     fn handle(&mut self, _: GetPendingPayouts, _: &mut Self::Context) -> Self::Result {
-        Box::new(
-            self.db
+        let db = self.db.clone();
+        async {
+            let data = db
                 .send(db::GetPayoutsByStatus(TransactionStatus::Pending))
-                .from_err()
-                .and_then(|db_response| {
-                    let data = db_response?;
-                    Ok(data.into_iter().map(PendingPayout).collect())
-                }),
-        )
+                .await
+                .map_err::<Error, _>(|e| e.into())??;
+            Ok::<Vec<PendingPayout>, Error>(data.into_iter().map(PendingPayout).collect())
+        }
+        .boxed()
     }
 }
 
 impl Handler<GetExpiredNewPayouts> for FsmPayout {
-    type Result = ResponseFuture<Vec<NewPayout>, Error>;
+    type Result = ResponseFuture<Result<Vec<NewPayout>, Error>>;
 
     fn handle(&mut self, _: GetExpiredNewPayouts, _: &mut Self::Context) -> Self::Result {
-        let res = block::<_, _, Error>({
+        block::<_, _, Error>({
             let pool = self.pool.clone();
             move || {
                 use crate::schema::transactions::dsl::*;
@@ -426,16 +422,16 @@ impl Handler<GetExpiredNewPayouts> for FsmPayout {
                     .map(|txs| txs.into_iter().map(NewPayout).collect())
             }
         })
-        .from_err();
-        Box::new(res)
+        .map_err(|e| e.into())
+        .boxed()
     }
 }
 
 impl Handler<GetExpiredInitializedPayouts> for FsmPayout {
-    type Result = ResponseFuture<Vec<InitializedPayout>, Error>;
+    type Result = ResponseFuture<Result<Vec<InitializedPayout>, Error>>;
 
     fn handle(&mut self, _: GetExpiredInitializedPayouts, _: &mut Self::Context) -> Self::Result {
-        let res = block::<_, _, Error>({
+        block::<_, _, Error>({
             let pool = self.pool.clone();
             move || {
                 use crate::schema::transactions::dsl::*;
@@ -453,16 +449,16 @@ impl Handler<GetExpiredInitializedPayouts> for FsmPayout {
                     .map(|txs| txs.into_iter().map(InitializedPayout).collect())
             }
         })
-        .from_err();
-        Box::new(res)
+        .map_err(|e| e.into())
+        .boxed()
     }
 }
 
 impl Handler<RejectPayout<NewPayout>> for FsmPayout {
-    type Result = ResponseFuture<RejectedPayout, Error>;
+    type Result = ResponseFuture<Result<RejectedPayout, Error>>;
 
     fn handle(&mut self, msg: RejectPayout<NewPayout>, _: &mut Self::Context) -> Self::Result {
-        let res = block::<_, _, Error>({
+        block::<_, _, Error>({
             let pool = self.pool.clone();
             move || {
                 let conn: &PgConnection = &pool.get().unwrap();
@@ -483,57 +479,56 @@ impl Handler<RejectPayout<NewPayout>> for FsmPayout {
                 Ok(RejectedPayout(tx))
             }
         })
-        .from_err();
-        Box::new(res)
+        .map_err(|e| e.into())
+        .boxed()
     }
 }
 
 impl Handler<RejectPayout<InitializedPayout>> for FsmPayout {
-    type Result = ResponseFuture<RejectedPayout, Error>;
+    type Result = ResponseFuture<Result<RejectedPayout, Error>>;
 
     fn handle(
         &mut self,
         msg: RejectPayout<InitializedPayout>,
         _: &mut Self::Context,
     ) -> Self::Result {
-        let res = self
-            .wallet
-            .cancel_tx(&msg.payout.wallet_tx_slate_id.clone().unwrap())
-            .and_then({
-                let pool = self.pool.clone();
-                move |_| {
-                    block::<_, _, Error>({
-                        move || {
-                            let conn: &PgConnection = &pool.get().unwrap();
-                            use crate::schema::transactions::dsl::*;
-                            let tx = diesel::update(
-                                transactions
-                                    .filter(id.eq(msg.payout.id.clone()))
-                                    .filter(status.eq(TransactionStatus::Initialized)),
-                            )
-                            .set((
-                                status.eq(TransactionStatus::Rejected),
-                                updated_at.eq(Utc::now().naive_utc()),
-                            ))
-                            .get_result(conn)?;
+        let wallet = self.wallet.clone();
+        let pool = self.pool.clone();
+        async {
+            wallet
+                .cancel_tx(&msg.payout.wallet_tx_slate_id.clone().unwrap())
+                .await;
+            block::<_, _, Error>({
+                move || {
+                    let conn: &PgConnection = &pool.get().unwrap();
+                    use crate::schema::transactions::dsl::*;
+                    let tx = diesel::update(
+                        transactions
+                            .filter(id.eq(msg.payout.id.clone()))
+                            .filter(status.eq(TransactionStatus::Initialized)),
+                    )
+                    .set((
+                        status.eq(TransactionStatus::Rejected),
+                        updated_at.eq(Utc::now().naive_utc()),
+                    ))
+                    .get_result(conn)?;
 
-                            Ok(RejectedPayout(tx))
-                        }
-                    })
-                    .from_err()
+                    Ok(RejectedPayout(tx))
                 }
-            });
-
-        Box::new(res)
+            })
+            .await
+            .map_err(|e| e.into())
+        }
+        .boxed_local()
     }
 }
 
 impl Handler<RejectPayout<PendingPayout>> for FsmPayout {
-    type Result = ResponseFuture<RejectedPayout, Error>;
+    type Result = ResponseFuture<Result<RejectedPayout, Error>>;
 
     fn handle(&mut self, msg: RejectPayout<PendingPayout>, _: &mut Self::Context) -> Self::Result {
-        let res = self
-            .wallet
+        let wallet = self.wallet.clone();
+        wallet
             .cancel_tx(&msg.payout.wallet_tx_slate_id.clone().unwrap())
             .and_then({
                 let pool = self.pool.clone();
@@ -558,11 +553,10 @@ impl Handler<RejectPayout<PendingPayout>> for FsmPayout {
                             Ok(RejectedPayout(tx))
                         }
                     })
-                    .from_err()
+                    .map_err(|e| e.into())
                 }
-            });
-
-        Box::new(res)
+            })
+            .boxed_local()
     }
 }
 pub trait PayoutFees {
