@@ -37,7 +37,8 @@ impl Node {
             self.url, CHAIN_OUTPUTS_BY_HEIGHT, start, end
         );
         debug!("Get latest blocks from node {}", url);
-        let resp = self.client
+        let mut resp = self
+            .client
             .get(&url) // <- Create request builder
             .basic_auth(&self.username, Some(&self.password))
             .send() // <- Send http request
@@ -45,13 +46,14 @@ impl Node {
             .map_err(|e| Error::NodeAPIError(s!(e)))?;
 
         if !resp.status().is_success() {
-            return Err(Error::NodeAPIError(format!("Error status: {:?}", resp)))
-        } 
+            return Err(Error::NodeAPIError(format!("Error status: {:?}", resp)));
+        }
 
-        let bytes = resp.body()
-                    .limit(10 * 1024 * 1024)
-                    .await
-                    .map_err(|e| Error::NodeAPIError(s!(e)))?;
+        let bytes = resp
+            .body()
+            .limit(10 * 1024 * 1024)
+            .await
+            .map_err(|e| Error::NodeAPIError(s!(e)))?;
 
         let blocks: Vec<Block> = from_slice(&bytes).map_err(|e| {
             error!(
@@ -68,7 +70,8 @@ impl Node {
         let url = format!("{}/{}", self.url, GET_STATUS_URL);
         debug!("Get current height from the node {}", url);
 
-        let resp  = self.client
+        let mut resp = self
+            .client
             .get(&url) // <- Create request builder
             .basic_auth(&self.username, Some(&self.password))
             .send() // <- Send http request
@@ -76,11 +79,12 @@ impl Node {
             .map_err(|e| Error::NodeAPIError(s!(e)))?;
 
         if !resp.status().is_success() {
-            return  Err(Error::NodeAPIError(format!("Error status: {:?}", resp)))
+            return Err(Error::NodeAPIError(format!("Error status: {:?}", resp)));
         }
 
         // <- server http response
-        let bytes = resp.body()
+        let bytes = resp
+            .body()
             .limit(10 * 1024 * 1024)
             .await
             .map_err(|e| Error::NodeAPIError(s!(e)))?;

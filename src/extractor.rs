@@ -35,7 +35,7 @@ impl FromRequest for BasicAuth<Merchant> {
     fn from_request(req: &HttpRequest, _: &mut dev::Payload) -> Self::Future {
         let req = req.clone();
 
-        async {
+        async move {
             let bauth = basic::BasicAuth::extract(&req)
                 .await
                 .map_err::<Error, _>(|e| Error::NotAuthorized)?;
@@ -82,14 +82,14 @@ impl FromRequest for Session<Merchant> {
 
     fn from_request(req: &HttpRequest, _: &mut dev::Payload) -> Self::Future {
         let req = req.clone();
-        let mut tmp;
-        let cfg = if let Some(cfg) = req.app_data::<SessionConfig>() {
-            cfg
-        } else {
-            tmp = SessionConfig::default();
-            &tmp
-        };
-        async {
+        async move {
+            let mut tmp;
+            let cfg = if let Some(cfg) = req.app_data::<SessionConfig>() {
+                cfg
+            } else {
+                tmp = SessionConfig::default();
+                &tmp
+            };
             let session = ActixSession::extract(&req)
                 .await
                 .map_err(|e| Error::NotAuthorizedInUI)?;
@@ -134,7 +134,7 @@ impl FromRequest for User<Merchant> {
 
     fn from_request(req: &HttpRequest, _: &mut dev::Payload) -> Self::Future {
         let req = req.clone();
-        async {
+        async move {
             let id = Identity::extract(&req).await?;
             let merchant_id = id.identity().ok_or(Error::NotAuthorizedInUI)?;
             let data = req.app_data::<AppState>().unwrap();
@@ -177,11 +177,11 @@ where
     type Future = Pin<Box<dyn Future<Output = Result<Self, Self::Error>>>>;
 
     fn from_request(_: &HttpRequest, payload: &mut dev::Payload) -> Self::Future {
-        let p = payload.take();
+        let mut p = payload.take();
         use futures::stream::TryStreamExt;
 
-        async {
-            let body = BytesMut::new();
+        async move {
+            let mut body = BytesMut::new();
             while let Some(chunk) = p
                 .try_next()
                 .await
@@ -209,11 +209,11 @@ impl FromRequest for jsonrpc::Request {
     type Future = Pin<Box<dyn Future<Output = Result<Self, Self::Error>>>>;
 
     fn from_request(_: &HttpRequest, payload: &mut dev::Payload) -> Self::Future {
-        let p = payload.take();
+        let mut p = payload.take();
         use futures::stream::TryStreamExt;
 
-        async {
-            let body = BytesMut::new();
+        async move {
+            let mut body = BytesMut::new();
             while let Some(chunk) = p
                 .try_next()
                 .await

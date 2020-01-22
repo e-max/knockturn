@@ -71,7 +71,8 @@ impl Cron {
     }
     async fn process_pending_payments(&self) -> Result<(), Error> {
         debug!("run process_pending_payments");
-        let payments: Vec<PendingPayment> = Payment::list(self.pool).await?;
+        let pool = self.pool.clone();
+        let payments: Vec<PendingPayment> = Payment::list(pool).await?;
         for payment in payments {
             if payment.is_expired() {
                 debug!("payment {} expired: try to reject it", payment.id);
@@ -99,6 +100,7 @@ impl Cron {
     async fn process_unreported_confirmed_payments(&self) -> Result<(), Error> {
         let payments = get_unreported_confirmed_payments(self.pool.clone()).await?;
         for payment in payments {
+            let payment_id = payment.id;
             let res: Result<(), Error> = self
                 .fsm
                 .send(ReportPayment { payment })
@@ -110,7 +112,7 @@ impl Cron {
                 })
                 .or_else({
                     move |e| {
-                        warn!("Couldn't report payment {}: {}", payment.id, e);
+                        warn!("Couldn't report payment {}: {}", payment_id, e);
                         Ok(())
                     }
                 });
@@ -122,6 +124,7 @@ impl Cron {
     async fn process_unreported_rejected_payments(&self) -> Result<(), Error> {
         let payments = get_unreported_rejected_payments(self.pool.clone()).await?;
         for payment in payments {
+            let payment_id = payment.id;
             let res: Result<(), Error> = self
                 .fsm
                 .send(ReportPayment { payment })
@@ -133,7 +136,7 @@ impl Cron {
                 })
                 .or_else({
                     move |e| {
-                        warn!("Couldn't report payment {}: {}", payment.id, e);
+                        warn!("Couldn't report payment {}: {}", payment_id, e);
                         Ok(())
                     }
                 });
@@ -278,25 +281,33 @@ fn reject_expired_payments(cron: &mut Cron, _: &mut Context<Cron>) {
 
 fn process_pending_payments(cron: &mut Cron, _: &mut Context<Cron>) {
     let cron = cron.clone();
-    actix::spawn(cron.process_pending_payments().map(|_| ()));
+    actix::spawn(async move { cron.process_pending_payments().map(|_| ()).await });
 }
 
 fn process_unreported_confirmed_payments(cron: &mut Cron, _: &mut Context<Cron>) {
     let cron = cron.clone();
-    actix::spawn(cron.process_unreported_confirmed_payments().map(|_| ()));
+    actix::spawn(async move {
+        cron.process_unreported_confirmed_payments()
+            .map(|_| ())
+            .await
+    });
 }
 
 fn process_unreported_rejected_payments(cron: &mut Cron, _: &mut Context<Cron>) {
     let cron = cron.clone();
-    actix::spawn(cron.process_unreported_rejected_payments().map(|_| ()));
+    actix::spawn(async move {
+        cron.process_unreported_rejected_payments()
+            .map(|_| ())
+            .await
+    });
 }
 
 fn sync_with_node(cron: &mut Cron, _: &mut Context<Cron>) {
     let cron = cron.clone();
-    actix::spawn(cron.sync_with_node().map(|_| ()));
+    actix::spawn(async move { cron.sync_with_node().map(|_| ()).await });
 }
 
 fn autoconfirmation(cron: &mut Cron, _: &mut Context<Cron>) {
     let cron = cron.clone();
-    actix::spawn(cron.autoconfirmation().map(|_| ()));
+    actix::spawn(async move { cron.autoconfirmation().map(|_| ()).await });
 }

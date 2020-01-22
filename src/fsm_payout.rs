@@ -390,7 +390,7 @@ impl Handler<GetPendingPayouts> for FsmPayout {
 
     fn handle(&mut self, _: GetPendingPayouts, _: &mut Self::Context) -> Self::Result {
         let db = self.db.clone();
-        async {
+        async move {
             let data = db
                 .send(db::GetPayoutsByStatus(TransactionStatus::Pending))
                 .await
@@ -494,7 +494,7 @@ impl Handler<RejectPayout<InitializedPayout>> for FsmPayout {
     ) -> Self::Result {
         let wallet = self.wallet.clone();
         let pool = self.pool.clone();
-        async {
+        async move {
             wallet
                 .cancel_tx(&msg.payout.wallet_tx_slate_id.clone().unwrap())
                 .await;
@@ -528,35 +528,35 @@ impl Handler<RejectPayout<PendingPayout>> for FsmPayout {
 
     fn handle(&mut self, msg: RejectPayout<PendingPayout>, _: &mut Self::Context) -> Self::Result {
         let wallet = self.wallet.clone();
-        wallet
-            .cancel_tx(&msg.payout.wallet_tx_slate_id.clone().unwrap())
-            .and_then({
-                let pool = self.pool.clone();
-                move |_| {
-                    block::<_, _, Error>({
-                        move || {
-                            let conn: &PgConnection = &pool.get().unwrap();
-                            let payout = msg.payout;
-                            warn!("Reject payout {:?}", payout);
-                            use crate::schema::transactions::dsl::*;
-                            let tx = diesel::update(
-                                transactions
-                                    .filter(id.eq(payout.id.clone()))
-                                    .filter(status.eq(TransactionStatus::Pending)),
-                            )
-                            .set((
-                                status.eq(TransactionStatus::Rejected),
-                                updated_at.eq(Utc::now().naive_utc()),
-                            ))
-                            .get_result(conn)?;
+        let pool = self.pool.clone();
+        async move {
+            wallet
+                .cancel_tx(&msg.payout.wallet_tx_slate_id.clone().unwrap())
+                .await;
+            block::<_, _, Error>({
+                move || {
+                    let conn: &PgConnection = &pool.get().unwrap();
+                    let payout = msg.payout;
+                    warn!("Reject payout {:?}", payout);
+                    use crate::schema::transactions::dsl::*;
+                    let tx = diesel::update(
+                        transactions
+                            .filter(id.eq(payout.id.clone()))
+                            .filter(status.eq(TransactionStatus::Pending)),
+                    )
+                    .set((
+                        status.eq(TransactionStatus::Rejected),
+                        updated_at.eq(Utc::now().naive_utc()),
+                    ))
+                    .get_result(conn)?;
 
-                            Ok(RejectedPayout(tx))
-                        }
-                    })
-                    .map_err(|e| e.into())
+                    Ok(RejectedPayout(tx))
                 }
             })
-            .boxed_local()
+            .map_err(|e| e.into())
+            .await
+        }
+        .boxed_local()
     }
 }
 pub trait PayoutFees {

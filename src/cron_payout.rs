@@ -27,6 +27,7 @@ impl CronPayout {
             .map_err(|e| Error::General(s!(e)))??;
         debug!("Found {} expired new payouts", payouts.len());
         for payout in payouts {
+            let payout_id = payout.id;
             let res: Result<(), Error> = self
                 .fsm
                 .send(RejectPayout { payout })
@@ -36,11 +37,9 @@ impl CronPayout {
                     db_response?;
                     Ok(())
                 })
-                .or_else({
-                    move |e| {
-                        error!("Couldn't reject payout {}: {}", payout.id, e);
-                        Ok(())
-                    }
+                .or_else(move |e| {
+                    error!("Couldn't reject payout {}: {}", payout_id, e);
+                    Ok(())
                 });
             res?;
         }
@@ -57,6 +56,7 @@ impl CronPayout {
             .map_err(|e| Error::General(s!(e)))??;
         debug!("Found {} expired initialized payouts", payouts.len());
         for payout in payouts {
+            let payout_id = payout.id;
             let res: Result<(), Error> = self
                 .fsm
                 .send(RejectPayout { payout })
@@ -66,11 +66,9 @@ impl CronPayout {
                     db_response?;
                     Ok(())
                 })
-                .or_else({
-                    move |e| {
-                        error!("Couldn't reject payout {}: {}", payout.id, e);
-                        Ok(())
-                    }
+                .or_else(move |e| {
+                    error!("Couldn't reject payout {}: {}", payout_id, e);
+                    Ok(())
                 });
             res?;
         }
@@ -87,6 +85,7 @@ impl CronPayout {
             .map_err(|e| Error::General(s!(e)))??;
         debug!("Found {} pending payouts", payouts.len());
         for payout in payouts {
+            let payout_id = payout.id;
             let res: Result<(), Error> = self
                 .fsm
                 .send(RejectPayout {
@@ -99,7 +98,7 @@ impl CronPayout {
                     Ok(())
                 })
                 .or_else(move |e| {
-                    error!("Cannot reject payout {}: {}", payout.id, e);
+                    error!("Cannot reject payout {}: {}", payout_id, e);
                     Ok(())
                 });
             res?;
@@ -135,15 +134,15 @@ impl Actor for CronPayout {
 
 fn process_expired_new_payouts(cron: &mut CronPayout, _: &mut Context<CronPayout>) {
     let cron = cron.clone();
-    actix::spawn(cron.process_expired_new_payouts().map(|_| ()));
+    actix::spawn(async move { cron.process_expired_new_payouts().map(|_| ()).await });
 }
 
 fn process_expired_initialized_payouts(cron: &mut CronPayout, _: &mut Context<CronPayout>) {
     let cron = cron.clone();
-    actix::spawn(cron.process_expired_initialized_payouts().map(|_| ()));
+    actix::spawn(async move { cron.process_expired_initialized_payouts().map(|_| ()).await });
 }
 
 fn process_pending_payouts(cron: &mut CronPayout, _: &mut Context<CronPayout>) {
     let cron = cron.clone();
-    actix::spawn(cron.process_pending_payouts().map(|_| ()));
+    actix::spawn(async move { cron.process_pending_payouts().map(|_| ()).await });
 }

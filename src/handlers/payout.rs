@@ -206,6 +206,6 @@ pub async fn accept_slate(
     Ok(HttpResponse::Ok().json(finalized_slate))
 }
 
-pub fn withdraw_confirmation(_req: HttpRequest) -> Result<HttpResponse, Error> {
+pub async fn withdraw_confirmation(_req: HttpRequest) -> Result<HttpResponse, Error> {
     Ok(HttpResponse::Ok().body("hello"))
 }

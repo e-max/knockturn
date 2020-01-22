@@ -18,7 +18,7 @@ use rustls::internal::pemfile::{certs, pkcs8_private_keys};
 use rustls::{NoClientAuth, ServerConfig};
 //use sentry;
 //use sentry_actix::SentryMiddleware;
-use futures::future::{lazy, ok};
+use futures::future::{lazy, ok, TryFutureExt};
 use std::env;
 use std::fs::File;
 use std::io::BufReader;
@@ -97,7 +97,7 @@ fn main() {
     cron::Cron::new(db.clone(), fsm.clone(), node.clone(), pool.clone()).start();
     cron_payout::CronPayout::new(fsm_payout.clone(), pool.clone()).start();
 
-    actix::spawn(lazy(move || {
+    actix::spawn(lazy(move |_| {
         check_node_horizon(&node, &pool)
             .map_err(|e| {
                 error!("Cannot check horizon: {}", e);

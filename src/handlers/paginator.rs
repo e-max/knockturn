@@ -77,7 +77,7 @@ impl FromRequest for Paginate {
     #[inline]
     fn from_request(req: &HttpRequest, _: &mut dev::Payload) -> Self::Future {
         let req = req.clone();
-        async {
+        async move {
             let tmp;
             let cfg = if let Some(cfg) = req.app_data::<PaginateConfig>() {
                 cfg

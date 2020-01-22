@@ -115,11 +115,11 @@ pub async fn login(
 #[template(path = "login.html")]
 struct LoginTemplate;
 
-pub fn login_form(_: HttpRequest) -> Result<HttpResponse, Error> {
+pub async fn login_form(_: HttpRequest) -> Result<HttpResponse, Error> {
     LoginTemplate.into_response()
 }
 
-pub fn logout(identity: Identity, session: Session) -> Result<HttpResponse, Error> {
+pub async fn logout(identity: Identity, session: Session) -> Result<HttpResponse, Error> {
     identity.forget();
     session.clear();
     Ok(HttpResponse::Found().header("location", "/login").finish())

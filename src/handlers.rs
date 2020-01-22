@@ -8,7 +8,6 @@ use actix_web::web::{block, Data, Path};
 use actix_web::HttpResponse;
 use askama::Template;
 use diesel::pg::PgConnection;
-use futures::future::{ok, Future};
 use mime_guess::get_mime_type;
 
 pub mod mfa;
@@ -18,12 +17,12 @@ pub mod payout;
 pub mod transaction;
 pub mod webui;
 
-pub fn create_merchant(
+pub async fn create_merchant(
     create_merchant: SimpleJson<CreateMerchant>,
     state: Data<AppState>,
-) -> impl Future<Item = HttpResponse, Error = Error> {
+) -> Result<HttpResponse, Error> {
     let create_merchant = create_merchant.into_inner();
-    block::<_, _, Error>({
+    let merchant = block::<_, _, Error>({
         let pool = state.pool.clone();
         move || {
             let conn: &PgConnection = &pool.get().unwrap();
@@ -31,24 +30,21 @@ pub fn create_merchant(
             Ok(merchant)
         }
     })
-    .from_err()
-    .and_then(|merchant| Ok(HttpResponse::Created().json(merchant)))
+    .await?;
+    Ok(HttpResponse::Created().json(merchant))
 }
 
-pub fn get_merchant(
+pub async fn get_merchant(
     merchant_id: Path<String>,
     state: Data<AppState>,
-) -> impl Future<Item = HttpResponse, Error = Error> {
-    state
+) -> Result<HttpResponse, Error> {
+    let merchant = state
         .db
         .send(GetMerchant {
             id: merchant_id.to_owned(),
-        })
-        .from_err()
-        .and_then(|db_response| {
-            let merchant = db_response?;
-            Ok(HttpResponse::Ok().json(merchant))
-        })
+        }).await??;
+
+    Ok(HttpResponse::Ok().json(merchant))
 }
 
 fn check_2fa_code(merchant: &Merchant, code: &str) -> Result<bool, Error> {
@@ -62,7 +58,7 @@ fn check_2fa_code(merchant: &Merchant, code: &str) -> Result<bool, Error> {
 
 pub trait TemplateIntoResponse {
     fn into_response(&self) -> Result<HttpResponse, Error>;
-    fn into_future(&self) -> Box<dyn Future<Item = HttpResponse, Error = Error>>;
+    //fn into_future(&self) -> Box<dyn Future<Item = HttpResponse, Error = Error>>;
 }
 
 impl<T: Template> TemplateIntoResponse for T {
@@ -71,9 +67,9 @@ impl<T: Template> TemplateIntoResponse for T {
         let ctype = get_mime_type(T::extension().unwrap_or("txt")).to_string();
         Ok(HttpResponse::Ok().content_type(ctype.as_str()).body(rsp))
     }
-    fn into_future(&self) -> Box<dyn Future<Item = HttpResponse, Error = Error>> {
-        Box::new(ok(self.into_response().into()))
-    }
+    //fn into_future(&self) -> Box<dyn Future<Item = HttpResponse, Error = Error>> {
+        //Box::new(ok(self.into_response().into()))
+    //}
 }
 
 pub trait BootstrapColor {

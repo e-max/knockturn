@@ -112,7 +112,7 @@ impl Wallet {
 
         debug!("Send raw jsonrpc request {}", url);
 
-        let resp = self
+        let mut resp = self
             .client()
             .post(&url) // <- Create request builder
             .basic_auth(&self.username, Some(&self.password))
@@ -179,7 +179,7 @@ impl Wallet {
     pub async fn receive(&self, slate: &Slate) -> Result<Slate, Error> {
         let url = format!("{}/{}", self.url, RECEIVE_URL);
         debug!("Receive slate by wallet  {}", url);
-        let resp = self
+        let mut resp = self
             .client()
             .post(&url)
             .basic_auth(&self.username, Some(&self.password))
@@ -209,7 +209,7 @@ impl Wallet {
     pub async fn finalize(&self, slate: &Slate) -> Result<Slate, Error> {
         let url = format!("{}/{}", self.url, FINALIZE_URL);
         debug!("Finalize slate by wallet {}", url);
-        let resp = self
+        let mut resp = self
             .client()
             .post(&url)
             .basic_auth(&self.username, Some(&self.password))

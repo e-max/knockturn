@@ -31,11 +31,11 @@ pub struct TotpRequest {
 #[template(path = "2fa.html")]
 struct TwoFATemplate;
 
-pub fn form_2fa(_: HttpRequest) -> Result<HttpResponse, Error> {
+pub async fn form_2fa(_: HttpRequest) -> Result<HttpResponse, Error> {
     TwoFATemplate {}.into_response()
 }
 
-pub fn get_totp(merchant: Session<Merchant>) -> Result<HttpResponse, Error> {
+pub async fn get_totp(merchant: Session<Merchant>) -> Result<HttpResponse, Error> {
     let merchant = merchant.into_inner();
     let token = merchant
         .token_2fa
