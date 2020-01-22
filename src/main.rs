@@ -28,7 +28,8 @@ extern crate diesel_migrations;
 
 embed_migrations!();
 
-fn main() {
+#[actix_rt::main]
+async fn main() -> std::io::Result<()> {
     dotenv().ok();
 
     env_logger::init();
@@ -64,7 +65,7 @@ fn main() {
     };
 
     info!("Starting");
-    let sys = System::new("knockturn-server");
+    //let sys = System::new("knockturn-server");
 
     let manager = ConnectionManager::<PgConnection>::new(cfg.database_url.as_str());
     let pool = r2d2::Pool::builder()
@@ -97,69 +98,57 @@ fn main() {
     cron::Cron::new(db.clone(), fsm.clone(), node.clone(), pool.clone()).start();
     cron_payout::CronPayout::new(fsm_payout.clone(), pool.clone()).start();
 
-    actix::spawn(lazy(move |_| {
-        check_node_horizon(&node, &pool)
-            .map_err(|e| {
-                error!("Cannot check horizon: {}", e);
-                System::current().stop();
-                ()
-            })
-            .and_then(move |_| {
-                let srv = HttpServer::new({
-                    let pool = pool.clone();
-                    move || {
-                        let app = App::new()
-                            .data(AppState {
-                                db: db.clone(),
-                                wallet: wallet.clone(),
-                                pool: pool.clone(),
-                                fsm: fsm.clone(),
-                                fsm_payout: fsm_payout.clone(),
-                            })
-                            .configure(routing)
-                            .wrap(middleware::Logger::new("\"%r\" %s %b %Dms"))
-                            .wrap(IdentityService::new(
-                                CookieIdentityPolicy::new(cookie_secret.as_bytes())
-                                    .name("auth-example")
-                                    .secure(false),
-                            ))
-                            .wrap(CookieSession::private(cookie_secret.as_bytes()).secure(false));
+    check_node_horizon(&node, &pool)
+        .map_err(|e| {
+            error!("Cannot check horizon: {}", e);
+            System::current().stop();
+            ()
+        })
+        .await;
 
-                        /*
-                         * doesn't work yet with actix 1.0
-                         * https://github.com/getsentry/sentry-rust/issues/143
-                         *
-                        if sentry_url != "" {
-                            app = app.wrap(SentryMiddleware::new());
-                        }
-                        */
-                        app
-                    }
-                });
+    let srv = HttpServer::new({
+        let pool = pool.clone();
+        move || {
+            let app = App::new()
+                .data(AppState {
+                    db: db.clone(),
+                    wallet: wallet.clone(),
+                    pool: pool.clone(),
+                    fsm: fsm.clone(),
+                    fsm_payout: fsm_payout.clone(),
+                })
+                .configure(routing)
+                .wrap(middleware::Logger::new("\"%r\" %s %b %Dms"))
+                .wrap(IdentityService::new(
+                    CookieIdentityPolicy::new(cookie_secret.as_bytes())
+                        .name("auth-example")
+                        .secure(false),
+                ))
+                .wrap(CookieSession::private(cookie_secret.as_bytes()).secure(false));
 
-                if let Ok(folder) = env::var("TLS_FOLDER") {
-                    // load ssl keys
-                    let mut config = ServerConfig::new(NoClientAuth::new());
-                    let cert_file = &mut BufReader::new(
-                        File::open(format!("{}/fullchain.pem", folder)).unwrap(),
-                    );
-                    let key_file =
-                        &mut BufReader::new(File::open(format!("{}/privkey.pem", folder)).unwrap());
-                    let cert_chain = certs(cert_file).unwrap();
-                    let mut keys = pkcs8_private_keys(key_file).unwrap();
-                    config.set_single_cert(cert_chain, keys.remove(0)).unwrap();
-                    srv.bind_rustls(&host, config)
-                        .expect(&format!("Can not TLS  bind to '{}'", &host))
-                        .start();
-                } else {
-                    srv.bind(&host)
-                        .expect(&format!("Can not bind to '{}'", &host))
-                        .start();
-                }
+            /*
+             * doesn't work yet with actix 1.0
+             * https://github.com/getsentry/sentry-rust/issues/143
+             *
+            if sentry_url != "" {
+                app = app.wrap(SentryMiddleware::new());
+            }
+            */
+            app
+        }
+    });
 
-                ok(())
-            })
-    }));
-
-    sys.run().unwrap();
+    if let Ok(folder) = env::var("TLS_FOLDER") {
+        // load ssl keys
+        let mut config = ServerConfig::new(NoClientAuth::new());
+        let cert_file =
+            &mut BufReader::new(File::open(format!("{}/fullchain.pem", folder)).unwrap());
+        let key_file = &mut BufReader::new(File::open(format!("{}/privkey.pem", folder)).unwrap());
+        let cert_chain = certs(cert_file).unwrap();
+        let mut keys = pkcs8_private_keys(key_file).unwrap();
+        config.set_single_cert(cert_chain, keys.remove(0)).unwrap();
+        srv.bind_rustls(&host, config)?.run().await
+    } else {
+        srv.bind(&host)?.run().await
+    }
 }

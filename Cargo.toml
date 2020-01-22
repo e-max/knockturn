@@ -6,9 +6,10 @@ edition = "2018"
 
 [dependencies]
 askama = "0.8.0"
-actix-web = { version = "2.0", features = [ "rust-tls"]}
+actix-web = { version = "2.0", features = [ "rustls"]}
 actix-web-httpauth = { git = "https://github.com/actix/actix-web-httpauth" }
 actix = "0.9"
+actix-rt = "1.0"
 bytes = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json="1.0"
