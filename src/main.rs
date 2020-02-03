@@ -8,6 +8,7 @@ use dotenv::dotenv;
 use env_logger;
 use knockturn::app::{check_node_horizon, routing, AppCfg, AppState};
 use knockturn::db::DbExecutor;
+use knockturn::errors::Error;
 use knockturn::fsm::Fsm;
 use knockturn::fsm_payout::FsmPayout;
 use knockturn::node::Node;
@@ -98,13 +99,11 @@ async fn main() -> std::io::Result<()> {
     cron::Cron::new(db.clone(), fsm.clone(), node.clone(), pool.clone()).start();
     cron_payout::CronPayout::new(fsm_payout.clone(), pool.clone()).start();
 
-    check_node_horizon(&node, &pool)
-        .map_err(|e| {
-            error!("Cannot check horizon: {}", e);
-            System::current().stop();
-            ()
-        })
-        .await;
+    check_node_horizon(&node, &pool).await.map_err(|e: Error| {
+        error!("Cannot check horizon: {}", e);
+        System::current().stop();
+        e
+    })?;
 
     let srv = HttpServer::new({
         let pool = pool.clone();
