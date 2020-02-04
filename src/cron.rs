@@ -36,7 +36,18 @@ impl Actor for Cron {
         ctx.run_interval(
             std::time::Duration::new(5, 0),
             move |_instance: &mut Cron, _ctx: &mut Context<Self>| {
-                rates.fetch();
+                let rates = rates.clone();
+                actix::spawn(async move {
+                    rates
+                        .fetch()
+                        .map(|r| {
+                            if let Err(e) = r {
+                                error!("Couldn't fetch rates {}", e);
+                            }
+                            ()
+                        })
+                        .await
+                });
             },
         );
         ctx.run_interval(std::time::Duration::new(5, 0), reject_expired_payments);
@@ -177,7 +188,7 @@ impl Cron {
             .filter(|o| o.block_height.is_some())
             .map(|o| (o.commit.clone(), o.block_height.unwrap() as i64))
             .collect();
-        debug!("Found {} non coinbase outputs", commits.len());
+        info!("Found {} non coinbase outputs", commits.len());
         block({
             let pool = self.pool.clone();
             move || {
@@ -281,14 +292,28 @@ fn reject_expired_payments(cron: &mut Cron, _: &mut Context<Cron>) {
 
 fn process_pending_payments(cron: &mut Cron, _: &mut Context<Cron>) {
     let cron = cron.clone();
-    actix::spawn(async move { cron.process_pending_payments().map(|_| ()).await });
+    actix::spawn(async move {
+        cron.process_pending_payments()
+            .map(|r| {
+                if let Err(e) = r {
+                    error!("Couldn't process penging payments: {}", e);
+                }
+                ()
+            })
+            .await
+    });
 }
 
 fn process_unreported_confirmed_payments(cron: &mut Cron, _: &mut Context<Cron>) {
     let cron = cron.clone();
     actix::spawn(async move {
         cron.process_unreported_confirmed_payments()
-            .map(|_| ())
+            .map(|r| {
+                if let Err(e) = r {
+                    error!("Couldn't process unreported payments: {}", e);
+                }
+                ()
+            })
             .await
     });
 }
@@ -297,17 +322,41 @@ fn process_unreported_rejected_payments(cron: &mut Cron, _: &mut Context<Cron>) 
     let cron = cron.clone();
     actix::spawn(async move {
         cron.process_unreported_rejected_payments()
-            .map(|_| ())
+            .map(|r| {
+                if let Err(e) = r {
+                    error!("Couldn't process unreported rejected payments: {}", e);
+                }
+                ()
+            })
             .await
     });
 }
 
 fn sync_with_node(cron: &mut Cron, _: &mut Context<Cron>) {
     let cron = cron.clone();
-    actix::spawn(async move { cron.sync_with_node().map(|_| ()).await });
+    actix::spawn(async move {
+        cron.sync_with_node()
+            .map(|r| {
+                if let Err(e) = r {
+                    error!("Couldn't sync with a node: {}", e);
+                }
+
+                ()
+            })
+            .await
+    });
 }
 
 fn autoconfirmation(cron: &mut Cron, _: &mut Context<Cron>) {
     let cron = cron.clone();
-    actix::spawn(async move { cron.autoconfirmation().map(|_| ()).await });
+    actix::spawn(async move {
+        cron.autoconfirmation()
+            .map(|r| {
+                if let Err(e) = r {
+                    error!("Error in autoconfirmation: {}", e);
+                }
+                ()
+            })
+            .await
+    });
 }

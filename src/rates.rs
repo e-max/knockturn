@@ -15,6 +15,7 @@ pub struct Rates {
     grin: HashMap<String, f64>,
 }
 
+#[derive(Clone)]
 pub struct RatesFetcher {
     pool: Pool,
 }
@@ -25,7 +26,7 @@ impl RatesFetcher {
     }
 
     pub async fn fetch(&self) -> Result<Rates, Error> {
-        info!("Trying to fetch rates");
+        debug!("Trying to fetch rates");
         let pool = self.pool.clone();
         let mut response = Client::default().get(
             "https://api.coingecko.com/api/v3/simple/price?ids=grin&vs_currencies=btc%2Cusd%2Ceur",
@@ -54,6 +55,8 @@ impl RatesFetcher {
         })
         .await
         .map_err(|e| Error::General(format!("Failed to store rates in DB: {}", e)))?;
+
+        debug!("Rates succesfully fetched");
 
         Ok(rates)
     }
