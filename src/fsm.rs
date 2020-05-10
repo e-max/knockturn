@@ -15,9 +15,11 @@ use chrono::{Duration, Utc};
 use derive_deref::Deref;
 use diesel::pg::PgConnection;
 use diesel::{self, prelude::*};
-use futures::future::{ok, Either, Future};
+use futures::future::{ok, Either, FutureExt, TryFutureExt};
 use log::{debug, error};
 use serde::{Deserialize, Serialize};
+use std::future::Future;
+use std::pin::Pin;
 use uuid::Uuid;
 
 pub const MINIMAL_WITHDRAW: i64 = 1_000_000_000;
@@ -47,12 +49,13 @@ where
 {
     const STATUS: TransactionStatus;
     fn new(tx: Transaction) -> Self;
-    fn get(tx_id: Uuid, pool: Pool) -> Box<dyn Future<Item = Self, Error = Error>> {
-        Box::new(get_payment(tx_id, Self::STATUS, pool).map(Self::new))
+    fn get(tx_id: Uuid, pool: Pool) -> Pin<Box<dyn Future<Output = Result<Self, Error>>>> {
+        Box::pin(get_payment(tx_id, Self::STATUS, pool).map(|res| res.map(Self::new)))
     }
-    fn list(pool: Pool) -> Box<dyn Future<Item = Vec<Self>, Error = Error>> {
-        Box::new(
-            get_payments(Self::STATUS, pool).map(|list| list.into_iter().map(Self::new).collect()),
+    fn list(pool: Pool) -> Pin<Box<dyn Future<Output = Result<Vec<Self>, Error>>>> {
+        Box::pin(
+            get_payments(Self::STATUS, pool)
+                .map(|res| res.map(|list| list.into_iter().map(Self::new).collect())),
         )
     }
 }
@@ -164,7 +167,7 @@ impl Message for ManuallyRefundPayment {
 }
 
 impl Handler<CreatePayment> for Fsm {
-    type Result = ResponseFuture<NewPayment, Error>;
+    type Result = ResponseFuture<Result<NewPayment, Error>>;
 
     fn handle(&mut self, msg: CreatePayment, _: &mut Self::Context) -> Self::Result {
         let tx = CreateTransaction {
@@ -184,16 +187,16 @@ impl Handler<CreatePayment> for Fsm {
             let conn: &PgConnection = &pool.get().unwrap();
             create_transaction(tx, conn).map(|transaction| NewPayment(transaction))
         })
-        .from_err();
-        Box::new(res)
+        .map_err(|e| e.into());
+        Box::pin(res)
     }
 }
 
-fn get_payment(
+async fn get_payment(
     tx_id: Uuid,
     required_status: TransactionStatus,
     pool: Pool,
-) -> impl Future<Item = Transaction, Error = Error> {
+) -> Result<Transaction, Error> {
     block::<_, _, Error>(move || {
         use crate::schema::transactions::dsl::*;
         let conn: &PgConnection = &pool.get().unwrap();
@@ -209,27 +212,26 @@ fn get_payment(
                 Ok(tx)
             })
     })
-    .from_err()
+    .await
+    .map_err(|e| e.into())
 }
 
-pub fn get_unreported_confirmed_payments(
-    pool: Pool,
-) -> impl Future<Item = Vec<ConfirmedPayment>, Error = Error> {
+pub async fn get_unreported_confirmed_payments(pool: Pool) -> Result<Vec<ConfirmedPayment>, Error> {
     get_unreported_payments(TransactionStatus::Confirmed, pool)
+        .await
         .map(|list| list.into_iter().map(ConfirmedPayment).collect())
 }
 
-pub fn get_unreported_rejected_payments(
-    pool: Pool,
-) -> impl Future<Item = Vec<RejectedPayment>, Error = Error> {
+pub async fn get_unreported_rejected_payments(pool: Pool) -> Result<Vec<RejectedPayment>, Error> {
     get_unreported_payments(TransactionStatus::Confirmed, pool)
+        .await
         .map(|list| list.into_iter().map(RejectedPayment).collect())
 }
 
-fn get_unreported_payments(
+async fn get_unreported_payments(
     tx_status: TransactionStatus,
     pool: Pool,
-) -> impl Future<Item = Vec<Transaction>, Error = Error> {
+) -> Result<Vec<Transaction>, Error> {
     block::<_, _, Error>(move || {
         use crate::schema::transactions::dsl::*;
         let conn: &PgConnection = &pool.get().unwrap();
@@ -246,13 +248,11 @@ fn get_unreported_payments(
             .load::<Transaction>(conn)
             .map_err(|e| e.into())
     })
-    .from_err()
+    .await
+    .map_err(|e| e.into())
 }
 
-fn get_payments(
-    tx_status: TransactionStatus,
-    pool: Pool,
-) -> impl Future<Item = Vec<Transaction>, Error = Error> {
+async fn get_payments(tx_status: TransactionStatus, pool: Pool) -> Result<Vec<Transaction>, Error> {
     block::<_, _, Error>(move || {
         use crate::schema::transactions::dsl::*;
         let conn: &PgConnection = &pool.get().unwrap();
@@ -262,7 +262,8 @@ fn get_payments(
             .load::<Transaction>(conn)
             .map_err(|e| e.into())
     })
-    .from_err()
+    .await
+    .map_err(|e| e.into())
 }
 
 impl Payment for NewPayment {
@@ -294,7 +295,7 @@ impl Payment for RefundPayment {
 }
 
 impl Handler<MakePayment> for Fsm {
-    type Result = ResponseFuture<PendingPayment, Error>;
+    type Result = ResponseFuture<Result<PendingPayment, Error>>;
 
     fn handle(&mut self, msg: MakePayment, _: &mut Self::Context) -> Self::Result {
         let transaction_id = msg.new_payment.id.clone();
@@ -326,21 +327,21 @@ impl Handler<MakePayment> for Fsm {
                 .map_err::<Error, _>(|e| e.into())?;
             Ok(PendingPayment(transaction))
         })
-        .from_err();
+        .map_err(|e| e.into());
 
-        Box::new(res)
+        Box::pin(res)
     }
 }
 
 impl Handler<SeenInChainPayment<PendingPayment>> for Fsm {
-    type Result = ResponseFuture<InChainPayment, Error>;
+    type Result = ResponseFuture<Result<InChainPayment, Error>>;
 
     fn handle(
         &mut self,
         msg: SeenInChainPayment<PendingPayment>,
         _: &mut Self::Context,
     ) -> Self::Result {
-        Box::new(
+        Box::pin(
             block::<_, _, Error>({
                 let pool = self.pool.clone();
                 move || {
@@ -355,20 +356,20 @@ impl Handler<SeenInChainPayment<PendingPayment>> for Fsm {
                     )
                 }
             })
-            .from_err(),
+            .map_err(|e| e.into()),
         )
     }
 }
 
 impl Handler<SeenInChainPayment<RejectedPayment>> for Fsm {
-    type Result = ResponseFuture<RefundPayment, Error>;
+    type Result = ResponseFuture<Result<RefundPayment, Error>>;
 
     fn handle(
         &mut self,
         msg: SeenInChainPayment<RejectedPayment>,
         _: &mut Self::Context,
     ) -> Self::Result {
-        Box::new(
+        Box::pin(
             block::<_, _, Error>({
                 let pool = self.pool.clone();
                 move || {
@@ -383,16 +384,16 @@ impl Handler<SeenInChainPayment<RejectedPayment>> for Fsm {
                     )
                 }
             })
-            .from_err(),
+            .map_err(|e| e.into()),
         )
     }
 }
 
 impl Handler<ConfirmPayment> for Fsm {
-    type Result = ResponseFuture<ConfirmedPayment, Error>;
+    type Result = ResponseFuture<Result<ConfirmedPayment, Error>>;
 
     fn handle(&mut self, msg: ConfirmPayment, _: &mut Self::Context) -> Self::Result {
-        Box::new(
+        Box::pin(
             block::<_, _, Error>({
                 let pool = self.pool.clone();
                 move || {
@@ -408,16 +409,16 @@ impl Handler<ConfirmPayment> for Fsm {
                     Ok(ConfirmedPayment(tx))
                 }
             })
-            .from_err(),
+            .map_err(|e| e.into()),
         )
     }
 }
 
-fn run_callback(
+async fn run_callback(
     callback_url: &str,
     token: &str,
     transaction: &Transaction,
-) -> impl Future<Item = (), Error = Error> {
+) -> Result<(), Error> {
     let confirmation = Confirmation {
         id: transaction.id.clone(),
         external_id: transaction.external_id.clone(),
@@ -428,29 +429,26 @@ fn run_callback(
         confirmations: transaction.confirmations.clone(),
         token: token.to_owned(),
     };
-    Client::default()
+    let resp = Client::default()
         .post(callback_url)
         .send_json(&confirmation)
+        .await
         .map_err({
             let callback_url = callback_url.to_owned();
             move |e| Error::MerchantCallbackError {
                 callback_url: callback_url,
                 error: s!(e),
             }
+        })?;
+
+    if resp.status().is_success() {
+        Ok(())
+    } else {
+        Err(Error::MerchantCallbackError {
+            callback_url: callback_url.to_owned(),
+            error: s!("aaa"),
         })
-        .and_then({
-            let callback_url = callback_url.to_owned();
-            |resp| {
-                if resp.status().is_success() {
-                    Ok(())
-                } else {
-                    Err(Error::MerchantCallbackError {
-                        callback_url: callback_url,
-                        error: s!("aaa"),
-                    })
-                }
-            }
-        })
+    }
 }
 
 /*
@@ -497,10 +495,10 @@ fn run_callback<'a>(
 */
 
 impl Handler<ManuallyRefundPayment> for Fsm {
-    type Result = ResponseFuture<ManuallyRefundedPayment, Error>;
+    type Result = ResponseFuture<Result<ManuallyRefundedPayment, Error>>;
 
     fn handle(&mut self, msg: ManuallyRefundPayment, _: &mut Self::Context) -> Self::Result {
-        Box::new(
+        Box::pin(
             block::<_, _, Error>({
                 let merch_id = msg.merchant_id.clone();
                 let pool = self.pool.clone();
@@ -524,49 +522,55 @@ impl Handler<ManuallyRefundPayment> for Fsm {
                     .map(ManuallyRefundedPayment)
                 }
             })
-            .from_err(),
+            .map_err(|e| e.into()),
         )
     }
 }
 
 impl Handler<RejectPayment<NewPayment>> for Fsm {
-    type Result = ResponseFuture<RejectedPayment, Error>;
+    type Result = ResponseFuture<Result<RejectedPayment, Error>>;
 
     fn handle(&mut self, msg: RejectPayment<NewPayment>, _: &mut Self::Context) -> Self::Result {
-        Box::new(reject_transaction(self.pool.clone(), &msg.payment.id).map(RejectedPayment))
+        Box::pin(
+            reject_transaction(self.pool.clone(), msg.payment.id.clone())
+                .map(|res| res.map(RejectedPayment)),
+        )
     }
 }
 
 impl Handler<RejectPayment<PendingPayment>> for Fsm {
-    type Result = ResponseFuture<RejectedPayment, Error>;
+    type Result = ResponseFuture<Result<RejectedPayment, Error>>;
 
     fn handle(
         &mut self,
         msg: RejectPayment<PendingPayment>,
         _: &mut Self::Context,
     ) -> Self::Result {
-        Box::new(reject_transaction(self.pool.clone(), &msg.payment.id).map(RejectedPayment))
+        Box::pin(
+            reject_transaction(self.pool.clone(), msg.payment.id.clone())
+                .map(|res| res.map(RejectedPayment)),
+        )
     }
 }
 
-fn reject_transaction(pool: Pool, id: &Uuid) -> impl Future<Item = Transaction, Error = Error> {
-    let id = id.clone();
+async fn reject_transaction(pool: Pool, id: Uuid) -> Result<Transaction, Error> {
     block::<_, _, Error>(move || {
         let conn: &PgConnection = &pool.get().unwrap();
         update_transaction_status(id, TransactionStatus::Rejected, conn)
     })
-    .from_err()
+    .await
+    .map_err(|e| e.into())
 }
 
 impl Handler<ReportPayment<ConfirmedPayment>> for Fsm {
-    type Result = ResponseFuture<(), Error>;
+    type Result = ResponseFuture<Result<(), Error>>;
 
     fn handle(
         &mut self,
         msg: ReportPayment<ConfirmedPayment>,
         _: &mut Self::Context,
     ) -> Self::Result {
-        Box::new(
+        Box::pin(
             report_transaction(self.db.clone(), msg.payment.0.clone()).and_then({
                 let pool = self.pool.clone();
                 move |_| {
@@ -581,7 +585,7 @@ impl Handler<ReportPayment<ConfirmedPayment>> for Fsm {
                             Ok(())
                         }
                     })
-                    .from_err()
+                    .map_err(|e| e.into())
                 }
             }),
         )
@@ -589,14 +593,14 @@ impl Handler<ReportPayment<ConfirmedPayment>> for Fsm {
 }
 
 impl Handler<ReportPayment<RejectedPayment>> for Fsm {
-    type Result = ResponseFuture<(), Error>;
+    type Result = ResponseFuture<Result<(), Error>>;
 
     fn handle(
         &mut self,
         msg: ReportPayment<RejectedPayment>,
         _: &mut Self::Context,
     ) -> Self::Result {
-        Box::new(
+        Box::pin(
             report_transaction(self.db.clone(), msg.payment.0.clone()).and_then({
                 let pool = self.pool.clone();
                 move |_| {
@@ -614,57 +618,50 @@ impl Handler<ReportPayment<RejectedPayment>> for Fsm {
                             })
                         }
                     })
-                    .from_err()
+                    .map_err(|e| e.into())
                 }
             }),
         )
     }
 }
 
-fn report_transaction(
-    db: Addr<DbExecutor>,
-    transaction: Transaction,
-) -> impl Future<Item = (), Error = Error> {
+async fn report_transaction(db: Addr<DbExecutor>, transaction: Transaction) -> Result<(), Error> {
     debug!("Try to report transaction {}", transaction.id);
-    db.send(GetMerchant {
-        id: transaction.merchant_id.clone(),
-    })
-    .from_err()
-    .and_then(|res| {
-        let merchant = res?;
-        Ok(merchant)
-    })
-    .and_then(move |merchant| {
-        if let Some(callback_url) = merchant.callback_url.clone() {
-            debug!("Run callback for merchant {}", merchant.email);
-            let res = run_callback(&callback_url, &merchant.token, &transaction).or_else({
-                let db = db.clone();
-                let report_attempts = transaction.report_attempts.clone();
-                let transaction_id = transaction.id.clone();
-                move |callback_err| {
-                    // try call ReportAttempt but ignore errors and return
-                    // error from callback
-                    let next_attempt = Utc::now().naive_utc()
-                        + Duration::seconds(10 * (report_attempts + 1).pow(2) as i64);
-                    db.send(ReportAttempt {
-                        transaction_id: transaction_id,
-                        next_attempt: Some(next_attempt),
-                    })
-                    .map_err(|e| Error::General(s!(e)))
-                    .and_then(|db_response| {
-                        db_response?;
-                        Ok(())
-                    })
-                    .or_else(|e| {
-                        error!("Get error in ReportAttempt {}", e);
-                        Ok(())
-                    })
-                    .and_then(|_| Err(callback_err))
-                }
-            });
-            Either::A(res)
-        } else {
-            Either::B(ok(()))
+
+    let merchant = db
+        .send(GetMerchant {
+            id: transaction.merchant_id.clone(),
+        })
+        .await??;
+
+    if let Some(callback_url) = merchant.callback_url.clone() {
+        debug!("Run callback for merchant {}", merchant.email);
+
+        if let Err(callback_err) = run_callback(&callback_url, &merchant.token, &transaction).await
+        {
+            let report_attempts = transaction.report_attempts.clone();
+            let transaction_id = transaction.id.clone();
+            let next_attempt = Utc::now().naive_utc()
+                + Duration::seconds(10 * (report_attempts + 1).pow(2) as i64);
+            let dbres = db
+                .send(ReportAttempt {
+                    transaction_id: transaction_id,
+                    next_attempt: Some(next_attempt),
+                })
+                .await
+                .map_err(|e| Error::General(s!(e)))
+                .and_then(|db_response| {
+                    db_response?;
+                    Ok(())
+                });
+
+            if let Err(e) = dbres {
+                error!("Get error in ReportAttempt {}", e);
+            };
+
+            return Err(callback_err);
         }
-    })
+    };
+
+    Ok(())
 }

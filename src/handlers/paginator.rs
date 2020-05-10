@@ -1,12 +1,15 @@
 use crate::errors::Error;
 use actix_web::dev;
 use actix_web::{FromRequest, HttpRequest};
+use core::future::Future;
 use diesel::query_dsl::methods::{LimitDsl, OffsetDsl};
+use futures::future::FutureExt;
 use serde::Deserialize;
 use serde_urlencoded;
 use std::borrow::Cow;
 use std::cmp;
 use std::fmt;
+use std::pin::Pin;
 use url::Url;
 
 #[derive(Debug, Clone)]
@@ -68,37 +71,41 @@ struct PageInfo {
 
 impl FromRequest for Paginate {
     type Config = PaginateConfig;
-    type Future = Result<Self, Self::Error>;
+    type Future = Pin<Box<dyn Future<Output = Result<Self, Self::Error>>>>;
     type Error = Error;
 
     #[inline]
     fn from_request(req: &HttpRequest, _: &mut dev::Payload) -> Self::Future {
-        let tmp;
-        let cfg = if let Some(cfg) = req.app_data::<PaginateConfig>() {
-            cfg
-        } else {
-            tmp = PaginateConfig::default();
-            &tmp
-        };
-        let conn = req.connection_info();
-        let url = Url::parse(&format!(
-            "{}://{}{}?{}",
-            conn.scheme(),
-            conn.host(),
-            req.path(),
-            req.query_string(),
-        ))
-        .map_err(|e| Error::General(s!(e)))?;
-
-        let page_info = serde_urlencoded::from_str::<PageInfo>(req.query_string())
+        let req = req.clone();
+        async move {
+            let tmp;
+            let cfg = if let Some(cfg) = req.app_data::<PaginateConfig>() {
+                cfg
+            } else {
+                tmp = PaginateConfig::default();
+                &tmp
+            };
+            let conn = req.connection_info();
+            let url = Url::parse(&format!(
+                "{}://{}{}?{}",
+                conn.scheme(),
+                conn.host(),
+                req.path(),
+                req.query_string(),
+            ))
             .map_err(|e| Error::General(s!(e)))?;
 
-        Ok(Paginate {
-            page: page_info.page.unwrap_or(1),
-            per_page: page_info.per_page.unwrap_or(cfg.per_page),
-            url: url,
-            max_pages: cfg.max_pages,
-        })
+            let page_info = serde_urlencoded::from_str::<PageInfo>(req.query_string())
+                .map_err(|e| Error::General(s!(e)))?;
+
+            Ok(Paginate {
+                page: page_info.page.unwrap_or(1),
+                per_page: page_info.per_page.unwrap_or(cfg.per_page),
+                url: url,
+                max_pages: cfg.max_pages,
+            })
+        }
+        .boxed_local()
     }
 }
 

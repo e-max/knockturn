@@ -267,23 +267,28 @@ pub fn register_rate(rates_map: HashMap<String, f64>, conn: &PgConnection) -> Re
     Ok(())
 }
 
+pub fn report_attempt(
+    conn: &PgConnection,
+    transaction_id: Uuid,
+    next_attempt: Option<NaiveDateTime>,
+) -> Result<(), Error> {
+    use crate::schema::transactions::dsl::*;
+    let next_attempt = next_attempt.unwrap_or(Utc::now().naive_utc() + Duration::seconds(10));
+    diesel::update(transactions.filter(id.eq(transaction_id)))
+        .set((
+            report_attempts.eq(report_attempts + 1),
+            next_report_attempt.eq(next_attempt),
+        ))
+        .get_result(conn)
+        .map_err(|e| e.into())
+        .map(|_: Transaction| ())
+}
+
 impl Handler<ReportAttempt> for DbExecutor {
     type Result = Result<(), Error>;
 
     fn handle(&mut self, msg: ReportAttempt, _: &mut Self::Context) -> Self::Result {
-        use crate::schema::transactions::dsl::*;
-        let conn: &PgConnection = &self.0.get().unwrap();
-        let next_attempt = msg
-            .next_attempt
-            .unwrap_or(Utc::now().naive_utc() + Duration::seconds(10));
-        diesel::update(transactions.filter(id.eq(msg.transaction_id)))
-            .set((
-                report_attempts.eq(report_attempts + 1),
-                next_report_attempt.eq(next_attempt),
-            ))
-            .get_result(conn)
-            .map_err(|e| e.into())
-            .map(|_: Transaction| ())
+        report_attempt(&self.0.get().unwrap(), msg.transaction_id, msg.next_attempt)
     }
 }
 

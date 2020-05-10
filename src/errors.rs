@@ -119,6 +119,12 @@ impl From<std::str::Utf8Error> for Error {
     }
 }
 
+impl From<Error> for std::io::Error {
+    fn from(error: Error) -> Self {
+        std::io::ErrorKind::Other.into()
+    }
+}
+
 // impl ResponseError trait allows to convert our errors into http responses with appropriate data
 impl ResponseError for Error {
     fn error_response(&self) -> HttpResponse {

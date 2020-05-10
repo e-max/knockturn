@@ -14,8 +14,6 @@ use actix_web::HttpResponse;
 use askama::Template;
 use data_encoding::BASE64;
 use diesel::pg::PgConnection;
-use futures::future::Future;
-use futures::future::{err, ok, Either};
 use log::*;
 use serde::{Deserialize, Serialize};
 use serde_json;
@@ -32,15 +30,15 @@ pub struct CreatePaymentRequest {
     pub redirect_url: Option<String>,
 }
 
-pub fn create_payment(
+pub async fn create_payment(
     merchant: BasicAuth<Merchant>,
     merchant_id: Path<String>,
     payment_req: SimpleJson<CreatePaymentRequest>,
     state: Data<AppState>,
-) -> impl Future<Item = HttpResponse, Error = Error> {
+) -> Result<HttpResponse, Error> {
     let merchant_id = merchant_id.into_inner();
     if merchant.id != merchant_id {
-        return Either::A(err(Error::InvalidEntity(s!("wrong merchant_id"))));
+        return Err(Error::InvalidEntity(s!("wrong merchant_id")));
     }
     let create_transaction = CreatePayment {
         merchant_id: merchant_id,
@@ -51,17 +49,8 @@ pub fn create_payment(
         message: payment_req.message.clone(),
         redirect_url: payment_req.redirect_url.clone(),
     };
-    Either::B(
-        state
-            .fsm
-            .send(create_transaction)
-            .from_err()
-            .and_then(|db_response| {
-                let new_payment = db_response?;
-
-                Ok(HttpResponse::Created().json(new_payment))
-            }),
-    )
+    let new_payment = state.fsm.send(create_transaction).await??;
+    Ok(HttpResponse::Created().json(new_payment))
 }
 
 #[derive(Debug, Serialize)]
@@ -75,11 +64,11 @@ struct PaymentStatus {
     pub required_confirmations: i64,
 }
 
-pub fn get_payment_status(
+pub async fn get_payment_status(
     transaction_data: Path<(String, Uuid)>,
     state: Data<AppState>,
-) -> impl Future<Item = HttpResponse, Error = Error> {
-    block::<_, _, Error>({
+) -> Result<HttpResponse, Error> {
+    let payment_status = block::<_, _, Error>({
         let pool = state.pool.clone();
         let (merchant_id, transaction_id) = transaction_data.into_inner();
         move || {
@@ -102,15 +91,15 @@ pub fn get_payment_status(
             Ok(payment_status)
         }
     })
-    .from_err()
-    .and_then(|payment_status| Ok(HttpResponse::Ok().json(payment_status)))
+    .await?;
+    Ok(HttpResponse::Ok().json(payment_status))
 }
 
-pub fn get_payment(
+pub async fn get_payment(
     transaction_data: Path<(String, Uuid)>,
     state: Data<AppState>,
-) -> impl Future<Item = HttpResponse, Error = Error> {
-    block::<_, _, Error>({
+) -> Result<HttpResponse, Error> {
+    let html = block::<_, _, Error>({
         let pool = state.pool.clone();
         let (merchant_id, transaction_id) = transaction_data.into_inner();
         move || {
@@ -144,8 +133,8 @@ pub fn get_payment(
             Ok(html)
         }
     })
-    .from_err()
-    .and_then(|html| Ok(HttpResponse::Ok().content_type("text/html").body(html)))
+    .await?;
+    Ok(HttpResponse::Ok().content_type("text/html").body(html))
 }
 
 #[derive(Template)]
@@ -159,52 +148,47 @@ struct PaymentTemplate<'a> {
 }
 
 //quick and dirty implementaion of JSONRPC for wallet client
-pub fn wallet_jsonrpc(
+pub async fn wallet_jsonrpc(
     req: jsonrpc::Request,
     payment_data: Path<(String, Uuid)>,
     state: Data<AppState>,
-) -> impl Future<Item = HttpResponse, Error = ()> {
+) -> Result<HttpResponse, ()> {
     let (merchant_id, payment_id) = payment_data.into_inner();
     let req_id = req.id.clone();
 
-    let res: Box<dyn Future<Item = jsonrpc::Response, Error = jsonrpc::ErrorData>> =
-        match req.method.as_ref() {
-            "receive_tx" => Box::new(
-                ok(())
-                    .and_then({
-                        let params = req.params.clone();
-                        move |_| {
-                            if params.len() != 3 {
-                                return Err(jsonrpc::ErrorData::std(-32602));
-                            }
-                            let slate: Slate =
-                                serde_json::from_value(params[0].clone()).map_err(|e| {
-                                    error!("Cannot parse slate: {}", e);
-                                    jsonrpc::ErrorData::std(-32602)
-                                })?;
-                            Ok(slate)
-                        }
-                    })
-                    .and_then(move |slate| {
-                        pay_slate2(req, slate, merchant_id, payment_id, state).map_err(|e| {
+    let res: Result<jsonrpc::Response, jsonrpc::ErrorData> = match req.method.as_ref() {
+        "receive_tx" => {
+            let params = req.params.clone();
+            if params.len() != 3 {
+                Err(jsonrpc::ErrorData::std(-32602))
+            } else {
+                match serde_json::from_value(params[0].clone()) {
+                    Ok(slate) => pay_slate2(req, slate, merchant_id, payment_id, state)
+                        .await
+                        .map_err(|e| {
                             error!("Error in pay_slate {}", e);
                             jsonrpc::ErrorData {
                                 code: 32000,
                                 message: format!("{}", e),
                                 data: serde_json::Value::Null,
                             }
-                        })
-                    }),
-            ),
-            _ => Box::new(state.wallet.jsonrpc_request(req, false).map_err(|e| {
-                error!("Error while proxying request {}", e);
-                jsonrpc::ErrorData {
-                    code: 32000,
-                    message: format!("{}", e),
-                    data: serde_json::Value::Null,
+                        }),
+                    Err(e) => {
+                        error!("Cannot parse slate: {}", e);
+                        Err(jsonrpc::ErrorData::std(-32602))
+                    }
                 }
-            })),
-        };
+            }
+        }
+        _ => state.wallet.jsonrpc_request(req, false).await.map_err(|e| {
+            error!("Error while proxying request {}", e);
+            jsonrpc::ErrorData {
+                code: 32000,
+                message: format!("{}", e),
+                data: serde_json::Value::Null,
+            }
+        }),
+    };
     res.or_else({
         let req_id = req_id.clone();
         |e| {
@@ -215,11 +199,11 @@ pub fn wallet_jsonrpc(
         }
     })
     .and_then(|resp| {
-        HttpResponse::Ok()
+        Ok(HttpResponse::Ok()
             .content_type("application/json")
-            .body(resp.dump())
+            .body(resp.dump()))
     })
-    .map_err(|e| ()) //ignore an error because we converted it to response anyway
+    .map_err(|e: jsonrpc::ErrorData| ()) //ignore an error because we converted it to response anyway
 }
 
 #[derive(Debug, Serialize)]
@@ -240,89 +224,61 @@ pub fn check_version() -> APIVersion {
     APIVersion::default()
 }
 
-pub fn pay_slate2(
+pub async fn pay_slate2(
     req: jsonrpc::Request,
     slate: Slate,
     merchant_id: String,
     payment_id: Uuid,
     state: Data<AppState>,
-) -> impl Future<Item = jsonrpc::Response, Error = Error> {
+) -> Result<jsonrpc::Response, Error> {
     let slate_amount = slate.amount;
-    Payment::get(payment_id, state.pool.clone())
-        .and_then(move |new_payment: NewPayment| {
-            let payment_amount = new_payment.grin_amount as u64;
-            if new_payment.is_invalid_amount(slate_amount) {
-                return Err(Error::WrongAmount(payment_amount, slate_amount));
-            }
-            Ok(new_payment)
-        })
-        .and_then({
-            let wallet = state.wallet.clone();
-            let fsm = state.fsm.clone();
-            let req = req.clone();
-            move |new_payment| {
-                wallet.jsonrpc_request(req, false).and_then(move |resp| {
-                    let commit = slate.tx.output_commitments()[0].clone();
-                    wallet
-                        .get_tx(&slate.id.hyphenated().to_string())
-                        .and_then(move |wallet_tx| {
-                            fsm.send(MakePayment {
-                                new_payment,
-                                wallet_tx,
-                                commit,
-                            })
-                            .from_err()
-                            .and_then(|db_response| {
-                                db_response?;
-                                Ok(())
-                            })
-                        })
-                        .and_then(|_| ok(resp))
-                })
-            }
-        })
+
+    let new_payment: NewPayment = Payment::get(payment_id, state.pool.clone()).await?;
+    let payment_amount = new_payment.grin_amount as u64;
+    if new_payment.is_invalid_amount(slate_amount) {
+        return Err(Error::WrongAmount(payment_amount, slate_amount));
+    }
+    let wallet = state.wallet.clone();
+    let fsm = state.fsm.clone();
+
+    let resp = wallet.jsonrpc_request(req, false).await?;
+    let commit = slate.tx.output_commitments()[0].clone();
+    let wallet_tx = wallet.get_tx(&slate.id.hyphenated().to_string()).await?;
+    fsm.send(MakePayment {
+        new_payment,
+        wallet_tx,
+        commit,
+    })
+    .await??;
+    Ok(resp)
 }
 
-pub fn make_payment(
+pub async fn make_payment(
     slate: SimpleJson<Slate>,
     payment_data: Path<(String, Uuid)>,
     state: Data<AppState>,
-) -> impl Future<Item = HttpResponse, Error = Error> {
+) -> Result<HttpResponse, Error> {
     let (merchant_id, payment_id) = payment_data.into_inner();
 
     let slate_amount = slate.amount;
-    Payment::get(payment_id, state.pool.clone())
-        .and_then(move |new_payment: NewPayment| {
-            let payment_amount = new_payment.grin_amount as u64;
-            if new_payment.is_invalid_amount(slate_amount) {
-                return Err(Error::WrongAmount(payment_amount, slate_amount));
-            }
-            Ok(new_payment)
-        })
-        .and_then({
-            let wallet = state.wallet.clone();
-            let fsm = state.fsm.clone();
-            move |new_payment| {
-                let slate = wallet.receive(&slate);
-                slate.and_then(move |slate| {
-                    let commit = slate.tx.output_commitments()[0].clone();
-                    wallet
-                        .get_tx(&slate.id.hyphenated().to_string())
-                        .and_then(move |wallet_tx| {
-                            fsm.send(MakePayment {
-                                new_payment,
-                                wallet_tx,
-                                commit,
-                            })
-                            .from_err()
-                            .and_then(|db_response| {
-                                db_response?;
-                                Ok(())
-                            })
-                        })
-                        .and_then(|_| ok(slate))
-                })
-            }
-        })
-        .and_then(|slate| Ok(HttpResponse::Ok().json(slate)))
+
+    let new_payment: NewPayment = Payment::get(payment_id, state.pool.clone()).await?;
+    let payment_amount = new_payment.grin_amount as u64;
+    if new_payment.is_invalid_amount(slate_amount) {
+        return Err(Error::WrongAmount(payment_amount, slate_amount));
+    }
+    let wallet = state.wallet.clone();
+    let fsm = state.fsm.clone();
+    let slate = wallet.receive(&slate).await?;
+    let commit = slate.tx.output_commitments()[0].clone();
+    let wallet_tx = wallet.get_tx(&slate.id.hyphenated().to_string()).await?;
+
+    fsm.send(MakePayment {
+        new_payment,
+        wallet_tx,
+        commit,
+    })
+    .await??;
+
+    Ok(HttpResponse::Ok().json(slate))
 }
