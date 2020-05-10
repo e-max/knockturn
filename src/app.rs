@@ -87,7 +87,7 @@ pub fn routing(cfg: &mut web::ServiceConfig) {
         )
         .service(
             web::resource("/merchants/{merchant_id}/payments/{transaction_id}/{grin_path:.*}")
-                .route(web::post().to_async(payment::make_payment)),
+                .route(web::post().to_async(payment::wallet_jsonrpc)),
         )
         .service(
             web::resource("/login")

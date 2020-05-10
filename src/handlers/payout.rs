@@ -180,20 +180,23 @@ pub fn generate_slate(
                         - new_payout.knockturn_fee.unwrap();
                     wallet
                         .create_slate(real_payment as u64, new_payout.message.clone())
-                        .and_then(move |slate| Ok((new_payout, slate)))
+                        .and_then(move |resp| {
+                            let slate = resp.into_result()?;
+                            Ok((new_payout, resp, slate))
+                        })
                 }
             })
             .and_then({
                 let wallet = state.wallet.clone();
-                move |(new_payout, slate)| {
+                move |(new_payout, resp, slate)| {
                     wallet
                         .get_tx(&slate.id.hyphenated().to_string())
-                        .and_then(|wallet_tx| Ok((new_payout, slate, wallet_tx)))
+                        .and_then(|wallet_tx| Ok((new_payout, resp, slate, wallet_tx)))
                 }
             })
             .and_then({
                 let fsm = state.fsm_payout.clone();
-                move |(new_payout, slate, wallet_tx)| {
+                move |(new_payout, resp, slate, wallet_tx)| {
                     let commit = slate.tx.output_commitments()[0].clone();
                     fsm.send(InitializePayout {
                         new_payout,
@@ -205,13 +208,13 @@ pub fn generate_slate(
                         db_response?;
                         Ok(())
                     })
-                    .and_then(|_| ok(slate))
+                    .and_then(|_| ok(resp))
                 }
             })
-            .and_then(|slate| {
+            .and_then(|resp| {
                 Ok(HttpResponse::Ok()
                     .content_type("application/octet-stream")
-                    .json(slate))
+                    .json(resp.into_inner()))
             }),
     )
 }

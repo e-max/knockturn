@@ -5,6 +5,7 @@ use crate::extractor::{BasicAuth, SimpleJson};
 use crate::filters::{self, ForHuman};
 use crate::fsm::{CreatePayment, MakePayment, NewPayment, Payment};
 use crate::handlers::BootstrapColor;
+use crate::jsonrpc;
 use crate::models::{Merchant, Money, Transaction, TransactionStatus};
 use crate::qrcode;
 use crate::wallet::Slate;
@@ -15,7 +16,9 @@ use data_encoding::BASE64;
 use diesel::pg::PgConnection;
 use futures::future::Future;
 use futures::future::{err, ok, Either};
+use log::*;
 use serde::{Deserialize, Serialize};
+use serde_json;
 use std::env;
 use uuid::Uuid;
 
@@ -155,13 +158,139 @@ struct PaymentTemplate<'a> {
     ironbelly_qrcode: &'a str,
 }
 
+//quick and dirty implementaion of JSONRPC for wallet client
+pub fn wallet_jsonrpc(
+    req: jsonrpc::Request,
+    payment_data: Path<(String, Uuid)>,
+    state: Data<AppState>,
+) -> impl Future<Item = HttpResponse, Error = ()> {
+    let (merchant_id, payment_id) = payment_data.into_inner();
+    let req_id = req.id.clone();
+
+    let res: Box<dyn Future<Item = jsonrpc::Response, Error = jsonrpc::ErrorData>> =
+        match req.method.as_ref() {
+            "receive_tx" => Box::new(
+                ok(())
+                    .and_then({
+                        let params = req.params.clone();
+                        move |_| {
+                            if params.len() != 3 {
+                                return Err(jsonrpc::ErrorData::std(-32602));
+                            }
+                            let slate: Slate =
+                                serde_json::from_value(params[0].clone()).map_err(|e| {
+                                    error!("Cannot parse slate: {}", e);
+                                    jsonrpc::ErrorData::std(-32602)
+                                })?;
+                            Ok(slate)
+                        }
+                    })
+                    .and_then(move |slate| {
+                        pay_slate2(req, slate, merchant_id, payment_id, state).map_err(|e| {
+                            error!("Error in pay_slate {}", e);
+                            jsonrpc::ErrorData {
+                                code: 32000,
+                                message: format!("{}", e),
+                                data: serde_json::Value::Null,
+                            }
+                        })
+                    }),
+            ),
+            _ => Box::new(state.wallet.jsonrpc_request(req, false).map_err(|e| {
+                error!("Error while proxying request {}", e);
+                jsonrpc::ErrorData {
+                    code: 32000,
+                    message: format!("{}", e),
+                    data: serde_json::Value::Null,
+                }
+            })),
+        };
+    res.or_else({
+        let req_id = req_id.clone();
+        |e| {
+            error!("Got jsonrpc error {}", e);
+            let mut resp = jsonrpc::Response::with_id(req_id);
+            resp.error = Some(e);
+            Ok(resp)
+        }
+    })
+    .and_then(|resp| {
+        HttpResponse::Ok()
+            .content_type("application/json")
+            .body(resp.dump())
+    })
+    .map_err(|e| ()) //ignore an error because we converted it to response anyway
+}
+
+#[derive(Debug, Serialize)]
+pub struct APIVersion {
+    foreign_api_version: u16,
+    supported_slate_versions: Vec<String>,
+}
+impl Default for APIVersion {
+    fn default() -> Self {
+        APIVersion {
+            foreign_api_version: 2,
+            supported_slate_versions: vec![s!("V1"), s!("V2")],
+        }
+    }
+}
+
+pub fn check_version() -> APIVersion {
+    APIVersion::default()
+}
+
+pub fn pay_slate2(
+    req: jsonrpc::Request,
+    slate: Slate,
+    merchant_id: String,
+    payment_id: Uuid,
+    state: Data<AppState>,
+) -> impl Future<Item = jsonrpc::Response, Error = Error> {
+    let slate_amount = slate.amount;
+    Payment::get(payment_id, state.pool.clone())
+        .and_then(move |new_payment: NewPayment| {
+            let payment_amount = new_payment.grin_amount as u64;
+            if new_payment.is_invalid_amount(slate_amount) {
+                return Err(Error::WrongAmount(payment_amount, slate_amount));
+            }
+            Ok(new_payment)
+        })
+        .and_then({
+            let wallet = state.wallet.clone();
+            let fsm = state.fsm.clone();
+            let req = req.clone();
+            move |new_payment| {
+                wallet.jsonrpc_request(req, false).and_then(move |resp| {
+                    let commit = slate.tx.output_commitments()[0].clone();
+                    wallet
+                        .get_tx(&slate.id.hyphenated().to_string())
+                        .and_then(move |wallet_tx| {
+                            fsm.send(MakePayment {
+                                new_payment,
+                                wallet_tx,
+                                commit,
+                            })
+                            .from_err()
+                            .and_then(|db_response| {
+                                db_response?;
+                                Ok(())
+                            })
+                        })
+                        .and_then(|_| ok(resp))
+                })
+            }
+        })
+}
+
 pub fn make_payment(
     slate: SimpleJson<Slate>,
-    payment_id: Path<Uuid>,
+    payment_data: Path<(String, Uuid)>,
     state: Data<AppState>,
 ) -> impl Future<Item = HttpResponse, Error = Error> {
+    let (merchant_id, payment_id) = payment_data.into_inner();
+
     let slate_amount = slate.amount;
-    let payment_id = payment_id.into_inner();
     Payment::get(payment_id, state.pool.clone())
         .and_then(move |new_payment: NewPayment| {
             let payment_amount = new_payment.grin_amount as u64;
